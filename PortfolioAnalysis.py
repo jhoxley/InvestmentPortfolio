@@ -93,7 +93,12 @@ for position in distinct_positions:
 
     ds = dg.create_date_series(positionFirstTran, positionLastTran)
 
-    ts = get_time_series(positionFirstTran, positionLastTran, ticker, stock_price_multiplier.get(ident, 1.0))    
+    # Fugly hack to handle cash positions, should be removed when we have a better way to handle cash
+    if ticker == 'N/A' and ident == "GBP=":
+        ts = pd.DataFrame(ds)
+        ts['Close'] = 1.0  # Assuming cash has a constant value of 1.0
+    else:
+        ts = get_time_series(positionFirstTran, positionLastTran, ticker, stock_price_multiplier.get(ident, 1.0))    
 
     #mergeddf = pd.merge(ds, df3, on='Settle date', how='left').ffill().sort_values(by='Settle date')
     #mergeddf = pd.merge(mergeddf, ts, on='Settle date', how='left').ffill()

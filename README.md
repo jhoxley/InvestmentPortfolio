@@ -4,6 +4,9 @@ This readme covers the overview of this repository. The **most important** part 
 
 ## TODO
 
+- **Bugs**
+ - fix yfinance handling of ccy, i.e. cash lines need a close px of 1.0
+ - 
 - Python code to extract position name from raw HL data
 - Factor out position<>identifier map
 - Factor out yfinance into own module
