@@ -13,9 +13,16 @@ def create_daily_summary(df):
         Total_PnL=('ITD PnL', 'sum')
     ).reset_index()
 
-    daily_summary['Total Return %'] = (daily_summary['Total_Market_Value'] + daily_summary['Total_Book_Cost']) / -daily_summary['Total_Book_Cost']
+    #daily_summary['Total Return %'] = (daily_summary['Total_Market_Value'] + daily_summary['Total_Book_Cost']) / -daily_summary['Total_Book_Cost']
     
-    daily_summary['Daily Return %'] = (daily_summary['Total_Market_Value'] - daily_summary['Total_Market_Value'].shift(1)) / -daily_summary['Total_Book_Cost']
+    #daily_summary['Daily Return %'] = (daily_summary['Total_Market_Value'] - daily_summary['Total_Market_Value'].shift(1)) / -daily_summary['Total_Book_Cost']
+
+    daily_summary = daily_summary.rename(columns={
+                                            'Total_Book_Cost': 'Book cost', 
+                                            'Total_Market_Value': 'Market value',
+                                            'Total_PnL': 'ITD PnL'
+                                            }
+                                        )
 
     return daily_summary
 
