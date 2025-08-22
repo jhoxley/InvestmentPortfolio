@@ -95,4 +95,27 @@ def calculate_returns(df):
 
     return df
 
+def calculate_daily_returns(df):
+    return df
 
+def calculate_composite_returns(df):
+    return df
+
+def update_summary_with_daily_returns(daily_summary, df):
+    # Ensure 'Settle date' is in datetime format
+    daily_summary['Settle date'] = pd.to_datetime(daily_summary['Settle date'])
+    df['Settle date'] = pd.to_datetime(df['Settle date'])
+
+    # Merge the daily summary with the main dataframe to get daily returns
+    merged_df = pd.merge(daily_summary, df[['Settle date', 'Portfolio Return %', 'Cm. Portfolio Return %']], on='Settle date', how='left')
+
+    # Aggregate to get total daily return and cumulative return
+    updated_summary = merged_df.groupby('Settle date').agg(
+        Book_cost=('Book cost', 'first'),
+        Market_value=('Market value', 'first'),
+        ITD_PnL=('ITD PnL', 'first'),
+        Daily_Return_Percent=('Portfolio Return %', 'sum'),
+        Cm_Portfolio_Return_Percent=('Cm. Portfolio Return %', 'sum')
+    ).reset_index()
+
+    return updated_summary

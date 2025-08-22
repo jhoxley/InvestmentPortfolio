@@ -129,7 +129,10 @@ dailyDF = af.create_daily_summary(final_df)
 
 print("Adding scaled daily analytics...")
 final_df = af.calculate_weights(final_df, dailyDF)
-final_df = af.calculate_returns(final_df)
+final_Df = af.calculate_daily_returns(final_df)
+final_df = af.calculate_composite_returns(final_df)
+
+dailyDF = af.update_summary_with_daily_returns(dailyDF, final_df) 
 
 # Save the final dataframe to an Excel file
 print("Saving results...")
