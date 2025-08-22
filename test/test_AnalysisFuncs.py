@@ -153,6 +153,13 @@ class TestCases(unittest.TestCase):
         # Call the utility function with test number 1
         self.utility_run_calculate_weights(1, rootpath)
 
+    def test_calculate_weights_2_multi_pos(self):
+        # define the root path for test data
+        rootpath = "./test_data/calculate_weights/"
+
+        # Call the utility function with test number 2
+        self.utility_run_calculate_weights(2, rootpath)
+
     ### =============================
     ### Tests for calculate_returns()
     ### =============================
