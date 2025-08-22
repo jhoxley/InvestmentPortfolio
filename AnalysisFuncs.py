@@ -28,12 +28,22 @@ def create_daily_summary(df):
 
 # create a python function to calculate the portfolio weight of each position
 def calculate_weights(df, daily_summary):   
+    # rename columns in daily_summary to avoid conflicts during merge
+    daily_summary = daily_summary.rename(columns={
+                                            'Book cost': 'Total_Book_Cost', 
+                                            'Market value': 'Total_Market_Value',
+                                            'ITD PnL': 'Total_ITD_PnL'
+                                            }
+                                        )
     # Merge the daily summary with the main dataframe
     df = pd.merge(df, daily_summary, on='Settle date', how='left')
     
     # Calculate the portfolio weight for each position
     df['Portfolio Weight %'] =(df['Market value'] / df['Total_Market_Value']) * 100
     
+    # Drop the temporary total columns
+    df = df.drop(columns=['Total_Book_Cost', 'Total_Market_Value', 'Total_ITD_PnL'])
+
     return df
 
 # create a python function given a dataframe returns the cumulative quantity and value by settle date
