@@ -160,8 +160,12 @@ class TestCases(unittest.TestCase):
         # Call the utility function with test number 2
         self.utility_run_calculate_weights(2, rootpath)
 
-    ### =============================
-    ### Tests for calculate_returns()
-    ### =============================
+    ### ===================================
+    ### Tests for calculate_daily_returns()
+    ### ===================================
+
+    ### =============================================
+    ### Tests for update_summary_with_daily_returns()
+    ### =============================================
 
         
