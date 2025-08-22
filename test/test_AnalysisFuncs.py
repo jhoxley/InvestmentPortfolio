@@ -70,6 +70,13 @@ class TestCases(unittest.TestCase):
         # Call the utility function with test number 4
         self.utility_create_daily_summary(4, rootpath)
 
+    def test_create_daily_summary_5_income_into_pnl(self):
+        # define the root path for test data
+        rootpath = "./test_data/create_daily_summary/"
+
+        # Call the utility function with test number 5
+        self.utility_create_daily_summary(5, rootpath)
+
     ### =============================
     ### Tests for calculate_weights()
     ### =============================

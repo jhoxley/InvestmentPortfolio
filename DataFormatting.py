@@ -32,7 +32,8 @@ def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePric
     # Calculate derived columns
     dfFinal['Market value'] = dfFinal['Quantity'] * dfFinal['Close']
     dfFinal['Day PnL'] = dfFinal['Market value'].diff().fillna(0)
-    dfFinal['ITD PnL'] = dfFinal['Market value'] - dfFinal['Book cost']
+    dfFinal['ITD PnL'] = dfFinal['Day PnL'] + dfFinal['Income']
+    dfFinal['ITD PnL'] = dfFinal['ITD PnL'].cumsum()
 
     # Add static columns
     dfFinal['Position name'] = positionName

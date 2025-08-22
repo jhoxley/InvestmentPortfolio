@@ -5,12 +5,14 @@ This readme covers the overview of this repository. The **most important** part 
 ## TODO
 
 **Bugs**
+- [ ] PnL and handling of income incorrect; avoid double-count through cash line
 - [ ] Return calculations look suspicious. Add unit tests to validate.
 - [ ] C:\Users\jhoxl\Python\InvestmentPortfolio\DataFormatting.py:26: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version.
 - [x] fix yfinance handling of ccy, i.e. cash lines need a close px of 1.0
 
 **Improvements**
 - Python code to extract position name from raw HL data
+- Capture deposit/withdrawal separate from book cost
 - Factor out position<>identifier map
 - Factor out yfinance into own module
 - Add caching layer to yfinance to retain historical data just in case of rate limiting or other issues
