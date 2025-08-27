@@ -68,6 +68,7 @@ import pandas as pd
 import openpyxl
 
 df = pd.read_excel("C:\\Users\\jhoxl\\OneDrive\\Investments\\InvestmentData.xlsx", sheet_name="Transactions")
+dfIncome = pd.read_excel("C:\\Users\\jhoxl\\OneDrive\\Investments\\InvestmentData.xlsx", sheet_name="Income")
 
 # get distinct values from the 'Position Name' column except for values equal to "Cash"
 #distinct_positions = (df[df['Position Name'] != "Cash"])['Position Name'].unique()  
@@ -100,17 +101,14 @@ for position in distinct_positions:
     else:
         ts = get_time_series(positionFirstTran, positionLastTran, ticker, stock_price_multiplier.get(ident, 1.0))    
 
-    #mergeddf = pd.merge(ds, df3, on='Settle date', how='left').ffill().sort_values(by='Settle date')
-    #mergeddf = pd.merge(mergeddf, ts, on='Settle date', how='left').ffill()
-    #mergeddf['Book Market Value'] = mergeddf['Cm.Qty'] * mergeddf['Close']
-    #mergeddf['PnL'] = mergeddf['Book Market Value'] + mergeddf['Cm.BookCost']
-        
     transactions = df[df['Position Name'] == position][['Settle date', 'Adj Qty', 'Value (£)']].rename(columns={'Adj Qty': 'Quantity'})
     transactions['Value (£)'] = transactions['Value (£)'].abs()
 
+    income = dfIncome[dfIncome['Position Name'] == position][['Settle date', 'Quantity', 'Value (£)']]
+
     PositionDf = DataFormatting.create_holding_dataframe(
         transactions,
-        pd.DataFrame(columns=['Settle date', 'Value (£)', 'Quantity']),
+        income,
         ds,
         ts,
         position
@@ -129,13 +127,15 @@ dailyDF = af.create_daily_summary(final_df)
 
 print("Adding scaled daily analytics...")
 final_df = af.calculate_weights(final_df, dailyDF)
-final_Df = af.calculate_daily_returns(final_df)
+final_df = af.calculate_daily_returns(final_df)
 final_df = af.calculate_composite_returns(final_df)
 
-dailyDF = af.update_summary_with_daily_returns(dailyDF, final_df) 
+dailyDF = af.update_summary_with_daily_returns(dailyDF, final_df)
+dailyDF = af.calculate_summary_composite_returns(dailyDF)
 
 # Save the final dataframe to an Excel file
 print("Saving results...")
+print(final_df)
 final_df = DataFormatting.drop_unwanted_columns(final_df, [
         'Settle date', 
         'Position name', 
@@ -146,13 +146,20 @@ final_df = DataFormatting.drop_unwanted_columns(final_df, [
         'Close', 
         'Market value', 
         'ITD PnL', 
+        'Income',
         'Portfolio Weight %', 
         'Daily Return %', 
         'Portfolio Return %',
         'Cm. Portfolio Return %',
         'ITD Return %',
-        'Portfolio ITD Return %'
+        'ITD Portfolio Return %',
+        'Ann. ITD Portfolio Return %',
+        '1Y Portfolio Return %',
+        '3Y Portfolio Return %',
+        '5Y Portfolio Return %',
     ])
+
+
 final_df.to_excel("C:\\Users\\jhoxl\\OneDrive\\Investments\\ProcessedDailyInvestmentData.xlsx", index=False)
 dailyDF.to_excel("C:\\Users\\jhoxl\\OneDrive\\Investments\\ProcessedDailySummary.xlsx", index=False)
 

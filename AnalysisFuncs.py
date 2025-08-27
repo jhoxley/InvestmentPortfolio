@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import datetime as dt
 
 # create a python function to create a daily summary of the portfolio
@@ -10,16 +11,14 @@ def create_daily_summary(df):
     daily_summary = df.groupby('Settle date').agg(
         Total_Book_Cost=('Book cost', 'sum'),
         Total_Market_Value=('Market value', 'sum'),
+        Total_Income=('Income', 'sum'),
         Total_PnL=('ITD PnL', 'sum')
     ).reset_index()
-
-    #daily_summary['Total Return %'] = (daily_summary['Total_Market_Value'] + daily_summary['Total_Book_Cost']) / -daily_summary['Total_Book_Cost']
-    
-    #daily_summary['Daily Return %'] = (daily_summary['Total_Market_Value'] - daily_summary['Total_Market_Value'].shift(1)) / -daily_summary['Total_Book_Cost']
 
     daily_summary = daily_summary.rename(columns={
                                             'Total_Book_Cost': 'Book cost', 
                                             'Total_Market_Value': 'Market value',
+                                            'Total_Income': 'Income',
                                             'Total_PnL': 'ITD PnL'
                                             }
                                         )
@@ -32,7 +31,8 @@ def calculate_weights(df, daily_summary):
     daily_summary = daily_summary.rename(columns={
                                             'Book cost': 'Total_Book_Cost', 
                                             'Market value': 'Total_Market_Value',
-                                            'ITD PnL': 'Total_ITD_PnL'
+                                            'ITD PnL': 'Total_ITD_PnL',
+                                            'Income': 'Total_Income'
                                             }
                                         )
     # Merge the daily summary with the main dataframe
@@ -42,15 +42,12 @@ def calculate_weights(df, daily_summary):
     df['Portfolio Weight %'] =(df['Market value'] / df['Total_Market_Value']) * 100
     
     # Drop the temporary total columns
-    df = df.drop(columns=['Total_Book_Cost', 'Total_Market_Value', 'Total_ITD_PnL'])
+    df = df.drop(columns=['Total_Book_Cost', 'Total_Market_Value', 'Total_ITD_PnL', 'Total_Income'])
 
     return df
 
 # create a python function given a dataframe returns the cumulative quantity and value by settle date
-def cumulative_by_settle_date(df):
-    # Ensure 'Settle Date' is in datetime format
-    #df['Settle date'] = pd.to_datetime(df['Settle date'])
-    
+def cumulative_by_settle_date(df):    
     # Group by 'Settle Date' and aggregate
     cumulative_df = df.groupby('Settle date').agg(
         Cumulative_Quantity=('Adj Qty', 'sum'),
@@ -72,9 +69,6 @@ def calculate_returns(df):
     Returns:
     DataFrame: The DataFrame with an additional 'Daily Return %' column.
     """     
-    # group 'df' by 'Position Name' and calculate daily returns and sort by 'Settle date'
-    #df['Daily Return %'] = df.sort_values(by=['Position Name', 'Settle date']).groupby('Position Name')['Close'].pct_change()
-
     # Return is (current value - book cost + dividends + interest) / original cost
     # calculate a return in 'df' by 'Position Name' by taking the current 'Book Market Value' minus the previous 'Book Market Value' and dividing by the 'Cm.BookCost'
     df['Daily Return %'] = df.sort_values(by=['Position name', 'Settle date']).groupby('Position name').apply(
@@ -96,10 +90,65 @@ def calculate_returns(df):
     return df
 
 def calculate_daily_returns(df):
-    return df
+    # The total return for each position is (current close - previous close) + dividend per share / previous close
+    ts = []
+
+    # write a loop to iterate over groups in df by 'Position name' and calculate the daily return
+    for _, group_df in df.groupby('Position name'):
+        group_df = group_df.sort_values(by='Settle date')
+        group_df['Daily Return %'] = 100.0 * (((group_df['Close'] - group_df['Close'].shift(1).fillna(method='bfill')) + np.where(group_df['Income Qty'] > 0.0, group_df['Income'] / group_df['Income Qty'], 0.0)) / (group_df['Close'].shift(1).fillna(method='bfill')))
+        group_df['Portfolio Return %'] = group_df['Daily Return %'] * group_df['Portfolio Weight %'] / 100
+        ts.append(group_df)
+
+    return pd.concat(ts, ignore_index=True).sort_values(by=['Settle date', 'Position name']).reset_index(drop=True)
 
 def calculate_composite_returns(df):
-    return df
+    ts = []
+
+    for _, group_df in df.groupby('Position name'):
+        group_df = group_df.sort_values(by='Settle date')
+        group_df['Settle date'] = pd.to_datetime(group_df['Settle date'])
+        # ITD
+        group_df['ITD Portfolio Return %'] = 100.0*((1 + group_df['Portfolio Return %'] / 100).cumprod() - 1)
+        # Ann. ITD
+        first_trade_date = np.datetime64(group_df['Settle date'].min(), 'D')
+        group_df['Ann. ITD Portfolio Return %'] = 100.0 * ((1 + group_df['ITD Portfolio Return %'] / 100) ** (260 / np.maximum(np.busday_count(first_trade_date, group_df['Settle date'].values.astype('datetime64[D]')), 1)) - 1)
+        # 1Y
+        group_df['1Y Portfolio Return %'] = group_df['Portfolio Return %'].rolling(window=260 * 1).apply(lambda x: 100.0 * ((1 + x / 100).cumprod().iloc[-1] - 1))
+        # 3Y
+        group_df['3Y Portfolio Return %'] = group_df['Portfolio Return %'].rolling(window=260 * 3).apply(lambda x: 100.0 * ((1 + x / 100).cumprod().iloc[-1] - 1))
+        group_df['3Y Portfolio Return %'] = ((1 + group_df['3Y Portfolio Return %'] / 100.0) ** (1/3) - 1) * 100.0
+        # 5Y
+        group_df['5Y Portfolio Return %'] = group_df['Portfolio Return %'].rolling(window=260 * 5).apply(lambda x: 100.0 * ((1 + x / 100).cumprod().iloc[-1] - 1))
+        group_df['5Y Portfolio Return %'] = ((1 + group_df['5Y Portfolio Return %'] / 100.0) ** (1/5) - 1) * 100.0
+        print(group_df)
+        ts.append(group_df)
+    
+    return pd.concat(ts, ignore_index=True).sort_values(by=['Settle date', 'Position name']).reset_index(drop=True)
+
+def calculate_summary_composite_returns(daily_summary):
+    daily_summary = daily_summary.sort_values(by='Settle date')
+    daily_summary['Portfolio Return %'] = daily_summary['Portfolio Return %'].fillna(0)
+
+    # ITD
+    daily_summary['ITD Portfolio Return %'] = 100.0*((1 + daily_summary['Portfolio Return %'] / 100).cumprod() - 1)
+
+    # Ann. ITD
+    first_trade_date = np.datetime64(daily_summary['Settle date'].min(), 'D')
+    daily_summary['Ann. ITD Portfolio Return %'] = 100.0 * ((1 + daily_summary['ITD Portfolio Return %'] / 100) ** (260 / np.maximum(np.busday_count(first_trade_date, daily_summary['Settle date'].values.astype('datetime64[D]')), 1)) - 1)
+
+    # 1Y
+    daily_summary['1Y Portfolio Return %'] = daily_summary['Portfolio Return %'].rolling(window=260 * 1).apply(lambda x: 100.0 * ((1 + x / 100).cumprod().iloc[-1] - 1))
+    
+    # 3Y
+    daily_summary['3Y Portfolio Return %'] = daily_summary['Portfolio Return %'].rolling(window=260 * 3).apply(lambda x: 100.0 * ((1 + x / 100).cumprod().iloc[-1] - 1))
+    daily_summary['3Y Portfolio Return %'] = ((1 + daily_summary['3Y Portfolio Return %'] / 100.0) ** (1/3) - 1) * 100.0
+    
+    # 5Y
+    daily_summary['5Y Portfolio Return %'] = daily_summary['Portfolio Return %'].rolling(window=260 * 5).apply(lambda x: 100.0 * ((1 + x / 100).cumprod().iloc[-1] - 1))
+    daily_summary['5Y Portfolio Return %'] = ((1 + daily_summary['5Y Portfolio Return %'] / 100.0) ** (1/5) - 1) * 100.0
+
+    return daily_summary
 
 def update_summary_with_daily_returns(daily_summary, df):
     # Ensure 'Settle date' is in datetime format
@@ -107,15 +156,24 @@ def update_summary_with_daily_returns(daily_summary, df):
     df['Settle date'] = pd.to_datetime(df['Settle date'])
 
     # Merge the daily summary with the main dataframe to get daily returns
-    merged_df = pd.merge(daily_summary, df[['Settle date', 'Portfolio Return %', 'Cm. Portfolio Return %']], on='Settle date', how='left')
+    merged_df = pd.merge(daily_summary, df[['Settle date', 'Portfolio Return %']], on='Settle date', how='left')
 
     # Aggregate to get total daily return and cumulative return
     updated_summary = merged_df.groupby('Settle date').agg(
         Book_cost=('Book cost', 'first'),
         Market_value=('Market value', 'first'),
         ITD_PnL=('ITD PnL', 'first'),
-        Daily_Return_Percent=('Portfolio Return %', 'sum'),
-        Cm_Portfolio_Return_Percent=('Cm. Portfolio Return %', 'sum')
+        Income=('Income', 'first'),
+        Daily_Return_Percent=('Portfolio Return %', 'sum')
     ).reset_index()
+
+    updated_summary = updated_summary.rename(columns={
+                                            'Book_cost': 'Book cost', 
+                                            'Market_value': 'Market value',
+                                            'ITD_PnL': 'ITD PnL',
+                                            'Income': 'Income',
+                                            'Daily_Return_Percent': 'Portfolio Return %'
+                                            }
+                                        )
 
     return updated_summary
