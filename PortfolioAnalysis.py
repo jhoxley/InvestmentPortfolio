@@ -135,7 +135,6 @@ dailyDF = af.calculate_summary_composite_returns(dailyDF)
 
 # Save the final dataframe to an Excel file
 print("Saving results...")
-print(final_df)
 final_df = DataFormatting.drop_unwanted_columns(final_df, [
         'Settle date', 
         'Position name', 

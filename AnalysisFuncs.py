@@ -121,7 +121,6 @@ def calculate_composite_returns(df):
         # 5Y
         group_df['5Y Portfolio Return %'] = group_df['Portfolio Return %'].rolling(window=260 * 5).apply(lambda x: 100.0 * ((1 + x / 100).cumprod().iloc[-1] - 1))
         group_df['5Y Portfolio Return %'] = ((1 + group_df['5Y Portfolio Return %'] / 100.0) ** (1/5) - 1) * 100.0
-        print(group_df)
         ts.append(group_df)
     
     return pd.concat(ts, ignore_index=True).sort_values(by=['Settle date', 'Position name']).reset_index(drop=True)
