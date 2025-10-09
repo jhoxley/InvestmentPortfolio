@@ -1,0 +1,8 @@
+# Ignore Python cache
+__pycache__/*
+Reports/__pycache__/*
+Data/__pycache__/*
+*.pyc
+
+# Ignore generated cache files
+*.parquet
