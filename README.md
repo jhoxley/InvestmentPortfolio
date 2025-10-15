@@ -6,6 +6,10 @@ This readme covers the overview of this repository. The **most important** part 
 
 **Bugs**
 - [ ] C:\Users\jhoxl\Python\InvestmentPortfolio\DataFormatting.py:26: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version.
+- [ ] Parquet caching seems to not work on date coverage
+- [ ] Should use caching to reduce yfinance query window size; append results
+- [ ] ITD PnL calcs look very wrong
+- [ ] Month/Quarter/Year aggregations may not have correct returns. Check.
 - [x] fix yfinance handling of ccy, i.e. cash lines need a close px of 1.0
 - [x] PnL and handling of income incorrect; avoid double-count through cash line
 - [x] Return calculations look suspicious. Add unit tests to validate.
@@ -21,9 +25,9 @@ This readme covers the overview of this repository. The **most important** part 
 
 This set of scripts is built around a simple extract of a Hargreaves Lansdown portoflio (www.hl.co.uk) as held by the author. This can be merged into a single XLSX input file with two tabs capturing the key events.
 
-Two known issues with code at time of writing:
+Known issues with code at time of writing:
 1. XLSX has an ugly built-in formula to extract a standardised position name from the raw data. This should be unified into the application code.
-2. The position name in the XLSX has a hard-coded dictionary of identifiers in `PortfolioAnalysis.py` which is bad
+
 
 ### Transactions
 
@@ -47,7 +51,18 @@ TBC
 
 - Create a Python env
 - Activate
-- Execute `./.venv/Scripts/python .\PortfolioAnalysis.py`
+- Execute `./.venv/Scripts/python .\PortfolioAnalysis.py` <report> <args>
+    Where <report> is one of:
+        ``DailyDetails``
+        ``DailySummary``
+        ``MonthlySummary``
+        ``QuarterlySummary``
+    with following command line <args>
+    - ``data_file``
+    - ``static_file``
+    - ``transactions_sheet``
+    - ``income_sheet``
+    - ``output_file``
 
 ### Interpreting the results
 
