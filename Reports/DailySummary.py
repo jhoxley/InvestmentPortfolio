@@ -1,6 +1,7 @@
 from .BaseReport import BaseReport
 import pandas as pd
 import numpy as np
+import AnalysisFuncs as af
 
 class DailySummaryReport(BaseReport):
 
@@ -13,24 +14,7 @@ class DailySummaryReport(BaseReport):
         data['Portfolio Return %'] = data['Daily Return %'] * (data['Weight %'] / 100)
 
         # (2) group positions by settle date
-        data['Settle date'] = pd.to_datetime(data['Settle date'])
-
-        daily_summary = data.groupby('Settle date').agg(
-            Total_Book_Cost=('Book cost', 'sum'),
-            Total_Market_Value=('Market value', 'sum'),
-            Total_Income=('Income', 'sum'),
-            Total_PnL=('ITD PnL', 'sum'),
-            Total_Portfolio_Return_Percent=('Portfolio Return %', 'sum')
-        ).reset_index()
-
-        daily_summary = daily_summary.rename(columns={
-                                                'Total_Book_Cost': 'Book cost', 
-                                                'Total_Market_Value': 'Market value',
-                                                'Total_Income': 'Income',
-                                                'Total_PnL': 'ITD PnL',
-                                                'Total_Portfolio_Return_Percent': 'Portfolio Return %'
-                                                }
-                                            )
+        daily_summary = af.create_daily_summary(data)
 
         # (4) calculate composite returns (ITD, 1Y, 3Y, 5Y, Ann. ITD) for each position
         daily_summary['Portfolio Return %'] = daily_summary['Portfolio Return %'].fillna(0)
