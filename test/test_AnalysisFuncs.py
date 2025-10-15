@@ -22,6 +22,7 @@ class TestCases(unittest.TestCase):
         df['Market value'] = pd.to_numeric(df['Market value'], errors='coerce').astype('float')
         df['Day PnL'] = pd.to_numeric(df['Day PnL'], errors='coerce').astype('float')
         df['ITD PnL'] = pd.to_numeric(df['ITD PnL'], errors='coerce').astype('float')
+        df['Portfolio Return %'] = pd.to_numeric(df['Portfolio Return %'], errors='coerce').astype('float')
 
         # load the expected results
         expected_df = pd.read_csv(f"{rootpath}expected_summary_{testNum}.csv")
@@ -31,6 +32,7 @@ class TestCases(unittest.TestCase):
         expected_df['Book cost'] = pd.to_numeric(expected_df['Book cost'], errors='coerce').astype('float')
         expected_df['Market value'] = pd.to_numeric(expected_df['Market value'], errors='coerce').astype('float')
         expected_df['ITD PnL'] = pd.to_numeric(expected_df['ITD PnL'], errors='coerce').astype('float')
+        expected_df['Portfolio Return %'] = pd.to_numeric(expected_df['Portfolio Return %'], errors='coerce').astype('float')
 
         # Call the function
         result_df = af.create_daily_summary(df)
@@ -125,7 +127,7 @@ class TestCases(unittest.TestCase):
         df['Market value'] = pd.to_numeric(df['Market value'], errors='coerce').astype('float')
         df['Day PnL'] = pd.to_numeric(df['Day PnL'], errors='coerce').astype('float')
         df['ITD PnL'] = pd.to_numeric(df['ITD PnL'], errors='coerce').astype('float')
-        df['Portfolio Weight %'] = pd.to_numeric(df['Portfolio Weight %'], errors='coerce').astype('float')
+        df['Weight %'] = pd.to_numeric(df['Weight %'], errors='coerce').astype('float')
 
         return df
     
@@ -133,11 +135,8 @@ class TestCases(unittest.TestCase):
         # Load the input portfolio data
         df = self.utility_load_input_portfolio(testNum, rootpath)
 
-        # Load the daily summary data
-        daily_summary_df = self.utility_load_daily_summary(testNum, rootpath)
-
         # Call the function
-        result_df = af.calculate_weights(df, daily_summary_df)
+        result_df = af.calculate_position_weights(df)
 
         # load the expected weights data
         expected_df = self.utility_load_expected_weights(testNum, rootpath)
