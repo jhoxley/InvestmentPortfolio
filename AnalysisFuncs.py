@@ -46,6 +46,21 @@ def calculate_weights(df, daily_summary):
 
     return df
 
+def calculate_position_weights(df):
+    # Calculate the total market value for each settle date
+    total_market_value = df.groupby('Settle date')['Market value'].transform('sum')
+    
+    # Calculate the portfolio weight for each position
+    df['Weight %'] = (df['Market value'] / total_market_value) * 100
+    
+    return df
+
+def calculate_itd_pnl(df):
+    # Calculate ITD PnL as Market Value - Book Cost + Income
+    # BUG: this is wrong as needs to be rolling sum of 'Income' not immediate, daily value
+    df['ITD PnL'] = df['Market value'] - df['Book cost'] + df['Income'].cumsum()
+    return df
+
 # create a python function given a dataframe returns the cumulative quantity and value by settle date
 def cumulative_by_settle_date(df):    
     # Group by 'Settle Date' and aggregate
@@ -89,7 +104,7 @@ def calculate_returns(df):
 
     return df
 
-def calculate_daily_returns(df):
+def calculate_daily_returns(df, include_portfolio_return=True):
     # The total return for each position is (current close - previous close) + dividend per share / previous close
     ts = []
 
@@ -97,7 +112,8 @@ def calculate_daily_returns(df):
     for _, group_df in df.groupby('Position name'):
         group_df = group_df.sort_values(by='Settle date')
         group_df['Daily Return %'] = 100.0 * (((group_df['Close'] - group_df['Close'].shift(1).fillna(method='bfill')) + np.where(group_df['Income Qty'] > 0.0, group_df['Income'] / group_df['Income Qty'], 0.0)) / (group_df['Close'].shift(1).fillna(method='bfill')))
-        group_df['Portfolio Return %'] = group_df['Daily Return %'] * group_df['Portfolio Weight %'] / 100
+        if include_portfolio_return:
+            group_df['Portfolio Return %'] = group_df['Daily Return %'] * group_df['Portfolio Weight %'] / 100
         ts.append(group_df)
 
     return pd.concat(ts, ignore_index=True).sort_values(by=['Settle date', 'Position name']).reset_index(drop=True)
