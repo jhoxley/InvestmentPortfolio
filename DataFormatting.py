@@ -22,7 +22,12 @@ def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePric
     # (1) we want (Settle date, Quantity, Book Cost) over all dates
 
     # alias dfIncome columns
-    dfIncome = dfIncome.rename(columns={'Value (£)': 'Income', 'Quantity': 'Income Qty'})
+    dfIncome = dfIncome.groupby('Settle date').agg(
+        Income_Qty=('Quantity', 'sum'),
+        Income=('Value (£)', 'sum')
+    ).reset_index()
+    dfIncome = dfIncome.rename(columns={'Income_Qty': 'Income Qty'})
+    
     dfFinal = pd.merge(dfFinal, dfIncome, on='Settle date', how='left').fillna(0)
     # (2) we want (Settle date, Quantity, Book Cost, Income Qty, Income) over all dates
 
