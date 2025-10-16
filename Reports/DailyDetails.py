@@ -26,5 +26,5 @@ class DailyDetailsReport(BaseReport):
     def required_measures(self) -> list[str]:
         return ["ITD PnL", "Daily Return %", "Weight %"]
     
-    def get_report_name(self) -> str:
+    def report_name(self) -> str:
         return "DailyDetailsReport"

@@ -5,5 +5,5 @@ class MonthlySummaryReport(PeriodicSummaryBase):
     def get_periodicity(self) -> str:
         return "ME"
         
-    def get_report_name(self) -> str:
+    def report_name(self) -> str:
         return "MonthlySummaryReport"
