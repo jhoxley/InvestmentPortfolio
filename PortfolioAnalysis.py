@@ -1,6 +1,7 @@
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py DailySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedDailySummary_New.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py MonthlySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedMonthlySummary_New.xlsx"
-# .\.venv\Scripts\Python .\PortfolioAnalysis.py QuarterlySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedQuarterlySummary_New.xlsx"
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py QuarterlySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedQuarterlySummary_New.xlsx"v
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py AnnualSummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedQuarterlySummary_New.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py DailyDetails data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedDailyInvestmentData_New.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentIsa.xlsx"
 
@@ -10,7 +11,7 @@ import datetime as dt
 import AnalysisFuncs as af
 import DataFormatting
 import DataGeneration as dg
-from Reports import DailyDetails, MonthlySummary, QuarterlySummary, DailySummary, MultiReport
+from Reports import DailyDetails, MonthlySummary, QuarterlySummary, DailySummary, MultiReport, AnnualSummary
 import pandas as pd
 from Data import MarketData
 import json
@@ -19,11 +20,13 @@ report_types = {
     "DailyDetails": DailyDetails.DailyDetailsReport(),
     "MonthlySummary": MonthlySummary.MonthlySummaryReport(),
     "QuarterlySummary": QuarterlySummary.QuarterlySummaryReport(),
+    "AnnualSummary": AnnualSummary.AnnualSummaryReport(),
     "DailySummary": DailySummary.DailySummaryReport(),
     "All" : MultiReport.MultiReport([
         DailyDetails.DailyDetailsReport(),
         MonthlySummary.MonthlySummaryReport(),
         QuarterlySummary.QuarterlySummaryReport(),
+        AnnualSummary.AnnualSummaryReport(),
         DailySummary.DailySummaryReport()
     ])
 }
