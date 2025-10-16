@@ -34,6 +34,22 @@ def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePric
     dfFinal = pd.merge(dfFinal, dfClosePrices, on='Settle date', how='left').ffill()
     # (3) we want (Settle date, Quantity, Book Cost, Income Qty, Income, Close) over all dates
 
+    # Add in capital
+    dfLodgements = dfTransactions[dfTransactions['Reference'].str.startswith('L')][['Settle date', 'Value (£)']].rename(columns={'Value (£)': 'Capital'})
+    dfSubscriptions = dfTransactions[dfTransactions['Reference'].str.lower().isin(['fpc', 'card web'])][['Settle date', 'Value (£)']].rename(columns={'Value (£)': 'Capital'})
+    
+    if dfLodgements.empty:
+        dfLodgements = pd.DataFrame(columns=['Settle date', 'Capital'])
+    if dfSubscriptions.empty:
+        dfSubscriptions = pd.DataFrame(columns=['Settle date', 'Capital'])
+
+    dfCapital = pd.concat([dfLodgements, dfSubscriptions], ignore_index=True, sort=False).groupby('Settle date').agg(
+        Capital=('Capital', 'sum')
+    ).reset_index()
+
+    dfFinal = pd.merge(dfFinal, dfCapital, on='Settle date', how='left').fillna(0)
+    dfFinal['Capital'] = dfFinal['Capital'].cumsum()
+
     # Calculate derived columns
     dfFinal['Market value'] = dfFinal['Quantity'] * dfFinal['Close']
     dfFinal['Day PnL'] = dfFinal['Market value'].diff().fillna(0)
@@ -44,7 +60,7 @@ def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePric
     dfFinal['Position name'] = positionName
 
     # reorder colummns
-    dfFinal = dfFinal[['Settle date', 'Position name', 'Quantity', 'Book cost', 'Income Qty', 'Income', 'Close', 
+    dfFinal = dfFinal[['Settle date', 'Position name', 'Capital', 'Quantity', 'Book cost', 'Income Qty', 'Income', 'Close', 
                        'Market value', 'Day PnL', 'ITD PnL']]   
 
     # Ensure the 'Settle date' is in datetime format
@@ -54,7 +70,7 @@ def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePric
     dfFinal['Position name'] = dfFinal['Position name'].astype(str)
 
     # Ensure numeric columns are in the correct format
-    numeric_columns = ['Quantity', 'Book cost', 'Income Qty', 'Income', 'Close', 'Market value', 'Day PnL', 'ITD PnL']
+    numeric_columns = ['Quantity', 'Capital', 'Book cost', 'Income Qty', 'Income', 'Close', 'Market value', 'Day PnL', 'ITD PnL']
     for col in numeric_columns:     
         dfFinal[col] = pd.to_numeric(dfFinal[col], errors='coerce').astype('float')
 

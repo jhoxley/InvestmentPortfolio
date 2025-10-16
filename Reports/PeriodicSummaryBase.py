@@ -26,6 +26,7 @@ class PeriodicSummaryBase(BaseReport):
 
         summary = daily_summary.groupby(pd.Grouper(key='Settle date', freq=periodicity)).agg(
             Total_Book_Cost=('Book cost', 'max'),
+            Total_Capital=('Capital', 'last'),
             Open_Market_Value=('Market value', 'first'),
             High_Market_Value=('Market value', 'max'),
             Low_Market_Value=('Market value', 'min'),
@@ -36,6 +37,7 @@ class PeriodicSummaryBase(BaseReport):
 
         summary = summary.rename(columns={
                                                 'Total_Book_Cost': 'Book cost', 
+                                                'Total_Capital': 'Close Capital',
                                                 'Open_Market_Value': 'Open Market value',
                                                 'High_Market_Value': 'High Market value',                                                
                                                 'Low_Market_Value': 'Low Market value',

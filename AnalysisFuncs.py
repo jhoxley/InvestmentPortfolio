@@ -9,6 +9,7 @@ def create_daily_summary(df):
     
     # Group by 'Settle date' and aggregate
     daily_summary = df.groupby('Settle date').agg(
+        Total_Capital =('Capital', 'sum'),
         Total_Book_Cost=('Book cost', 'sum'),
         Total_Market_Value=('Market value', 'sum'),
         Total_Income=('Income', 'sum'),
@@ -17,6 +18,7 @@ def create_daily_summary(df):
     ).reset_index()
 
     daily_summary = daily_summary.rename(columns={
+                                            'Total_Capital': 'Capital',
                                             'Total_Book_Cost': 'Book cost', 
                                             'Total_Market_Value': 'Market value',
                                             'Total_Income': 'Income',
@@ -38,9 +40,8 @@ def calculate_position_weights(df):
     return df
 
 def calculate_itd_pnl(df):
-    # Calculate ITD PnL as Market Value - Book Cost + Income
-    # BUG: this is wrong as needs to be rolling sum of 'Income' not immediate, daily value
-    df['ITD PnL'] = df['Market value'] - df['Book cost'] + df['Income'].cumsum()
+    # Calculate ITD PnL as Market Value - Book Cost + Income (aka Capital)
+    df['ITD PnL'] = df['Market value'] - df['Capital']
     return df
 
 # create a python function given a dataframe returns the cumulative quantity and value by settle date

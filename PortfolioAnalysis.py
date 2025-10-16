@@ -97,7 +97,7 @@ for position in distinct_positions:
         multiplier = static.get("multiplier", 1.0)
         ts = mdApi.get_time_series(positionFirstTran, positionLastTran, ticker, multiplier)    
 
-    transactions = df[df['Position Name'] == position][['Settle date', 'Adj Qty', 'Value (£)']].rename(columns={'Adj Qty': 'Quantity'})
+    transactions = df[df['Position Name'] == position][['Settle date', 'Reference', 'Adj Qty', 'Value (£)']].rename(columns={'Adj Qty': 'Quantity'})
     transactions['Value (£)'] = transactions['Value (£)'].abs()
 
     income = dfIncome[dfIncome['Position Name'] == position][['Settle date', 'Quantity', 'Value (£)']]
@@ -117,7 +117,7 @@ print("Generating final dataframe...")
 final_df = DataFormatting.create_portfolio(frames)
 
 # Expected schema:
-# 'Settle date', 'Position name', 'Quantity', 'Book cost', 'Close', 'Market value', 'Income'
+# 'Settle date', 'Position name', 'Capital', 'Quantity', 'Book cost', 'Close', 'Market value', 'Income'
 
 # Interrogate the report to see what measures it needs
 print("Report requires the following measures: " + ", ".join(report.required_measures()))

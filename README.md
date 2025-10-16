@@ -8,7 +8,7 @@ This readme covers the overview of this repository. The **most important** part 
 - [ ] C:\Users\jhoxl\Python\InvestmentPortfolio\DataFormatting.py:26: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version.
 - [ ] Parquet caching seems to not work on date coverage
 - [ ] Should use caching to reduce yfinance query window size; append results
-- [ ] ITD PnL calcs look very wrong
+- [ ] Sales dont factor into PnL or Capital calcs properly, e.g. 10/05/2024 divestment of iShares holdings vanishes from future records
 - [ ] Month/Quarter/Year aggregations may not have correct returns. Check.
 - [x] fix yfinance handling of ccy, i.e. cash lines need a close px of 1.0
 - [x] PnL and handling of income incorrect; avoid double-count through cash line
