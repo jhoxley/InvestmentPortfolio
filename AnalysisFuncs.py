@@ -63,7 +63,7 @@ def calculate_daily_returns(df, include_portfolio_return=True):
     # write a loop to iterate over groups in df by 'Position name' and calculate the daily return
     for _, group_df in df.groupby('Position name'):
         group_df = group_df.sort_values(by='Settle date')
-        group_df['Daily Return %'] = 100.0 * (((group_df['Close'] - group_df['Close'].shift(1).fillna(method='bfill')) + np.where(group_df['Income Qty'] > 0.0, group_df['Income'] / group_df['Income Qty'], 0.0)) / (group_df['Close'].shift(1).fillna(method='bfill')))
+        group_df['Daily Return %'] = 100.0 * (((group_df['Close'] - group_df['Close'].shift(1).bfill()) + np.where(group_df['Income Qty'] > 0.0, group_df['Income'] / group_df['Income Qty'], 0.0)) / (group_df['Close'].shift(1).bfill()))
         if include_portfolio_return:
             group_df['Portfolio Return %'] = group_df['Daily Return %'] * group_df['Portfolio Weight %'] / 100
         ts.append(group_df)
