@@ -10,7 +10,7 @@ class PeriodicSummaryBase(BaseReport):
     def get_periodicity(self) -> str:
         return "D"
 
-    def generate(self, output_filename: str, data):
+    def generate(self, output_filename: str, data, report_args: dict = dict()):
         print("Generating " + self.report_name())
         
         # === Generate raw data for this report ===

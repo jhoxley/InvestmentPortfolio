@@ -3,7 +3,7 @@ from typing import List
 
 class BaseReport(ABC):
     @abstractmethod
-    def generate(self, output_filename: str, data):
+    def generate(self, output_filename: str, data, report_args: dict = dict()):
         pass
 
     def report_name(self) -> str:

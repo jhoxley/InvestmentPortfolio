@@ -5,7 +5,7 @@ import AnalysisFuncs as af
 
 class DailyDetailsReport(BaseReport):
 
-    def generate(self, output_filename: str, data):
+    def generate(self, output_filename: str, data, report_args: dict = dict()):
         print("Generating Daily Details Report")
         
         # === Generate raw data for this report ===
