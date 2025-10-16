@@ -9,12 +9,12 @@ class MultiReport(BaseReport):
     def __init__(self, reports: list[BaseReport]):
         self.reports = reports
 
-    def generate(self, output_filename: str, data):
+    def generate(self, output_filename: str, data, report_args: dict = dict()):
         print("Generating Multi Report")
         
         for report in self.reports:
             report_filename = output_filename.replace(".xlsx", f"_{report.report_name()}.xlsx")
-            report.generate(report_filename, data)
+            report.generate(report_filename, data, report_args)
         
         return
     

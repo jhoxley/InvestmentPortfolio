@@ -3,7 +3,8 @@
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py QuarterlySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedQuarterlySummary_New.xlsx"v
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py AnnualSummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedQuarterlySummary_New.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py DailyDetails data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedDailyInvestmentData_New.xlsx"
-# .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentIsa.xlsx"
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py Projected data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedProjectedInvestmentData_New.xlsx" fwd_periods=12
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentIsa.xlsx" fwd_periods=1095 periodicity="QE"
 
 import sys
 import yfinance as yf
@@ -11,7 +12,7 @@ import datetime as dt
 import AnalysisFuncs as af
 import DataFormatting
 import DataGeneration as dg
-from Reports import DailyDetails, MonthlySummary, QuarterlySummary, DailySummary, MultiReport, AnnualSummary
+from Reports import DailyDetails, MonthlySummary, QuarterlySummary, DailySummary, MultiReport, AnnualSummary,ForwardProjection
 import pandas as pd
 from Data import MarketData
 import json
@@ -22,12 +23,14 @@ report_types = {
     "QuarterlySummary": QuarterlySummary.QuarterlySummaryReport(),
     "AnnualSummary": AnnualSummary.AnnualSummaryReport(),
     "DailySummary": DailySummary.DailySummaryReport(),
+    "Projected" : ForwardProjection.ForwardProjectionReport(),
     "All" : MultiReport.MultiReport([
         DailyDetails.DailyDetailsReport(),
         MonthlySummary.MonthlySummaryReport(),
         QuarterlySummary.QuarterlySummaryReport(),
         AnnualSummary.AnnualSummaryReport(),
-        DailySummary.DailySummaryReport()
+        DailySummary.DailySummaryReport(),
+        ForwardProjection.ForwardProjectionReport()
     ])
 }
 
@@ -41,7 +44,7 @@ if report is None:
     print("Options are: " + ", ".join(report_types.keys()))
     sys.exit(1)
 
-print(f"Selected report: {report.get_report_name()}")
+print(f"Selected report: {report.report_name()}")
 
 # extract params
 kv_args = sys.argv[2:]  # Skip script name and first argument
@@ -143,6 +146,9 @@ if missing_measures:
     print(f"Error: The following required measures are missing from the data: {', '.join(missing_measures)}")
     sys.exit(1)
 
+# Determine params passed into report
+report_args = {key : params[key] for key in params if key not in ['data_file', 'static_file', 'transactions_sheet', 'income_sheet', 'output_file']}
+
 # Run the report
 print("Generating report, saving to " + output_file)
-report.generate(output_file, final_df)
+report.generate(output_file, final_df, report_args)
