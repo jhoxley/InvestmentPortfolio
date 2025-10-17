@@ -3,8 +3,22 @@ from .BaseReport import BaseReport
 import pandas as pd
 import numpy as np
 import AnalysisFuncs as af
+import mplfinance as mpf
 
 class PeriodicSummaryBase(BaseReport):
+
+    def graph_summary(self, summary: pd.DataFrame, output_filename: str):
+        
+        df = summary[['Settle date','Open Market value','High Market value','Low Market value','Close Market value']]
+        df = df.set_index('Settle date')
+        df = df.rename(columns={
+                        'Open Market value': 'Open',
+                        'High Market value': 'High',
+                        'Low Market value': 'Low',
+                        'Close Market value': 'Close'
+                    })
+
+        mpf.plot(df, type="candle", style="charles", title="Portfolio Market Value Through Time", ylabel="Market value (£)", savefig=output_filename)
 
     @abstractmethod
     def get_periodicity(self) -> str:
@@ -78,6 +92,8 @@ class PeriodicSummaryBase(BaseReport):
         summary.to_excel(output_filename, index=False)
 
         # === Format and save as visual ===
+        output_filename = output_filename.replace('.xlsx', '_Summary.png')
+        self.graph_summary(summary, output_filename)
         
         return
     
