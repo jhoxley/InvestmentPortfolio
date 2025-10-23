@@ -47,6 +47,8 @@ def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePric
         Capital=('Capital', 'sum')
     ).reset_index()
 
+    dfFinal = dfFinal.infer_objects(copy=False)
+    dfCapital = dfCapital.infer_objects(copy=False)
     dfFinal = pd.merge(dfFinal, dfCapital, on='Settle date', how='left').fillna(0)
     dfFinal['Capital'] = dfFinal['Capital'].cumsum()
 
