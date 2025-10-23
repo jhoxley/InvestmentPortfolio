@@ -6,7 +6,9 @@
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py Projected data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedProjectedInvestmentData_New.xlsx" fwd_periods=1095
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentIsa.xlsx" fwd_periods=1095 periodicity="QE"
 
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py DailyDetails data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_DailySummary.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py DailySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_DailySummary.xlsx"
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP.xlsx" fwd_periods=1095 periodicity="QE"
 
 import sys
 import yfinance as yf
@@ -88,8 +90,9 @@ for position in distinct_positions:
         ticker = static.get("ticker")
     else:
         ident = static.get("isin", "")
-        ticker = yf.Ticker(ident).info.get('symbol', 'N/A') if ident else 'N/A'
-        print(f"   Translated {static.get('isin','')} to ticker {ticker}")
+        if static.get("price_file") is None:
+            ticker = yf.Ticker(ident).info.get('symbol', 'N/A') if ident else 'N/A'
+            print(f"   Translated {static.get('isin','')} to ticker {ticker}")
     
     
     df2 = df[df['Position Name'] == position]
@@ -110,6 +113,16 @@ for position in distinct_positions:
     if ticker == 'N/A' and position.lower() == 'cash':
         ts = pd.DataFrame(ds)
         ts['Close'] = 1.0  # Assuming cash has a constant value of 1.0
+    elif static.get("price_file") is not None:
+        price_file = static.get("price_file")
+        print(f"   Loading prices from file: {price_file}")
+        ts = pd.read_excel(price_file)
+        ts = ts.rename(columns={ts.columns[0]: 'Settle date', ts.columns[1]: 'Close'})
+        ts['Settle date'] = pd.to_datetime(ts['Settle date'])
+        ts = ts[(ts['Settle date'] >= pd.to_datetime(positionFirstTran)) & (ts['Settle date'] <= pd.to_datetime(positionLastTran))]
+        ts['Close'] = pd.to_numeric(ts['Close'], errors='coerce').fillna(0)
+        multiplier = static.get("multiplier", 1.0)
+        ts['Close'] = ts['Close'] * multiplier
     else:
         multiplier = static.get("multiplier", 1.0)
         ts = mdApi.get_time_series(positionFirstTran, positionLastTran, ticker, multiplier)    
