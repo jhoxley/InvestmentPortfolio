@@ -36,7 +36,7 @@ def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePric
 
     # Add in capital
     dfLodgements = dfTransactions[dfTransactions['Reference'].str.startswith('L')][['Settle date', 'Value (£)']].rename(columns={'Value (£)': 'Capital'})
-    dfSubscriptions = dfTransactions[dfTransactions['Reference'].str.lower().isin(['fpc', 'card web'])][['Settle date', 'Value (£)']].rename(columns={'Value (£)': 'Capital'})
+    dfSubscriptions = dfTransactions[dfTransactions['Reference'].str.lower().isin(['fpc', 'card web', 'contrib', 'bacs'])][['Settle date', 'Value (£)']].rename(columns={'Value (£)': 'Capital'})
     
     if dfLodgements.empty:
         dfLodgements = pd.DataFrame(columns=['Settle date', 'Capital'])
