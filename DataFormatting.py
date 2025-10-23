@@ -50,6 +50,9 @@ def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePric
     dfFinal = pd.merge(dfFinal, dfCapital, on='Settle date', how='left').fillna(0)
     dfFinal['Capital'] = dfFinal['Capital'].cumsum()
 
+    # Filter negative quantities - we dont go short here
+    dfFinal['Quantity'] = dfFinal['Quantity'].apply(lambda x: max(x, 0))
+
     # Calculate derived columns
     dfFinal['Market value'] = dfFinal['Quantity'] * dfFinal['Close']
     dfFinal['Day PnL'] = dfFinal['Market value'].diff().fillna(0)

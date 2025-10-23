@@ -1,10 +1,12 @@
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py DailySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedDailySummary_New.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py MonthlySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedMonthlySummary_New.xlsx"
-# .\.venv\Scripts\Python .\PortfolioAnalysis.py QuarterlySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedQuarterlySummary_New.xlsx"v
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py QuarterlySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedQuarterlySummary_New.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py AnnualSummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedQuarterlySummary_New.xlsx"
-# .\.venv\Scripts\Python .\PortfolioAnalysis.py DailyDetails data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedDailyInvestmentData_New.xlsx"
-# .\.venv\Scripts\Python .\PortfolioAnalysis.py Projected data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedProjectedInvestmentData_New.xlsx" fwd_periods=12
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py DailyDetails data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentISA_DailyDetails.xlsx"
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py Projected data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\ProcessedProjectedInvestmentData_New.xlsx" fwd_periods=1095
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="Transactions" income_sheet="Income" output_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentIsa.xlsx" fwd_periods=1095 periodicity="QE"
+
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py DailySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_DailySummary.xlsx"
 
 import sys
 import yfinance as yf
@@ -77,15 +79,24 @@ mdApi = MarketData.MarketDataApi()
 
 for position in distinct_positions:
     static = position_lookup.get(position, {})
-    ident = static.get("isin", "")
-    ticker = yf.Ticker(ident).info.get('symbol', 'N/A') if ident else 'N/A'
+    if static.get("ignore", False):
+        print(f"Skipping ignored position: {position}")
+        continue
+    print(f"Processing... Name: {position}, Isin: {static.get('isin','')}, Ticker: {static.get('ticker','')}")
+
+    if static.get("ticker") is not None and static.get("ticker") != "":
+        ticker = static.get("ticker")
+    else:
+        ident = static.get("isin", "")
+        ticker = yf.Ticker(ident).info.get('symbol', 'N/A') if ident else 'N/A'
+        print(f"   Translated {static.get('isin','')} to ticker {ticker}")
     
-    print(f"Processing... Name: {position}, Isin: {ident}, Ticker: {ticker}")
+    
     df2 = df[df['Position Name'] == position]
 
     df3 = af.cumulative_by_settle_date(df2)
     df3['Position Name'] = position
-    df3['ISIN']= ident
+    df3['ISIN']= static.get("isin", "")
     df3['Ticker'] = ticker
     
     positionFirstTran = pd.to_datetime(df3['Settle date']).min()
@@ -96,7 +107,7 @@ for position in distinct_positions:
     ds = dg.create_date_series(positionFirstTran, positionLastTran)
 
     # Fugly hack to handle cash positions, should be removed when we have a better way to handle cash
-    if ticker == 'N/A' and ident == "GBP=":
+    if ticker == 'N/A' and position.lower() == 'cash':
         ts = pd.DataFrame(ds)
         ts['Close'] = 1.0  # Assuming cash has a constant value of 1.0
     else:
