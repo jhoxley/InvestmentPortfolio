@@ -3,8 +3,29 @@ import pandas as pd
 import numpy as np
 import AnalysisFuncs as af
 import DataGeneration as df
+import matplotlib.pyplot as plt
 
 class ForwardProjectionReport(BaseReport):
+
+    def graph_projection(self, daily_summary: pd.DataFrame, output_filename: str):
+        graphDf = daily_summary[['Settle date', 'Market value', 'Proj. Market Value (ITD)', 'Proj. Market Value (1Y)', 'Proj. Market Value (3Y)', 'Proj. Market Value (5Y)']]
+        graphDf.set_index('Settle date', inplace=True)
+
+        fig,ax = plt.subplots(figsize=(12,8))
+        graphDf.plot.line(ax=ax, cmap='Dark2', alpha=0.7)
+
+        ax.set_title('Forward Projection of Portfolio Market Value')
+        ax.set_ylabel('Value (£)')   
+        ax.set_xlabel('Date')
+        ax.grid(axis='y', linestyle='--', alpha=0.7, linewidth=0.8, which='major')
+        ax.grid(axis='y', linestyle='--', alpha=0.4, linewidth=0.4, which='minor')
+
+        ncols = min(len(graphDf.columns), 2)
+        ax.legend(title='Return Type', loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=ncols, fontsize='small')
+
+        plt.tight_layout()
+        plt.savefig(output_filename)
+        plt.close(fig)
 
     def generate(self, output_filename: str, data, report_args: dict[str,str] = dict()):
         print("Generating Forward Projection Report")
@@ -94,6 +115,8 @@ class ForwardProjectionReport(BaseReport):
         daily_summary.to_excel(output_filename, index=False)
 
         # === Format and save as visual ===
+        graph_filename = output_filename.replace('.xlsx', '_FwdProjection.png')
+        self.graph_projection(daily_summary, graph_filename)
         
         return
     
