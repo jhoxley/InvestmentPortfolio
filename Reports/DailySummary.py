@@ -8,6 +8,7 @@ class DailySummaryReport(BaseReport):
 
     def graph_summary(self, daily_summary: pd.DataFrame, output_filename: str):
         graphDf = daily_summary[['Settle date', 'Book cost', 'Capital', 'Market value']]
+        graphDf.set_index('Settle date', inplace=True)
 
         fig,ax = plt.subplots(figsize=(12,8))
         graphDf.plot.line(ax=ax, cmap='Dark2', alpha=0.7)
@@ -27,6 +28,7 @@ class DailySummaryReport(BaseReport):
 
     def graph_returns(self, daily_summary: pd.DataFrame, output_filename: str):
         graphDf = daily_summary[['Settle date', 'Ann. ITD Portfolio Return %', '1Y Portfolio Return %', '3Y Portfolio Return %', '5Y Portfolio Return %']]
+        graphDf.set_index('Settle date', inplace=True)
 
         fig,ax = plt.subplots(figsize=(12,8))
         graphDf.plot.line(ax=ax, cmap='Dark2', alpha=0.7)

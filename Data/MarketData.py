@@ -31,6 +31,8 @@ class MarketDataApi(object):
             d3data = {'Settle date': d2.index.values, 'Close': d2.values}
             d3 = pd.DataFrame(d3data)
             d3['Close'] = d3['Close'] * pxmultiplier
+            # filter d3 to remove zero close prices. They don't make sense and more likely missing/bad data.
+            d3 = d3[d3['Close'] != 0].reset_index(drop=True)
 
             px_ccy = self.get_ticker_currency(ticker)
             if px_ccy is not None and px_ccy.upper() != 'GBP': # pxmultiplier handles pence like GBp
