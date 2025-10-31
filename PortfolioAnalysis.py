@@ -10,6 +10,7 @@
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py DailySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_DailySummary.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP.xlsx" fwd_periods=3650 periodicity="QE"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py Projected data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP.xlsx" fwd_periods=3650 periodicity="QE"
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py Current data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_Holdings.xlsx"
 
 import sys
 import yfinance as yf
@@ -17,7 +18,7 @@ import datetime as dt
 import AnalysisFuncs as af
 import DataFormatting
 import DataGeneration as dg
-from Reports import DailyDetails, MonthlySummary, QuarterlySummary, DailySummary, MultiReport, AnnualSummary,ForwardProjection
+from Reports import DailyDetails, MonthlySummary, QuarterlySummary, DailySummary, MultiReport, AnnualSummary,ForwardProjection,CurrentHoldings
 import pandas as pd
 from Data import MarketData
 import json
@@ -29,13 +30,15 @@ report_types = {
     "AnnualSummary": AnnualSummary.AnnualSummaryReport(),
     "DailySummary": DailySummary.DailySummaryReport(),
     "Projected" : ForwardProjection.ForwardProjectionReport(),
+    "Current" : CurrentHoldings.CurrentHoldingsReport(),
     "All" : MultiReport.MultiReport([
         DailyDetails.DailyDetailsReport(),
         MonthlySummary.MonthlySummaryReport(),
         QuarterlySummary.QuarterlySummaryReport(),
         AnnualSummary.AnnualSummaryReport(),
         DailySummary.DailySummaryReport(),
-        ForwardProjection.ForwardProjectionReport()
+        ForwardProjection.ForwardProjectionReport(),
+        CurrentHoldings.CurrentHoldingsReport()
     ])
 }
 
