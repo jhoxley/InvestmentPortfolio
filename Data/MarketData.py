@@ -62,6 +62,9 @@ class MarketDataApi(object):
 
     def get_time_series(self, start_date, end_date, ticker, pxmultiplier=1.0):
         cache_file = f"cache_{ticker}.parquet"
+        if start_date >= end_date:
+            print(f"Start date {start_date} is after or equal to end date {end_date}. Adjusting dates.")
+            start_date = end_date - pd.Timedelta(days=5)
         if os.path.exists(cache_file):
             df = pd.read_parquet(cache_file)
             loaded_first_date = df['Settle date'].min().to_pydatetime().date()

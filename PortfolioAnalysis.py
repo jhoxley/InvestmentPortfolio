@@ -8,7 +8,8 @@
 
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py DailyDetails data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_DailyDetails.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py DailySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_DailySummary.xlsx"
-# .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP.xlsx" fwd_periods=7300 periodicity="YE"
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP.xlsx" fwd_periods=3650 periodicity="QE"
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py Projected data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP.xlsx" fwd_periods=3650 periodicity="QE"
 
 import sys
 import yfinance as yf
@@ -108,6 +109,11 @@ for position in distinct_positions:
         positionLastTran = dt.datetime.today().date() - pd.tseries.offsets.BDay(2) # assume data is up to 2 business days old in YFinance API
 
     ds = dg.create_date_series(positionFirstTran, positionLastTran)
+
+    # hack for new positions where we dont get the 2BD history yet
+    if positionLastTran - positionFirstTran < pd.Timedelta(days=5):
+        print(f"   Skipping inclusion of new position '{position}' with insufficient history.")
+        continue
 
     # Fugly hack to handle cash positions, should be removed when we have a better way to handle cash
     if ticker == 'N/A' and position.lower() == 'cash':
