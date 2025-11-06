@@ -2,7 +2,7 @@ import pandas as pd
 import datetime as dt
 
 
-def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePrices, positionName):
+def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePrices, positionName, theme):
     """
         create_holding_dataframe
         Creates a DataFrame of holdings by merging transactions, income, date series, and close prices.
@@ -63,9 +63,10 @@ def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePric
 
     # Add static columns
     dfFinal['Position name'] = positionName
+    dfFinal['Theme'] = theme
 
     # reorder colummns
-    dfFinal = dfFinal[['Settle date', 'Position name', 'Capital', 'Quantity', 'Book cost', 'Income Qty', 'Income', 'Close', 
+    dfFinal = dfFinal[['Settle date', 'Position name', 'Theme', 'Capital', 'Quantity', 'Book cost', 'Income Qty', 'Income', 'Close', 
                        'Market value', 'Day PnL', 'ITD PnL']]   
 
     # Ensure the 'Settle date' is in datetime format
@@ -73,6 +74,7 @@ def create_holding_dataframe(dfTransactions, dfIncome, dsDateSeries, dfClosePric
 
     # Ensure the 'Position name' is a string
     dfFinal['Position name'] = dfFinal['Position name'].astype(str)
+    dfFinal['Theme'] = dfFinal['Theme'].astype(str)
 
     # Ensure numeric columns are in the correct format
     numeric_columns = ['Quantity', 'Capital', 'Book cost', 'Income Qty', 'Income', 'Close', 'Market value', 'Day PnL', 'ITD PnL']

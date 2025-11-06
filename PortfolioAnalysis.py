@@ -141,12 +141,15 @@ for position in distinct_positions:
 
     income = dfIncome[dfIncome['Position Name'] == position][['Settle date', 'Quantity', 'Value (£)']]
 
+    theme = static.get("theme", "n/a")
+
     PositionDf = DataFormatting.create_holding_dataframe(
         transactions,
         income,
         ds,
         ts,
-        position
+        position,
+        theme
     )
 
     frames.append(PositionDf)
