@@ -43,4 +43,4 @@ class CurrentHoldingsReport(BaseReport):
         return ["ITD PnL", "Daily Return %", "Weight %"]
     
     def report_name(self) -> str:
-        return "DailyDetailsReport"
+        return "CurrentHoldingsReport"

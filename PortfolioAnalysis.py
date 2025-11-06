@@ -114,8 +114,8 @@ for position in distinct_positions:
     ds = dg.create_date_series(positionFirstTran, positionLastTran)
 
     # hack for new positions where we dont get the 2BD history yet
-    if positionLastTran - positionFirstTran < pd.Timedelta(days=5):
-        print(f"   Skipping inclusion of new position '{position}' with insufficient history.")
+    if positionFirstTran > dt.datetime.today().date() - pd.tseries.offsets.BDay(2):
+        print(f"   Skipping inclusion of new position '{position}' with insufficient history. Need at least 2 business days of history, looking for data from {positionFirstTran}.")
         continue
 
     # Fugly hack to handle cash positions, should be removed when we have a better way to handle cash
