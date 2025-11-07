@@ -58,9 +58,18 @@ class DailyDetailsReport(BaseReport):
 
         # (3) calculate composite returns (ITD, 1Y, 3Y, 5Y, Ann. ITD) for each position
         daily_details = af.calculate_composite_returns(data)
+
+        # (4) prepare daily details by theme
+        daily_by_theme = daily_details.copy()
+        daily_by_theme = daily_by_theme.groupby(['Settle date', 'Theme'], as_index=False).agg({
+            'Market value': 'sum',
+            'Weight %': 'sum'
+        })
         
         # === Format and save as CSV ===
-        daily_details.to_excel(output_filename, index=False)
+        with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
+            daily_details.to_excel(writer, sheet_name='Daily Positions', index=False)
+            daily_by_theme.to_excel(writer, sheet_name='Daily by Theme', index=False)
 
         # === Format and save as visual ===
         graph_market_value_filename = output_filename.replace('.xlsx', '_MarketValueByPosition.png')
@@ -68,12 +77,6 @@ class DailyDetailsReport(BaseReport):
 
         graph_weight_filename = output_filename.replace('.xlsx', '_WeightByPosition.png')
         self.graph_weight_by_position(daily_details, graph_weight_filename, 'Position name')
-
-        daily_by_theme = daily_details.copy()
-        daily_by_theme = daily_by_theme.groupby(['Settle date', 'Theme'], as_index=False).agg({
-            'Market value': 'sum',
-            'Weight %': 'sum'
-        })
 
         graph_market_value_filename = output_filename.replace('.xlsx', '_MarketValueByTheme.png')
         self.graph_market_value_by_position(daily_by_theme, graph_market_value_filename, 'Theme')

@@ -62,10 +62,7 @@ class CurrentHoldingsReport(BaseReport):
         # (5) Sort by Market Value descending
         current_holdings = current_holdings.sort_values(by='Total PnL', ascending=False)
         
-        # === Format and save as CSV ===
-        current_holdings.to_excel(output_filename, index=False)
-
-        # === Format and save as CSV by theme ===
+        # (6) Aggregate by theme for summary
         by_theme = current_holdings.groupby('Theme').agg({
             'Book cost': 'sum',
             'Market value': 'sum',
@@ -74,10 +71,13 @@ class CurrentHoldingsReport(BaseReport):
             'Weight %': 'sum'
         }).reset_index()
 
+        # === Format and save as CSV ===
+        with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
+            current_holdings.to_excel(writer, sheet_name='Current Holdings', index=False)
+            by_theme.to_excel(writer, sheet_name='Themes', index=False)
+
         by_theme['Total return %'] = ((by_theme['Market value'] + by_theme['Total income'] - by_theme['Book cost']) / by_theme['Book cost']) * 100
         by_theme = by_theme.sort_values(by='Market value', ascending=False)
-
-        by_theme.to_excel(output_filename.replace('.xlsx', '_ByTheme.xlsx'), index=False)
 
         graph_market_value_filename = output_filename.replace('.xlsx', '_MarketValueByTheme.png')
         self.graph_market_value_by_theme(by_theme, graph_market_value_filename)
@@ -89,3 +89,4 @@ class CurrentHoldingsReport(BaseReport):
     
     def report_name(self) -> str:
         return "CurrentHoldingsReport"
+    
