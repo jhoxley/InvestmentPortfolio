@@ -6,9 +6,11 @@ import matplotlib.pyplot as plt
 
 class DailySummaryReport(BaseReport):
 
-    def graph_summary(self, daily_summary: pd.DataFrame, output_filename: str):
+    def graph_summary(self, daily_summary: pd.DataFrame, output_filename: str, days : int = -1):
         graphDf = daily_summary[['Settle date', 'Book cost', 'Capital', 'Market value']]
         graphDf.set_index('Settle date', inplace=True)
+        if days > 0:
+            graphDf = graphDf.tail(days)
 
         fig,ax = plt.subplots(figsize=(12,8))
         graphDf.plot.line(ax=ax, cmap='Dark2', alpha=0.7)
@@ -23,12 +25,14 @@ class DailySummaryReport(BaseReport):
         ax.legend(title='Position name', loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=ncols, fontsize='small')
 
         plt.tight_layout()
-        plt.savefig(output_filename)
+        plt.savefig(output_filename, dpi=300)
         plt.close(fig)
 
-    def graph_returns(self, daily_summary: pd.DataFrame, output_filename: str):
+    def graph_returns(self, daily_summary: pd.DataFrame, output_filename: str, days : int = -1):
         graphDf = daily_summary[['Settle date', 'Ann. ITD Portfolio Return %', '1Y Portfolio Return %', '3Y Portfolio Return %', '5Y Portfolio Return %']]
         graphDf.set_index('Settle date', inplace=True)
+        if days > 0:
+            graphDf = graphDf.tail(days)
 
         fig,ax = plt.subplots(figsize=(12,8))
         graphDf.plot.line(ax=ax, cmap='Dark2', alpha=0.7)
@@ -43,7 +47,7 @@ class DailySummaryReport(BaseReport):
         ax.legend(title='Return Type', loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=ncols, fontsize='small')
 
         plt.tight_layout()
-        plt.savefig(output_filename)
+        plt.savefig(output_filename, dpi=300)
         plt.close(fig)
 
     def generate(self, output_filename: str, data, report_args: dict = dict()):
@@ -85,8 +89,14 @@ class DailySummaryReport(BaseReport):
         graph_summary_filename = output_filename.replace('.xlsx', '_Summary.png')
         self.graph_summary(daily_summary, graph_summary_filename)
 
+        graph_summary_filename = output_filename.replace('.xlsx', '_Summary_Last_3yr.png')
+        self.graph_summary(daily_summary, graph_summary_filename, 52 * 5 * 3)
+
         graph_returns_filename = output_filename.replace('.xlsx', '_Returns.png')
         self.graph_returns(daily_summary, graph_returns_filename)
+
+        graph_returns_filename = output_filename.replace('.xlsx', '_Returns_Last_3yr.png')
+        self.graph_returns(daily_summary, graph_returns_filename, 52 * 5 * 3)
         
         return
     

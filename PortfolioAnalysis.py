@@ -88,6 +88,8 @@ for position in distinct_positions:
     if static.get("ignore", False):
         print(f"Skipping ignored position: {position}")
         continue
+    print(' ')
+    print('================================')
     print(f"Processing... Name: {position}, Isin: {static.get('isin','')}, Ticker: {static.get('ticker','')}")
 
     if static.get("ticker") is not None and static.get("ticker") != "":

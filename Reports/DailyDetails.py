@@ -6,10 +6,12 @@ import matplotlib.pyplot as plt
 
 class DailyDetailsReport(BaseReport):
 
-    def graph_market_value_by_position(self, daily_details: pd.DataFrame, output_filename: str, pivot_column: str):
+    def graph_market_value_by_position(self, daily_details: pd.DataFrame, output_filename: str, pivot_column: str, days: int = -1):
         graphDf = daily_details[['Settle date', pivot_column, 'Market value']]
         graphDf = graphDf.pivot(index='Settle date', columns=pivot_column, values='Market value').fillna(0)
         graphDf = graphDf.drop(columns=['Cash'], errors='ignore')  # Remove cash column if present
+        if days > 0:
+            graphDf = graphDf.tail(days)
 
         fig,ax = plt.subplots(figsize=(12,8))
         graphDf.plot.area(ax=ax, cmap='tab20', alpha=0.7)
@@ -27,10 +29,12 @@ class DailyDetailsReport(BaseReport):
         plt.savefig(output_filename, dpi=300)
         plt.close(fig)
 
-    def graph_weight_by_position(self, daily_details: pd.DataFrame, output_filename: str, pivot_column: str):
+    def graph_weight_by_position(self, daily_details: pd.DataFrame, output_filename: str, pivot_column: str, days: int = -1):
         graphDf = daily_details[['Settle date', pivot_column, 'Weight %']]
         graphDf = graphDf.pivot(index='Settle date', columns=pivot_column, values='Weight %').fillna(0)
         graphDf = graphDf.drop(columns=['Cash'], errors='ignore')  # Remove cash column if present
+        if days > 0:
+            graphDf = graphDf.tail(days)
         
         fig,ax = plt.subplots(figsize=(12,8))
         graphDf.plot.area(ax=ax, cmap='tab20', alpha=0.7)
@@ -75,14 +79,26 @@ class DailyDetailsReport(BaseReport):
         graph_market_value_filename = output_filename.replace('.xlsx', '_MarketValueByPosition.png')
         self.graph_market_value_by_position(daily_details, graph_market_value_filename, 'Position name')
 
+        graph_market_value_filename = output_filename.replace('.xlsx', '_MarketValueByPosition_Last_3yr.png')
+        self.graph_market_value_by_position(daily_details, graph_market_value_filename, 'Position name', 52 * 5 * 3)
+
         graph_weight_filename = output_filename.replace('.xlsx', '_WeightByPosition.png')
         self.graph_weight_by_position(daily_details, graph_weight_filename, 'Position name')
+
+        graph_weight_filename = output_filename.replace('.xlsx', '_WeightByPosition_Last_3yr.png')
+        self.graph_weight_by_position(daily_details, graph_weight_filename, 'Position name', 52 * 5 * 3)
 
         graph_market_value_filename = output_filename.replace('.xlsx', '_MarketValueByTheme.png')
         self.graph_market_value_by_position(daily_by_theme, graph_market_value_filename, 'Theme')
 
+        graph_market_value_filename = output_filename.replace('.xlsx', '_MarketValueByTheme_Last_3yr.png')
+        self.graph_market_value_by_position(daily_by_theme, graph_market_value_filename, 'Theme', 52 * 5 * 3)
+
         graph_weight_filename = output_filename.replace('.xlsx', '_WeightByTheme.png')
         self.graph_weight_by_position(daily_by_theme, graph_weight_filename, 'Theme')
+
+        graph_weight_filename = output_filename.replace('.xlsx', '_WeightByTheme_Last_3yr.png')
+        self.graph_weight_by_position(daily_by_theme, graph_weight_filename, 'Theme', 52 * 5 * 3)
         
         return
     
