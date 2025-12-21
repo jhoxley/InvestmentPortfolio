@@ -24,7 +24,7 @@ class ForwardProjectionReport(BaseReport):
         ax.legend(title='Return Type', loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=ncols, fontsize='small')
 
         plt.tight_layout()
-        plt.savefig(output_filename)
+        plt.savefig(output_filename, dpi=300)
         plt.close(fig)
 
     def generate(self, output_filename: str, data, report_args: dict[str,str] = dict()):
