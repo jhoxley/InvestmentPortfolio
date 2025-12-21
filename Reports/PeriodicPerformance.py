@@ -45,9 +45,7 @@ class PeriodicPerformanceReport(BaseReport):
         pivot_df = data.pivot(index='Settle date', columns=pivot_column, values=['Pivot value'])
 
         # Aggregate to desired periodicity
-        pivot_df = pivot_df.groupby(pd.Grouper(key='Settle date', freq=granularity)).agg({
-            'Pivot value': 'last'
-        }).reset_index()        
+        pivot_df = pivot_df.groupby(pd.Grouper(freq=granularity)).last()
 
         pivot_df = pivot_df.drop(columns=['Cash'], errors='ignore')  # Remove cash column if present
         
@@ -60,8 +58,8 @@ class PeriodicPerformanceReport(BaseReport):
         ax.set_title(f'Periodic {"Performance" if not pnl else "PnL"} by {pivot_column} - {granularity} Granularity - {"all" if lb == -1 else f"{lb} days"} history')
         ax.set_ylabel('PnL (£)' if pnl else 'Return (%)')   
         ax.set_xlabel('Date')
-        ax.grid(axis='y', linestyle='--', alpha=0.7, linewidth=0.8, which='major')
-        ax.grid(axis='y', linestyle='--', alpha=0.6, linewidth=0.7, which='minor')
+        ax.grid(axis='y', linestyle='--', alpha=0.7, linewidth=0.8, which='both')
+        #ax.grid(axis='y', linestyle='--', alpha=0.6, linewidth=0.7, which='minor')
 
         ncols = min(len(data.columns), 2)
         ax.legend(title=pivot_column, loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=ncols, fontsize='small')
