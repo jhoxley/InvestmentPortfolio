@@ -41,7 +41,7 @@ def calculate_position_weights(df):
 
 def calculate_itd_pnl(df):
     # Calculate ITD PnL as Market Value - Book Cost + Income (aka Capital)
-    df['ITD PnL'] = df['Market value'] - df['Capital']
+    df['ITD PnL'] = df['Market value'] - df['Book cost'] + df['Income']
     return df
 
 # create a python function given a dataframe returns the cumulative quantity and value by settle date
