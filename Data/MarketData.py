@@ -89,6 +89,7 @@ class MarketDataApi(object):
         else:
             print(f"No cache found for {ticker}. Fetching data...")
             df = self.get_time_series_internal(start_date,end_date,ticker,pxmultiplier)
-            df.to_parquet(cache_file)
+            if not ticker == 'N/A':
+                df.to_parquet(cache_file)
             print("Saved DataFrame to cache.")
         return df
