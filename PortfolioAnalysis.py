@@ -8,7 +8,7 @@
 
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py DailyDetails data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_DailyDetails.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py DailySummary data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_DailySummary.xlsx"
-# .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP.xlsx" fwd_periods=3650 periodicity="QE"
+# .\.venv\Scripts\Python .\PortfolioAnalysis.py All data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP\SIPP.xlsx" fwd_periods=3650 periodicity="ME"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py Projected data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP.xlsx" fwd_periods=3650 periodicity="QE"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py Current data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_Holdings.xlsx"
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py Performance data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_Holdings.xlsx"
@@ -137,6 +137,11 @@ for position in distinct_positions:
         ts['Close'] = pd.to_numeric(ts['Close'], errors='coerce').fillna(0)
         multiplier = static.get("multiplier", 1.0)
         ts['Close'] = ts['Close'] * multiplier
+        days_gap =  (positionLastTran.date() - ts['Settle date'].max().date()).days
+        if ticker != '' and days_gap > 3:
+            print(f'Loaded price data from file but {days_gap} days missing. Attempting query with {ticker} from YFinance to fill gap.')
+            ts2 = mdApi.get_time_series(pd.to_datetime(ts['Settle date'].max().date()), pd.to_datetime(positionLastTran), ticker, multiplier)
+            ts = pd.concat([ts, ts2]).drop_duplicates(subset=['Settle date']).reset_index(drop=True)
     else:
         multiplier = static.get("multiplier", 1.0)
         ts = mdApi.get_time_series(positionFirstTran, positionLastTran, ticker, multiplier)    
