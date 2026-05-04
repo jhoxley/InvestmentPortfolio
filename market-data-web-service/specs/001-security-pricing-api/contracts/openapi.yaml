@@ -1,0 +1,245 @@
+openapi: 3.1.0
+info:
+  title: Market Data API
+  description: >
+    Locally hosted security pricing API backed by Yahoo Finance (yfinance).
+    Returns current and historical closing prices for individual securities
+    identified by standard Yahoo Finance ticker symbols.
+  version: 0.1.0
+  contact:
+    name: Investment Portfolio Project
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+
+paths:
+  /securities/{ticker}/price:
+    get:
+      summary: Get current price for a security
+      description: >
+        Returns the current (or most recently available) price for the given
+        ticker symbol, along with currency, timestamp, and market status.
+        Zero or null prices from the upstream source are treated as data
+        unavailability and return 404.
+      operationId: get_current_price
+      tags:
+        - Securities
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          description: >
+            Yahoo Finance ticker symbol (e.g. "AAPL" for Apple Inc.,
+            "VOD.L" for Vodafone on the London Stock Exchange).
+          schema:
+            type: string
+            minLength: 1
+            example: AAPL
+      responses:
+        '200':
+          description: Current price data retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceResponse'
+              example:
+                ticker: AAPL
+                price: 189.30
+                currency: USD
+                timestamp: "2026-05-04T16:00:00Z"
+                market_status: closed
+        '404':
+          description: >
+            Security not found, delisted, or no valid price data available
+            (e.g. all prices returned by upstream are zero or null).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "No valid price data found for ticker 'INVALIDXYZ99'"
+        '422':
+          description: Validation error — ticker contains invalid characters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Upstream data source (Yahoo Finance) is unreachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Upstream data provider is currently unavailable. Please try again later."
+
+  /securities/{ticker}/history:
+    get:
+      summary: Get historical daily price series for a security
+      description: >
+        Returns an ordered time series of daily closing prices for the given
+        ticker symbol over the requested date range. Defaults to the trailing
+        30 calendar days when no dates are specified.
+      operationId: get_price_history
+      tags:
+        - Securities
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          description: Yahoo Finance ticker symbol
+          schema:
+            type: string
+            minLength: 1
+            example: MSFT
+        - name: from
+          in: query
+          required: false
+          description: Start date (YYYY-MM-DD). Defaults to 30 calendar days ago.
+          schema:
+            type: string
+            format: date
+            example: "2024-01-01"
+        - name: to
+          in: query
+          required: false
+          description: End date (YYYY-MM-DD). Defaults to today.
+          schema:
+            type: string
+            format: date
+            example: "2024-03-31"
+      responses:
+        '200':
+          description: Historical price series retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceHistoryResponse'
+              example:
+                ticker: MSFT
+                currency: USD
+                prices:
+                  - date: "2024-01-02"
+                    close: 374.02
+                  - date: "2024-01-03"
+                    close: 370.87
+        '404':
+          description: >
+            Security not found or no valid price data available for the
+            requested date range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: >
+            Validation error — e.g. "from" date is after "to" date, or
+            ticker contains invalid characters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "'from' date (2024-06-01) must not be after 'to' date (2024-01-01)"
+        '503':
+          description: Upstream data source (Yahoo Finance) is unreachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    PriceResponse:
+      type: object
+      description: Current (or most recent) price for a single security
+      required:
+        - ticker
+        - price
+        - currency
+        - timestamp
+        - market_status
+      properties:
+        ticker:
+          type: string
+          description: The requested ticker symbol
+          example: AAPL
+        price:
+          type: number
+          format: double
+          description: Current or most recent closing price. Always > 0.
+          exclusiveMinimum: 0
+          example: 189.30
+        currency:
+          type: string
+          description: ISO 4217 currency code (e.g. USD, GBp)
+          example: USD
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of the price observation
+          example: "2026-05-04T16:00:00Z"
+        market_status:
+          type: string
+          enum:
+            - open
+            - closed
+          description: Whether the originating market is currently open or closed
+          example: closed
+
+    PricePoint:
+      type: object
+      description: A single daily closing price observation
+      required:
+        - date
+        - close
+      properties:
+        date:
+          type: string
+          format: date
+          description: Trading date in YYYY-MM-DD format
+          example: "2024-01-02"
+        close:
+          type: number
+          format: double
+          description: Closing price for this trading date. Always > 0.
+          exclusiveMinimum: 0
+          example: 374.02
+
+    PriceHistoryResponse:
+      type: object
+      description: Historical daily closing prices for a single security
+      required:
+        - ticker
+        - currency
+        - prices
+      properties:
+        ticker:
+          type: string
+          description: The requested ticker symbol
+          example: MSFT
+        currency:
+          type: string
+          description: ISO 4217 currency code
+          example: USD
+        prices:
+          type: array
+          description: Chronologically ascending list of daily closing prices
+          items:
+            $ref: '#/components/schemas/PricePoint'
+
+    ErrorResponse:
+      type: object
+      description: Structured error response for 4xx and 5xx status codes
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Human-readable description of the error
+          example: "No valid price data found for ticker 'INVALIDXYZ99'"
+        code:
+          type: string
+          description: Optional machine-readable error code
+          example: "TICKER_NOT_FOUND"
