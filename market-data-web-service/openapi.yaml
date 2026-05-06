@@ -1,0 +1,181 @@
+openapi: 3.1.0
+info:
+  title: Market Data API
+  description: Locally hosted security pricing API backed by Yahoo Finance (yfinance).
+  version: 0.1.0
+paths:
+  /securities/{ticker}/price:
+    get:
+      tags:
+      - Securities
+      summary: Get Current Price
+      operationId: get_current_price_securities__ticker__price_get
+      parameters:
+      - name: ticker
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          pattern: ^[A-Za-z0-9.\-\^=]+$
+          title: Ticker
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /securities/{ticker}/history:
+    get:
+      tags:
+      - Securities
+      summary: Get Price History
+      operationId: get_price_history_securities__ticker__history_get
+      parameters:
+      - name: ticker
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          pattern: ^[A-Za-z0-9.\-\^=]+$
+          title: Ticker
+      - name: from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: From
+      - name: to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: To
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceHistoryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    PriceHistoryResponse:
+      properties:
+        ticker:
+          type: string
+          title: Ticker
+        currency:
+          type: string
+          title: Currency
+        prices:
+          items:
+            $ref: '#/components/schemas/PricePoint'
+          type: array
+          title: Prices
+      type: object
+      required:
+      - ticker
+      - currency
+      - prices
+      title: PriceHistoryResponse
+    PricePoint:
+      properties:
+        date:
+          type: string
+          format: date
+          title: Date
+        close:
+          type: number
+          exclusiveMinimum: 0.0
+          title: Close
+      type: object
+      required:
+      - date
+      - close
+      title: PricePoint
+    PriceResponse:
+      properties:
+        ticker:
+          type: string
+          title: Ticker
+        price:
+          type: number
+          exclusiveMinimum: 0.0
+          title: Price
+        currency:
+          type: string
+          title: Currency
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        market_status:
+          type: string
+          enum:
+          - open
+          - closed
+          title: Market Status
+      type: object
+      required:
+      - ticker
+      - price
+      - currency
+      - timestamp
+      - market_status
+      title: PriceResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
