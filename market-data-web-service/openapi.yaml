@@ -145,6 +145,10 @@ components:
           - open
           - closed
           title: Market Status
+        as_of_date:
+          type: string
+          format: date
+          title: As Of Date
       type: object
       required:
       - ticker
@@ -152,6 +156,7 @@ components:
       - currency
       - timestamp
       - market_status
+      - as_of_date
       title: PriceResponse
     ValidationError:
       properties:

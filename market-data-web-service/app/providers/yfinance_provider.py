@@ -17,24 +17,33 @@ class YFinanceProvider(PricingProvider):
     def get_current_price(self, ticker: str) -> dict[str, object]:
         try:
             t = yf.Ticker(ticker)
-            info = t.fast_info
+            df = t.history(period="5d")
         except _NETWORK_ERRORS as exc:
             raise ProviderUnavailableError() from exc
         except Exception as exc:
             raise DataNotFoundError(ticker) from exc
 
+        if df is None or df.empty:
+            raise DataNotFoundError(ticker)
+
+        df = df[df["Close"] > 0]
+        if df.empty:
+            raise DataNotFoundError(ticker)
+
         try:
-            price = info.last_price
-            currency = getattr(info, "currency", None)
-            market_state = getattr(info, "market_state", None)
+            last_row = df.iloc[-1]
+            price = float(last_row["Close"])
+            as_of_date: date = df.index[-1].date()
+            currency = getattr(t.fast_info, "currency", None)
+            market_state: str | None = t.info.get("marketState")
+        except _NETWORK_ERRORS as exc:
+            raise ProviderUnavailableError() from exc
         except Exception as exc:
             raise DataNotFoundError(ticker) from exc
 
-        if price is None or price <= 0:
-            raise DataNotFoundError(ticker)
-
         return {
-            "price": float(price),
+            "price": price,
+            "as_of_date": as_of_date,
             "currency": str(currency) if currency else "USD",
             "market_state": market_state,
         }

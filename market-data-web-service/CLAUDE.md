@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at:
-specs/001-security-pricing-api/plan.md
+specs/002-price-as-of-date/plan.md
 <!-- SPECKIT END -->

@@ -15,6 +15,7 @@ class PriceResponse(BaseModel):
     currency: str
     timestamp: datetime
     market_status: Literal["open", "closed"]
+    as_of_date: date
 
 
 class PriceHistoryResponse(BaseModel):

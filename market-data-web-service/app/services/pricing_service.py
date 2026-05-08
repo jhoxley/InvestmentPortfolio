@@ -12,13 +12,14 @@ class PricingService:
     def get_current_price(self, ticker: str) -> PriceResponse:
         raw = self._provider.get_current_price(ticker)
         market_state = raw.get("market_state")
-        market_status = "open" if str(market_state).lower() in ("open", "regular") else "closed"
+        market_status = "open" if str(market_state).upper() in ("OPEN", "REGULAR") else "closed"
         return PriceResponse(
             ticker=ticker,
             price=float(raw["price"]),  # type: ignore[arg-type]
             currency=str(raw["currency"]),
             timestamp=datetime.now(tz=timezone.utc),
             market_status=market_status,  # type: ignore[arg-type]
+            as_of_date=raw["as_of_date"],  # type: ignore[arg-type]
         )
 
     def get_price_history(

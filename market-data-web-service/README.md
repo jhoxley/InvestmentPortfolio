@@ -36,13 +36,17 @@ Tickers follow Yahoo Finance conventions:
 
 ### Implemented Specification
 
-The service implements all three user stories from the feature specification (`specs/001-security-pricing-api/spec.md`):
+The service implements all user stories from two feature specifications:
 
+**Feature 001 — Security Pricing API** (`specs/001-security-pricing-api/spec.md`):
 - **US1 — Current Price** (P1 MVP): `GET /securities/{ticker}/price`
 - **US2 — Historical Price Series** (P2): `GET /securities/{ticker}/history`
 - **US3 — Error Handling** (P3): Structured 404/422/503 responses for all failure cases
 
-All acceptance scenarios are implemented as executable BDD tests (`pytest tests/ -v`).
+**Feature 002 — As-Of Date on Current Price** (`specs/002-price-as-of-date/spec.md`):
+- **US1 — Know What Date a Price Is For** (P1): `as_of_date` field added to the current price response, reconciled with the most recent entry in the history endpoint
+
+All 12 acceptance scenarios are implemented as executable BDD tests (`pytest tests/ -v`).
 
 ---
 
@@ -95,7 +99,8 @@ Example response:
   "price": 189.30,
   "currency": "USD",
   "timestamp": "2026-05-06T09:15:00Z",
-  "market_status": "closed"
+  "market_status": "closed",
+  "as_of_date": "2026-05-06"
 }
 ```
 
@@ -138,7 +143,7 @@ All errors return a JSON body with a `detail` field:
 pytest tests/ -v
 ```
 
-All 9 BDD scenarios (3 per user story) should pass. Live network calls are made for US1 and US2 scenarios.
+All 12 BDD scenarios (3 per user story) should pass. Live network calls are made for US1 and US2 scenarios.
 
 ### Checking Logs
 
@@ -165,7 +170,7 @@ BASE_URL = "http://localhost:8000"
 response = httpx.get(f"{BASE_URL}/securities/AAPL/price")
 response.raise_for_status()
 data = response.json()
-print(data["price"], data["currency"], data["market_status"])
+print(data["price"], data["currency"], data["market_status"], data["as_of_date"])
 
 # Historical prices
 response = httpx.get(
