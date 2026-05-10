@@ -27,3 +27,12 @@ class PriceHistoryResponse(BaseModel):
 class ErrorResponse(BaseModel):
     detail: str
     code: str | None = None
+
+
+class CacheDeleteResponse(BaseModel):
+    ticker: str
+    deleted: bool
+
+
+class CacheClearResponse(BaseModel):
+    deleted_count: int

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& \".specify\\\\scripts\\\\powershell\\\\check-prerequisites.ps1\" -Json -PathsOnly)",
+      "PowerShell(& \".specify\\\\scripts\\\\powershell\\\\setup-plan.ps1\" -Json)",
+      "PowerShell(& \".specify\\\\scripts\\\\powershell\\\\setup-tasks.ps1\" -Json)",
+      "PowerShell(& \".specify\\\\scripts\\\\powershell\\\\check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks 2>$null)",
+      "Bash(.venv/Scripts/python -m mypy app/config.py app/cache/repository.py app/providers/cached_provider.py app/api/cache.py app/models/pricing.py app/api/securities.py app/main.py)",
+      "Bash(.venv/Scripts/python -m ruff check app/config.py app/cache/ app/providers/cached_provider.py app/api/cache.py app/models/pricing.py app/api/securities.py app/main.py tests/conftest.py tests/steps/cache_full_hit_steps.py tests/steps/cache_partial_hit_steps.py tests/steps/cache_miss_steps.py tests/steps/cache_management_steps.py)",
+      "Bash(.venv/Scripts/ruff check *)",
+      "Bash(python -m ruff --version)",
+      "Bash(pip show *)",
+      "Bash(/c/GitHub/JHoxley/InvestmentPortfolio/market-data-web-service/.venv/Scripts/pip install *)"
+    ]
+  }
+}

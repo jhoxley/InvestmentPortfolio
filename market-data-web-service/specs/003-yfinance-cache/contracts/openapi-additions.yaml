@@ -1,0 +1,121 @@
+# OpenAPI Additions: YFinance Price Data Cache
+# These paths and schemas are to be merged into the root openapi.yaml
+# Target file: market-data-web-service/openapi.yaml
+# Operation: additive — no existing paths or schemas are modified
+
+openapi: 3.1.0
+
+# --- New Paths ---
+
+paths:
+  /cache/{ticker}:
+    delete:
+      summary: Delete cache entry for a single ticker
+      description: >
+        Removes the locally cached price data for the specified ticker symbol.
+        Returns 200 whether or not a cache entry existed (idempotent).
+        After deletion, the next price history request for this ticker will
+        fetch fresh data from Yahoo Finance.
+      operationId: delete_ticker_cache
+      tags:
+        - Cache Management
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          description: >
+            Yahoo Finance ticker symbol whose cache entry should be removed
+            (e.g. "AAPL", "VOD.L").
+          schema:
+            type: string
+            minLength: 1
+            example: AAPL
+      responses:
+        '200':
+          description: Cache operation completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheDeleteResponse'
+              examples:
+                deleted:
+                  summary: Cache entry existed and was removed
+                  value:
+                    ticker: AAPL
+                    deleted: true
+                not_found:
+                  summary: No cache entry existed for this ticker
+                  value:
+                    ticker: XYZ
+                    deleted: false
+        '422':
+          description: Validation error — ticker contains invalid characters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cache:
+    delete:
+      summary: Clear all cache entries
+      description: >
+        Removes all locally cached price data for all tickers.
+        Returns the number of entries deleted. If the cache is already empty,
+        returns 0 with no error.
+      operationId: clear_all_cache
+      tags:
+        - Cache Management
+      responses:
+        '200':
+          description: All cache entries removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheClearResponse'
+              examples:
+                cleared:
+                  summary: Three entries deleted
+                  value:
+                    deleted_count: 3
+                empty:
+                  summary: Cache was already empty
+                  value:
+                    deleted_count: 0
+
+# --- New Component Schemas ---
+
+components:
+  schemas:
+    CacheDeleteResponse:
+      type: object
+      description: >
+        Result of a DELETE /cache/{ticker} request. Indicates whether a
+        cache entry was found and removed for the specified ticker.
+      required:
+        - ticker
+        - deleted
+      properties:
+        ticker:
+          type: string
+          description: The ticker symbol that was targeted
+          example: AAPL
+        deleted:
+          type: boolean
+          description: >
+            true if a cache entry existed and was removed;
+            false if no cache entry was found
+          example: true
+
+    CacheClearResponse:
+      type: object
+      description: >
+        Result of a DELETE /cache request. Reports the number of cache
+        entries that were removed.
+      required:
+        - deleted_count
+      properties:
+        deleted_count:
+          type: integer
+          minimum: 0
+          description: Number of cache entries (files) removed
+          example: 3

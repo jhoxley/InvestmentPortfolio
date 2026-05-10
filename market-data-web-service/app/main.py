@@ -6,7 +6,8 @@ import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.api import securities
+from app.api import cache, securities
+from app.config import load_settings
 from app.exceptions import DataNotFoundError, InvalidTickerError, ProviderUnavailableError
 from app.logging_config import setup_logging
 from app.models.pricing import ErrorResponse
@@ -17,6 +18,9 @@ logger = structlog.get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
+    settings = load_settings()
+    settings.cache.directory.mkdir(parents=True, exist_ok=True)
+    logger.info("cache_dir_ready", path=str(settings.cache.directory))
     yield
 
 
@@ -28,10 +32,13 @@ app = FastAPI(
 )
 
 app.include_router(securities.router)
+app.include_router(cache.router)
 
 
 @app.middleware("http")
-async def log_requests(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+async def log_requests(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     start = time.time()
     response = await call_next(request)
     duration_ms = round((time.time() - start) * 1000, 2)
@@ -50,16 +57,22 @@ async def data_not_found_handler(request: Request, exc: DataNotFoundError) -> JS
     logger.error("data_not_found", ticker=exc.ticker, detail=exc.message)
     return JSONResponse(
         status_code=404,
-        content=ErrorResponse(detail=exc.message, code="TICKER_NOT_FOUND").model_dump(exclude_none=True),
+        content=ErrorResponse(detail=exc.message, code="TICKER_NOT_FOUND").model_dump(
+            exclude_none=True
+        ),
     )
 
 
 @app.exception_handler(ProviderUnavailableError)
-async def provider_unavailable_handler(request: Request, exc: ProviderUnavailableError) -> JSONResponse:
+async def provider_unavailable_handler(
+    request: Request, exc: ProviderUnavailableError
+) -> JSONResponse:
     logger.error("provider_unavailable", detail=exc.message)
     return JSONResponse(
         status_code=503,
-        content=ErrorResponse(detail=exc.message, code="PROVIDER_UNAVAILABLE").model_dump(exclude_none=True),
+        content=ErrorResponse(detail=exc.message, code="PROVIDER_UNAVAILABLE").model_dump(
+            exclude_none=True
+        ),
     )
 
 
@@ -68,5 +81,7 @@ async def invalid_ticker_handler(request: Request, exc: InvalidTickerError) -> J
     logger.error("invalid_ticker", ticker=exc.ticker, detail=exc.message)
     return JSONResponse(
         status_code=422,
-        content=ErrorResponse(detail=exc.message, code="INVALID_TICKER").model_dump(exclude_none=True),
+        content=ErrorResponse(detail=exc.message, code="INVALID_TICKER").model_dump(
+            exclude_none=True
+        ),
     )

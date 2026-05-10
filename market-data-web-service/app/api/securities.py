@@ -2,7 +2,10 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Path, Query
 
+from app.cache.repository import CacheRepository
+from app.config import Settings, get_settings
 from app.models.pricing import PriceHistoryResponse, PriceResponse
+from app.providers.cached_provider import CachedPricingProvider
 from app.providers.yfinance_provider import YFinanceProvider
 from app.services.pricing_service import PricingService
 
@@ -11,8 +14,10 @@ router = APIRouter(prefix="/securities", tags=["Securities"])
 _TICKER_PATTERN = r"^[A-Za-z0-9.\-\^=]+$"
 
 
-def get_pricing_service() -> PricingService:
-    return PricingService(provider=YFinanceProvider())
+def get_pricing_service(settings: Settings = Depends(get_settings)) -> PricingService:
+    repo = CacheRepository(settings.cache.directory)
+    provider = CachedPricingProvider(YFinanceProvider(), repo)
+    return PricingService(provider=provider)
 
 
 @router.get("/{ticker}/price", response_model=PriceResponse)

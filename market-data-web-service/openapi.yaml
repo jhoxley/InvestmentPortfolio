@@ -78,6 +78,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /cache/{ticker}:
+    delete:
+      tags:
+      - Cache Management
+      summary: Delete Ticker Cache
+      operationId: delete_ticker_cache
+      parameters:
+      - name: ticker
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          title: Ticker
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheDeleteResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /cache:
+    delete:
+      tags:
+      - Cache Management
+      summary: Clear All Cache
+      operationId: clear_all_cache
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheClearResponse'
 components:
   schemas:
     HTTPValidationError:
@@ -158,6 +198,29 @@ components:
       - market_status
       - as_of_date
       title: PriceResponse
+    CacheDeleteResponse:
+      properties:
+        ticker:
+          type: string
+          title: Ticker
+        deleted:
+          type: boolean
+          title: Deleted
+      type: object
+      required:
+      - ticker
+      - deleted
+      title: CacheDeleteResponse
+    CacheClearResponse:
+      properties:
+        deleted_count:
+          type: integer
+          minimum: 0
+          title: Deleted Count
+      type: object
+      required:
+      - deleted_count
+      title: CacheClearResponse
     ValidationError:
       properties:
         loc:
