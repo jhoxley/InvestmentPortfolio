@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from app.exceptions import InvalidTickerError
 from app.models.pricing import PriceHistoryResponse, PricePoint, PriceResponse
@@ -17,7 +17,7 @@ class PricingService:
             ticker=ticker,
             price=float(raw["price"]),  # type: ignore[arg-type]
             currency=str(raw["currency"]),
-            timestamp=datetime.now(tz=timezone.utc),
+            timestamp=datetime.now(tz=UTC),
             market_status=market_status,  # type: ignore[arg-type]
             as_of_date=raw["as_of_date"],  # type: ignore[arg-type]
         )
@@ -28,7 +28,7 @@ class PricingService:
         from_date: date | None = None,
         to_date: date | None = None,
     ) -> PriceHistoryResponse:
-        today = datetime.now(tz=timezone.utc).date()
+        today = datetime.now(tz=UTC).date()
         resolved_to = to_date or today
         resolved_from = from_date or (today - timedelta(days=30))
 
@@ -42,13 +42,12 @@ class PricingService:
 
         currency = "USD"
         try:
-            import yfinance as yf
-            info = yf.Ticker(ticker).fast_info
-            c = getattr(info, "currency", None)
-            if c:
-                currency = str(c)
+            price_data = self._provider.get_current_price(ticker)
+            c = price_data.get("currency")
+            if isinstance(c, str) and c:
+                currency = c
         except Exception:
             pass
 
-        prices = [PricePoint(date=d, close=c) for d, c in raw]
+        prices = [PricePoint(date=d, close=v) for d, v in raw]
         return PriceHistoryResponse(ticker=ticker, currency=currency, prices=prices)
