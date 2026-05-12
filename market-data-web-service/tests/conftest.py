@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.providers import PricingProvider
+from app.providers.identifier_provider import IdentifierProvider
 
 
 @pytest.fixture()
@@ -100,6 +101,23 @@ def client_with_fx(
     app.dependency_overrides[get_pricing_service] = override_service
     app.dependency_overrides[get_currency_service] = override_currency_service
     app.dependency_overrides[get_fx_provider] = override_fx_provider
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def mock_identifier_provider() -> MagicMock:
+    return MagicMock(spec=IdentifierProvider)
+
+
+@pytest.fixture()
+def client_with_identifiers(
+    mock_identifier_provider: MagicMock,
+) -> Generator[TestClient, None, None]:
+    from app.api.identifiers import get_identifier_provider
+
+    app.dependency_overrides[get_identifier_provider] = lambda: mock_identifier_provider
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

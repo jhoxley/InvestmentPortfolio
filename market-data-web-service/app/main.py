@@ -6,12 +6,14 @@ import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.api import cache, fx, securities
+from app.api import cache, fx, identifiers, securities
 from app.config import load_settings
 from app.exceptions import (
     CurrencyUnavailableError,
     DataNotFoundError,
     FxAlignmentError,
+    IdentifierFormatError,
+    IdentifierNotFoundError,
     InvalidCurrencyError,
     InvalidCurrencyPairError,
     InvalidTickerError,
@@ -42,6 +44,7 @@ app = FastAPI(
 app.include_router(securities.router)
 app.include_router(cache.router)
 app.include_router(fx.router)
+app.include_router(identifiers.router)
 
 
 @app.middleware("http")
@@ -148,6 +151,32 @@ async def currency_unavailable_handler(
     return JSONResponse(
         status_code=404,
         content=ErrorResponse(detail=exc.message, code="CURRENCY_UNAVAILABLE").model_dump(
+            exclude_none=True
+        ),
+    )
+
+
+@app.exception_handler(IdentifierFormatError)
+async def identifier_format_handler(
+    request: Request, exc: IdentifierFormatError
+) -> JSONResponse:
+    logger.warning("identifier_format_error", identifier=exc.identifier, detail=exc.message)
+    return JSONResponse(
+        status_code=422,
+        content=ErrorResponse(detail=exc.message, code="IDENTIFIER_FORMAT_ERROR").model_dump(
+            exclude_none=True
+        ),
+    )
+
+
+@app.exception_handler(IdentifierNotFoundError)
+async def identifier_not_found_handler(
+    request: Request, exc: IdentifierNotFoundError
+) -> JSONResponse:
+    logger.error("identifier_not_found", identifier=exc.identifier, detail=exc.message)
+    return JSONResponse(
+        status_code=404,
+        content=ErrorResponse(detail=exc.message, code="IDENTIFIER_NOT_FOUND").model_dump(
             exclude_none=True
         ),
     )

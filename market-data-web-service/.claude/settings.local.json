@@ -10,7 +10,11 @@
       "Bash(.venv/Scripts/ruff check *)",
       "Bash(python -m ruff --version)",
       "Bash(pip show *)",
-      "Bash(/c/GitHub/JHoxley/InvestmentPortfolio/market-data-web-service/.venv/Scripts/pip install *)"
+      "Bash(/c/GitHub/JHoxley/InvestmentPortfolio/market-data-web-service/.venv/Scripts/pip install *)",
+      "PowerShell(Set-Content *)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:ranaroussi.github.io)"
     ]
   }
 }

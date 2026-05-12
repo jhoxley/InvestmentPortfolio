@@ -1,0 +1,160 @@
+openapi: 3.1.0
+info:
+  title: Identifier Lookup Contract
+  description: >
+    Contract for the identifier-to-ticker lookup endpoint.
+    This document defines the API surface for Feature 005 and is the authoritative
+    reference for openapi.yaml additions.
+  version: 0.1.0
+
+paths:
+  /identifiers/{identifier}:
+    get:
+      tags:
+        - Identifiers
+      summary: Resolve Identifier to Ticker
+      description: >
+        Accepts a security identifier (ISIN, CUSIP, or SEDOL) and returns the
+        corresponding ticker symbol, security name, and exchange as provided by
+        the underlying data source.
+
+        If no type hint is provided, the identifier type is auto-detected from
+        the structural format of the value. The caller may optionally supply a
+        type hint to skip auto-detection.
+      operationId: resolve_identifier_to_ticker
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: >
+            The security identifier to resolve. Accepted formats:
+            ISIN (12 chars, ISO 3166-1 country prefix),
+            CUSIP (9 alphanumeric chars),
+            SEDOL (6–7 alphanumeric chars).
+            The value is normalised to uppercase before processing.
+          schema:
+            type: string
+            minLength: 1
+            example: US0378331005
+        - name: type
+          in: query
+          required: false
+          description: >
+            Optional type hint. When provided, the identifier is validated against
+            the specified format only; auto-detection is skipped.
+          schema:
+            type: string
+            enum:
+              - ISIN
+              - CUSIP
+              - SEDOL
+            example: ISIN
+      responses:
+        '200':
+          description: Identifier resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TickerResolutionResponse'
+              examples:
+                isin_apple:
+                  summary: Apple Inc. ISIN resolved
+                  value:
+                    identifier: US0378331005
+                    identifier_type: ISIN
+                    ticker: AAPL
+                    security_name: Apple Inc.
+                    exchange: NMS
+        '404':
+          description: >
+            Identifier is validly formatted but could not be resolved to a ticker
+            by the underlying data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                not_found:
+                  summary: ISIN not found
+                  value:
+                    detail: "Identifier 'US0000000000' could not be resolved to a ticker."
+                    code: IDENTIFIER_NOT_FOUND
+        '422':
+          description: >
+            Identifier does not match any supported format, or it does not match
+            the format for the explicitly provided type hint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_format:
+                  summary: Unrecognised format
+                  value:
+                    detail: "Identifier 'NOT-VALID-FORMAT' does not match ISIN, CUSIP, or SEDOL format."
+                    code: IDENTIFIER_FORMAT_ERROR
+        '503':
+          description: Upstream data provider is temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                provider_down:
+                  summary: Provider unavailable
+                  value:
+                    detail: "Upstream data provider is currently unavailable. Please try again later."
+                    code: PROVIDER_UNAVAILABLE
+
+components:
+  schemas:
+    TickerResolutionResponse:
+      type: object
+      required:
+        - identifier
+        - identifier_type
+        - ticker
+        - security_name
+        - exchange
+      properties:
+        identifier:
+          type: string
+          description: The original identifier value, normalised to uppercase.
+          example: US0378331005
+        identifier_type:
+          type: string
+          enum:
+            - ISIN
+            - CUSIP
+            - SEDOL
+          description: The detected or caller-confirmed identifier type.
+          example: ISIN
+        ticker:
+          type: string
+          description: Resolved ticker symbol as returned by the underlying data source.
+          example: AAPL
+        security_name:
+          type: string
+          description: >
+            Security name as returned by the underlying data source.
+            May be a short name or long name depending on availability.
+          example: Apple Inc.
+        exchange:
+          type: string
+          description: >
+            Exchange identifier as returned by the underlying data source, with no
+            normalisation to MIC codes or common exchange names.
+          example: NMS
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Human-readable description of the error.
+        code:
+          type: string
+          nullable: true
+          description: Machine-readable error code.

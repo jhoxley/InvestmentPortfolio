@@ -58,3 +58,19 @@ class InvalidCurrencyPairError(Exception):
             f"Invalid FX pair '{pair}': base and quote currencies must differ."
         )
         super().__init__(self.message)
+
+
+class IdentifierFormatError(Exception):
+    def __init__(self, identifier: str, message: str | None = None) -> None:
+        self.identifier = identifier
+        self.message = message or (
+            f"Identifier '{identifier}' does not match ISIN, CUSIP, or SEDOL format."
+        )
+        super().__init__(self.message)
+
+
+class IdentifierNotFoundError(Exception):
+    def __init__(self, identifier: str, message: str | None = None) -> None:
+        self.identifier = identifier
+        self.message = message or f"Identifier '{identifier}' could not be resolved to a ticker."
+        super().__init__(self.message)

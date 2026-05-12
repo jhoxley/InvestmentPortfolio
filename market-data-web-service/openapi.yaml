@@ -196,6 +196,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /identifiers/{identifier}:
+    get:
+      tags:
+      - Identifiers
+      summary: Resolve Identifier to Ticker
+      operationId: resolve_identifier_to_ticker
+      parameters:
+      - name: identifier
+        in: path
+        required: true
+        description: >
+          Security identifier to resolve. Accepted formats: ISIN (12 chars, ISO 3166-1 country
+          prefix), CUSIP (9 alphanumeric chars), SEDOL (6–7 alphanumeric chars). Normalised to
+          uppercase before processing.
+        schema:
+          type: string
+          minLength: 1
+          title: Identifier
+          example: US0378331005
+      - name: type
+        in: query
+        required: false
+        description: >
+          Optional type hint. When provided, the identifier is validated against the specified
+          format only; auto-detection is skipped.
+        schema:
+          anyOf:
+          - type: string
+            enum:
+            - ISIN
+            - CUSIP
+            - SEDOL
+          - type: 'null'
+          title: Type
+          example: ISIN
+      responses:
+        '200':
+          description: Identifier resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TickerResolutionResponse'
+        '404':
+          description: Identifier is validly formatted but could not be resolved to a ticker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Identifier does not match any supported format, or conflicts with the provided type hint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Upstream data provider unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /cache/{ticker}:
     delete:
       tags:
@@ -425,6 +485,46 @@ components:
       required:
       - deleted_count
       title: CacheClearResponse
+    TickerResolutionResponse:
+      type: object
+      required:
+      - identifier
+      - identifier_type
+      - ticker
+      - security_name
+      - exchange
+      properties:
+        identifier:
+          type: string
+          title: Identifier
+          description: The original identifier value, normalised to uppercase.
+          example: US0378331005
+        identifier_type:
+          type: string
+          enum:
+          - ISIN
+          - CUSIP
+          - SEDOL
+          title: Identifier Type
+          description: The detected or caller-confirmed identifier type.
+          example: ISIN
+        ticker:
+          type: string
+          title: Ticker
+          description: Resolved ticker symbol as returned by the underlying data source.
+          example: AAPL
+        security_name:
+          type: string
+          title: Security Name
+          description: Security name as returned by the underlying data source.
+          example: Apple Inc.
+        exchange:
+          type: string
+          title: Exchange
+          description: >
+            Exchange identifier as returned by the underlying data source, with no
+            normalisation to MIC codes or common exchange names.
+          example: NMS
     ValidationError:
       properties:
         loc:

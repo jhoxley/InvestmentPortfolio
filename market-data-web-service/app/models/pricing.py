@@ -38,6 +38,14 @@ class PriceHistoryResponse(BaseModel):
     prices: list[PricePoint]
 
 
+class TickerResolutionResponse(BaseModel):
+    identifier: str
+    identifier_type: str
+    ticker: str
+    security_name: str
+    exchange: str
+
+
 class ErrorResponse(BaseModel):
     detail: str
     code: str | None = None
