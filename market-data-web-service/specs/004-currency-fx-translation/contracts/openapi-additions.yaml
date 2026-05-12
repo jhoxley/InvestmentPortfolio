@@ -1,0 +1,319 @@
+# OpenAPI additions for Feature 004: Currency Translation & FX Pair Endpoint
+# Merge these paths and components into the root openapi.yaml before implementation.
+
+paths:
+  /fx/{pair}/history:
+    get:
+      summary: Get FX pair rate history
+      description: >
+        Returns the historical exchange rate time series for two ISO 4217 currency
+        codes concatenated as a 6-character pair (e.g., USDGBP). Results are cached
+        and served from cache on repeat requests. Intended for diagnostic and
+        cash-position analysis.
+      tags:
+        - FX
+      parameters:
+        - name: pair
+          in: path
+          required: true
+          description: >
+            Six-character concatenation of two ISO 4217 currency codes (e.g., USDGBP).
+            Base currency is the first three characters; quote currency is the last three.
+          schema:
+            type: string
+            pattern: "^[A-Za-z]{6}$"
+            example: USDGBP
+        - name: from
+          in: query
+          required: false
+          description: Start date (inclusive) in YYYY-MM-DD format. Defaults to 30 days ago.
+          schema:
+            type: string
+            format: date
+            example: "2025-01-02"
+        - name: to
+          in: query
+          required: false
+          description: End date (inclusive) in YYYY-MM-DD format. Defaults to today.
+          schema:
+            type: string
+            format: date
+            example: "2025-03-31"
+      responses:
+        "200":
+          description: FX rate history returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FxHistoryResponse"
+        "404":
+          description: FX pair not found or no data available for the requested period.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >
+            Validation error — invalid currency code, reversed date range, or
+            identical base and quote currencies.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Upstream data provider unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # Additions to existing /securities/{ticker}/price endpoint:
+  # Add optional `currency` query parameter.
+  /securities/{ticker}/price:
+    get:
+      summary: Get current security price (with optional currency translation)
+      description: >
+        Returns the current price for a security. If the optional `currency` parameter
+        is provided and differs from the security's native currency, the price is
+        translated using the most recent available FX rate.
+      tags:
+        - Securities
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9.\\-\\^=]+$"
+        - name: currency
+          in: query
+          required: false
+          description: >
+            Target ISO 4217 3-letter currency code. When provided and different from
+            the security's native currency, the price is converted using the latest
+            available FX rate.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
+            example: GBP
+      responses:
+        "200":
+          description: Current price returned (translated if currency parameter provided).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceResponse"
+        "404":
+          description: Ticker not found or FX data unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid ticker format or invalid currency code.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Upstream data provider unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # Additions to existing /securities/{ticker}/history endpoint:
+  # Add optional `currency` query parameter.
+  /securities/{ticker}/history:
+    get:
+      summary: Get security price history (with optional currency translation)
+      description: >
+        Returns the historical price series for a security. If the optional `currency`
+        parameter is provided and differs from the security's native currency, each
+        price entry is translated using the nearest available FX rate for that date
+        (forward-fill first, backward-fill as fallback). Each translated entry includes
+        the FX rate applied.
+      tags:
+        - Securities
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9.\\-\\^=]+$"
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: currency
+          in: query
+          required: false
+          description: >
+            Target ISO 4217 3-letter currency code. When provided, each price entry
+            is converted to this currency and includes the FX rate applied.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
+            example: GBP
+      responses:
+        "200":
+          description: Price history returned (translated if currency parameter provided).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceHistoryResponse"
+        "404":
+          description: Ticker not found or FX alignment failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid ticker, invalid currency code, or reversed date range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Upstream data provider unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    FxRateEntry:
+      type: object
+      required:
+        - date
+        - rate
+      properties:
+        date:
+          type: string
+          format: date
+          description: Trading date of the FX observation.
+          example: "2025-01-02"
+        rate:
+          type: number
+          format: float
+          minimum: 0
+          exclusiveMinimum: true
+          description: Rate of 1 BASE expressed in QUOTE units.
+          example: 0.7912
+
+    FxHistoryResponse:
+      type: object
+      required:
+        - pair
+        - base_currency
+        - quote_currency
+        - rates
+      properties:
+        pair:
+          type: string
+          description: Concatenated ISO 4217 pair code.
+          example: USDGBP
+        base_currency:
+          type: string
+          description: ISO 4217 base currency code.
+          example: USD
+        quote_currency:
+          type: string
+          description: ISO 4217 quote currency code.
+          example: GBP
+        rates:
+          type: array
+          items:
+            $ref: "#/components/schemas/FxRateEntry"
+          description: Chronologically ascending list of dated FX rates.
+
+    # Updated PricePoint to include optional fx_rate
+    PricePoint:
+      type: object
+      required:
+        - date
+        - close
+      properties:
+        date:
+          type: string
+          format: date
+          example: "2025-01-02"
+        close:
+          type: number
+          format: float
+          minimum: 0
+          exclusiveMinimum: true
+          description: Close price in the response currency.
+          example: 148.23
+        fx_rate:
+          type: number
+          format: float
+          minimum: 0
+          exclusiveMinimum: true
+          nullable: true
+          description: >
+            FX rate applied to this entry (BASE→QUOTE). Present only when
+            currency translation was performed; null otherwise.
+          example: 0.7912
+
+    # Updated PriceResponse to include optional fx_rate
+    PriceResponse:
+      type: object
+      required:
+        - ticker
+        - price
+        - currency
+        - timestamp
+        - market_status
+        - as_of_date
+      properties:
+        ticker:
+          type: string
+        price:
+          type: number
+          format: float
+          minimum: 0
+          exclusiveMinimum: true
+          description: Price in the response currency.
+        currency:
+          type: string
+          description: Currency of the returned price (target if translated, native otherwise).
+          example: GBP
+        timestamp:
+          type: string
+          format: date-time
+        market_status:
+          type: string
+          enum: [open, closed]
+        as_of_date:
+          type: string
+          format: date
+        fx_rate:
+          type: number
+          format: float
+          nullable: true
+          description: >
+            FX rate applied to the current price. Present only when currency
+            translation was performed; null otherwise.
+          example: 0.7912
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+        code:
+          type: string
+          nullable: true

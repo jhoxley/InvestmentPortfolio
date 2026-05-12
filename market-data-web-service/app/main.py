@@ -6,9 +6,17 @@ import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.api import cache, securities
+from app.api import cache, fx, securities
 from app.config import load_settings
-from app.exceptions import DataNotFoundError, InvalidTickerError, ProviderUnavailableError
+from app.exceptions import (
+    CurrencyUnavailableError,
+    DataNotFoundError,
+    FxAlignmentError,
+    InvalidCurrencyError,
+    InvalidCurrencyPairError,
+    InvalidTickerError,
+    ProviderUnavailableError,
+)
 from app.logging_config import setup_logging
 from app.models.pricing import ErrorResponse
 
@@ -33,6 +41,7 @@ app = FastAPI(
 
 app.include_router(securities.router)
 app.include_router(cache.router)
+app.include_router(fx.router)
 
 
 @app.middleware("http")
@@ -82,6 +91,63 @@ async def invalid_ticker_handler(request: Request, exc: InvalidTickerError) -> J
     return JSONResponse(
         status_code=422,
         content=ErrorResponse(detail=exc.message, code="INVALID_TICKER").model_dump(
+            exclude_none=True
+        ),
+    )
+
+
+@app.exception_handler(InvalidCurrencyError)
+async def invalid_currency_handler(
+    request: Request, exc: InvalidCurrencyError
+) -> JSONResponse:
+    logger.warning("invalid_currency", code=exc.code, detail=exc.message)
+    return JSONResponse(
+        status_code=422,
+        content=ErrorResponse(detail=exc.message, code="INVALID_CURRENCY").model_dump(
+            exclude_none=True
+        ),
+    )
+
+
+@app.exception_handler(InvalidCurrencyPairError)
+async def invalid_currency_pair_handler(
+    request: Request, exc: InvalidCurrencyPairError
+) -> JSONResponse:
+    logger.warning("invalid_currency_pair", pair=exc.pair, detail=exc.message)
+    return JSONResponse(
+        status_code=422,
+        content=ErrorResponse(detail=exc.message, code="INVALID_CURRENCY_PAIR").model_dump(
+            exclude_none=True
+        ),
+    )
+
+
+@app.exception_handler(FxAlignmentError)
+async def fx_alignment_error_handler(
+    request: Request, exc: FxAlignmentError
+) -> JSONResponse:
+    logger.error(
+        "fx_alignment_error",
+        pair=exc.pair,
+        security_date=str(exc.security_date),
+        detail=exc.message,
+    )
+    return JSONResponse(
+        status_code=404,
+        content=ErrorResponse(detail=exc.message, code="FX_ALIGNMENT_ERROR").model_dump(
+            exclude_none=True
+        ),
+    )
+
+
+@app.exception_handler(CurrencyUnavailableError)
+async def currency_unavailable_handler(
+    request: Request, exc: CurrencyUnavailableError
+) -> JSONResponse:
+    logger.error("currency_unavailable", ticker=exc.ticker, detail=exc.message)
+    return JSONResponse(
+        status_code=404,
+        content=ErrorResponse(detail=exc.message, code="CURRENCY_UNAVAILABLE").model_dump(
             exclude_none=True
         ),
     )
