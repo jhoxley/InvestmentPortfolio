@@ -6,14 +6,18 @@ from app.exceptions import CurrencyUnavailableError, FxAlignmentError
 from app.models.pricing import PriceHistoryResponse, PricePoint, PriceResponse
 from app.providers import PricingProvider
 from app.services.fx_aligner import FxAligner
+from app.services.gap_fill import GapFillService
 
 logger = structlog.get_logger(__name__)
 
 
 class CurrencyService:
-    def __init__(self, fx_provider: PricingProvider, aligner: FxAligner) -> None:
+    def __init__(
+        self, fx_provider: PricingProvider, aligner: FxAligner, gap_fill: GapFillService
+    ) -> None:
         self._fx_provider = fx_provider
         self._aligner = aligner
+        self._gap_fill = gap_fill
 
     def get_native_currency(self, ticker: str, security_provider: PricingProvider) -> str:
         """Return the native currency for a security."""
@@ -94,6 +98,7 @@ class CurrencyService:
         )
 
         fx_series = self._fx_provider.get_price_history(pair, from_date, to_date)
+        fx_series = self._gap_fill.fill(fx_series, from_date, to_date)
 
         security_dates = [p.date for p in records]
 

@@ -10,6 +10,7 @@ from app.providers.fx_provider import FxInnerProvider
 from app.providers.yfinance_provider import YFinanceProvider
 from app.services.currency_service import CurrencyService
 from app.services.fx_aligner import FxAligner
+from app.services.gap_fill import GapFillService
 from app.services.pricing_service import PricingService
 from app.validators.currency import validate_currency_code
 
@@ -21,13 +22,13 @@ _TICKER_PATTERN = r"^[A-Za-z0-9.\-\^=]+$"
 def get_pricing_service(settings: Settings = Depends(get_settings)) -> PricingService:
     repo = CacheRepository(settings.cache.directory)
     provider = CachedPricingProvider(YFinanceProvider(), repo)
-    return PricingService(provider=provider)
+    return PricingService(provider=provider, gap_fill=GapFillService())
 
 
 def get_currency_service(settings: Settings = Depends(get_settings)) -> CurrencyService:
     repo = CacheRepository(settings.cache.directory)
     fx_provider = CachedPricingProvider(FxInnerProvider(YFinanceProvider()), repo)
-    return CurrencyService(fx_provider=fx_provider, aligner=FxAligner())
+    return CurrencyService(fx_provider=fx_provider, aligner=FxAligner(), gap_fill=GapFillService())
 
 
 @router.get("/{ticker}/price", response_model=PriceResponse)

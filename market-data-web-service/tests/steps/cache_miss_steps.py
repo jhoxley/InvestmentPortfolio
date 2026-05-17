@@ -60,8 +60,8 @@ def cache_file_created(tmp_cache_dir: Path) -> None:
 @then("the response contains the correct price data")
 def correct_price_data(response: object) -> None:
     data = response.json()  # type: ignore[union-attr]
-    prices = data["prices"]
-    assert len(prices) == len(_GOOG_RECORDS)
-    for actual, (expected_date, expected_close) in zip(prices, _GOOG_RECORDS, strict=True):
-        assert actual["date"] == expected_date.isoformat()
-        assert abs(actual["close"] - expected_close) < 0.001
+    prices_by_date = {p["date"]: p["close"] for p in data["prices"]}
+    assert len(prices_by_date) >= len(_GOOG_RECORDS)
+    for expected_date, expected_close in _GOOG_RECORDS:
+        assert expected_date.isoformat() in prices_by_date
+        assert abs(prices_by_date[expected_date.isoformat()] - expected_close) < 0.001

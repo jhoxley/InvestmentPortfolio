@@ -106,7 +106,11 @@ paths:
           example: GBP
       responses:
         '200':
-          description: Price history returned (translated if currency parameter provided).
+          description: >
+            Price history returned (translated if currency parameter provided).
+            All Mon–Fri business days in the requested range are guaranteed to have an
+            entry — gaps from holidays or data outages are filled by forward/backward
+            carry of the nearest observation.
           content:
             application/json:
               schema:
@@ -171,7 +175,11 @@ paths:
           example: "2025-03-31"
       responses:
         '200':
-          description: FX rate history returned successfully.
+          description: >
+            FX rate history returned successfully. All Mon–Fri business days in the
+            requested range are guaranteed to have a rate entry — gaps from holidays
+            or data outages are filled by forward/backward carry of the nearest
+            available rate.
           content:
             application/json:
               schema:

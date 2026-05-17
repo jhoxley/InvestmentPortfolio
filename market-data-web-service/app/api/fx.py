@@ -10,6 +10,7 @@ from app.models.pricing import FxHistoryResponse, FxRateEntry
 from app.providers.cached_provider import CachedPricingProvider
 from app.providers.fx_provider import FxInnerProvider
 from app.providers.yfinance_provider import YFinanceProvider
+from app.services.gap_fill import GapFillService
 from app.validators.currency import validate_currency_code
 
 router = APIRouter(prefix="/fx", tags=["FX"])
@@ -24,12 +25,17 @@ def get_fx_provider(settings: Settings = Depends(get_settings)) -> CachedPricing
     return CachedPricingProvider(FxInnerProvider(YFinanceProvider()), repo)
 
 
+def get_fx_gap_fill_service() -> GapFillService:
+    return GapFillService()
+
+
 @router.get("/{pair}/history", response_model=FxHistoryResponse)
 async def get_fx_history(
     pair: str = Path(..., min_length=6, max_length=6, pattern=_PAIR_PATTERN),
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
     fx_provider: CachedPricingProvider = Depends(get_fx_provider),
+    gap_fill: GapFillService = Depends(get_fx_gap_fill_service),
 ) -> FxHistoryResponse:
     base = pair[:3].upper()
     quote = pair[3:].upper()
@@ -59,10 +65,11 @@ async def get_fx_history(
     )
 
     records = fx_provider.get_price_history(pair_upper, resolved_from, resolved_to)
+    filled = gap_fill.fill(records, resolved_from, resolved_to)
 
     return FxHistoryResponse(
         pair=pair_upper,
         base_currency=base,
         quote_currency=quote,
-        rates=[FxRateEntry(date=d, rate=r) for d, r in records],
+        rates=[FxRateEntry(date=d, rate=r) for d, r in filled],
     )

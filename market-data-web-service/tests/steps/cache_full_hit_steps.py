@@ -63,11 +63,11 @@ def status_200_cache(response: object) -> None:
 @then("the response prices list contains the cached entries")
 def prices_match_cache(response: object) -> None:
     data = response.json()  # type: ignore[union-attr]
-    prices = data["prices"]
-    assert len(prices) == len(_AAPL_RECORDS_Q1)
-    for actual, (expected_date, expected_close) in zip(prices, _AAPL_RECORDS_Q1, strict=True):
-        assert actual["date"] == expected_date.isoformat()
-        assert abs(actual["close"] - expected_close) < 0.001
+    prices_by_date = {p["date"]: p["close"] for p in data["prices"]}
+    assert len(prices_by_date) >= len(_AAPL_RECORDS_Q1)
+    for expected_date, expected_close in _AAPL_RECORDS_Q1:
+        assert expected_date.isoformat() in prices_by_date
+        assert abs(prices_by_date[expected_date.isoformat()] - expected_close) < 0.001
 
 
 @then("the response prices list contains only entries within the requested range")

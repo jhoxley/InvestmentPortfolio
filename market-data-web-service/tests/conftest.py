@@ -48,6 +48,7 @@ def client_with_cache(
     from app.cache.repository import CacheRepository
     from app.config import CacheSettings, Settings, get_settings
     from app.providers.cached_provider import CachedPricingProvider
+    from app.services.gap_fill import GapFillService
     from app.services.pricing_service import PricingService
 
     def override_settings() -> Settings:
@@ -56,7 +57,7 @@ def client_with_cache(
     def override_service() -> PricingService:
         repo = CacheRepository(tmp_cache_dir)
         provider = CachedPricingProvider(mock_inner_provider, repo)
-        return PricingService(provider=provider)
+        return PricingService(provider=provider, gap_fill=GapFillService())
 
     app.dependency_overrides[get_settings] = override_settings
     app.dependency_overrides[get_pricing_service] = override_service
@@ -78,6 +79,7 @@ def client_with_fx(
     from app.providers.cached_provider import CachedPricingProvider
     from app.services.currency_service import CurrencyService
     from app.services.fx_aligner import FxAligner
+    from app.services.gap_fill import GapFillService
     from app.services.pricing_service import PricingService
 
     def override_settings() -> Settings:
@@ -86,12 +88,54 @@ def client_with_fx(
     def override_service() -> PricingService:
         repo = CacheRepository(tmp_cache_dir)
         provider = CachedPricingProvider(mock_inner_provider, repo)
-        return PricingService(provider=provider)
+        return PricingService(provider=provider, gap_fill=GapFillService())
 
     def override_currency_service() -> CurrencyService:
         repo = CacheRepository(tmp_cache_dir)
         fx_prov = CachedPricingProvider(mock_fx_provider, repo)
-        return CurrencyService(fx_provider=fx_prov, aligner=FxAligner())
+        return CurrencyService(fx_provider=fx_prov, aligner=FxAligner(), gap_fill=GapFillService())
+
+    def override_fx_provider() -> CachedPricingProvider:
+        repo = CacheRepository(tmp_cache_dir)
+        return CachedPricingProvider(mock_fx_provider, repo)
+
+    app.dependency_overrides[get_settings] = override_settings
+    app.dependency_overrides[get_pricing_service] = override_service
+    app.dependency_overrides[get_currency_service] = override_currency_service
+    app.dependency_overrides[get_fx_provider] = override_fx_provider
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def client_with_gap_fill(
+    tmp_cache_dir: Path,
+    mock_inner_provider: MagicMock,
+    mock_fx_provider: MagicMock,
+) -> Generator[TestClient, None, None]:
+    from app.api.fx import get_fx_provider
+    from app.api.securities import get_currency_service, get_pricing_service
+    from app.cache.repository import CacheRepository
+    from app.config import CacheSettings, Settings, get_settings
+    from app.providers.cached_provider import CachedPricingProvider
+    from app.services.currency_service import CurrencyService
+    from app.services.fx_aligner import FxAligner
+    from app.services.gap_fill import GapFillService
+    from app.services.pricing_service import PricingService
+
+    def override_settings() -> Settings:
+        return Settings(cache=CacheSettings(directory=tmp_cache_dir))
+
+    def override_service() -> PricingService:
+        repo = CacheRepository(tmp_cache_dir)
+        provider = CachedPricingProvider(mock_inner_provider, repo)
+        return PricingService(provider=provider, gap_fill=GapFillService())
+
+    def override_currency_service() -> CurrencyService:
+        repo = CacheRepository(tmp_cache_dir)
+        fx_prov = CachedPricingProvider(mock_fx_provider, repo)
+        return CurrencyService(fx_provider=fx_prov, aligner=FxAligner(), gap_fill=GapFillService())
 
     def override_fx_provider() -> CachedPricingProvider:
         repo = CacheRepository(tmp_cache_dir)

@@ -3,11 +3,13 @@ from datetime import UTC, date, datetime, timedelta
 from app.exceptions import InvalidTickerError
 from app.models.pricing import PriceHistoryResponse, PricePoint, PriceResponse
 from app.providers import PricingProvider
+from app.services.gap_fill import GapFillService
 
 
 class PricingService:
-    def __init__(self, provider: PricingProvider) -> None:
+    def __init__(self, provider: PricingProvider, gap_fill: GapFillService) -> None:
         self._provider = provider
+        self._gap_fill = gap_fill
 
     def get_current_price(self, ticker: str) -> PriceResponse:
         raw = self._provider.get_current_price(ticker)
@@ -39,6 +41,7 @@ class PricingService:
             )
 
         raw = self._provider.get_price_history(ticker, resolved_from, resolved_to)
+        filled = self._gap_fill.fill(raw, resolved_from, resolved_to)
 
         currency = "USD"
         try:
@@ -49,5 +52,5 @@ class PricingService:
         except Exception:
             pass
 
-        prices = [PricePoint(date=d, close=v) for d, v in raw]
+        prices = [PricePoint(date=d, close=v) for d, v in filled]
         return PriceHistoryResponse(ticker=ticker, currency=currency, prices=prices)

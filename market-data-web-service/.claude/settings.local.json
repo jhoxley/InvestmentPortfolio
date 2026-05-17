@@ -14,7 +14,16 @@
       "PowerShell(Set-Content *)",
       "WebFetch(domain:github.com)",
       "WebSearch",
-      "WebFetch(domain:ranaroussi.github.io)"
+      "WebFetch(domain:ranaroussi.github.io)",
+      "PowerShell(New-Item *)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/steps/price_gap_fill_steps.py -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/steps/fx_gap_fill_steps.py -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/steps/gap_fill_fx_conversion_steps.py -v)",
+      "Bash(.venv/Scripts/python.exe -m ruff check app/services/gap_fill.py app/services/pricing_service.py app/services/currency_service.py app/api/fx.py app/api/securities.py tests/conftest.py tests/steps/price_gap_fill_steps.py tests/steps/fx_gap_fill_steps.py tests/steps/gap_fill_fx_conversion_steps.py)",
+      "Bash(.venv/Scripts/python.exe -m mypy app/services/gap_fill.py app/services/pricing_service.py app/services/currency_service.py app/api/fx.py app/api/securities.py --strict)",
+      "Bash(.venv/Scripts/python.exe -m pytest -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/steps/cache_full_hit_steps.py::test_request_is_fully_satisfied_by_cached_data tests/steps/cache_miss_steps.py::test_no_cache_exists_for_requested_ticker -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/steps/cache_full_hit_steps.py::test_request_is_fully_satisfied_by_cached_data -v)"
     ]
   }
 }
