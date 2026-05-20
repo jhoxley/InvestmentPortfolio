@@ -1,19 +1,24 @@
 from fastapi import APIRouter, Depends, Path, Query
 
+from app.config import Settings, get_settings
 from app.models.pricing import TickerResolutionResponse
-from app.providers.identifier_provider import IdentifierProvider, YFinanceIdentifierProvider
+from app.providers.identifier_provider import (
+    FallbackIdentifierProvider,
+    YFinanceIdentifierProvider,
+)
+from app.repositories.fallback_config import FallbackConfigRepository
 from app.services.identifier_service import IdentifierService
 
 router = APIRouter(prefix="/identifiers", tags=["Identifiers"])
 
 
-def get_identifier_provider() -> YFinanceIdentifierProvider:
-    return YFinanceIdentifierProvider()
-
-
 def get_identifier_service(
-    provider: IdentifierProvider = Depends(get_identifier_provider),
+    settings: Settings = Depends(get_settings),
 ) -> IdentifierService:
+    fallback_repo = FallbackConfigRepository(settings.fallback.config_path)
+    provider = FallbackIdentifierProvider(
+        inner=YFinanceIdentifierProvider(), fallback_repo=fallback_repo
+    )
     return IdentifierService(provider=provider)
 
 

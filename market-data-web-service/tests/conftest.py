@@ -159,9 +159,70 @@ def mock_identifier_provider() -> MagicMock:
 def client_with_identifiers(
     mock_identifier_provider: MagicMock,
 ) -> Generator[TestClient, None, None]:
-    from app.api.identifiers import get_identifier_provider
+    from app.api.identifiers import get_identifier_service
+    from app.services.identifier_service import IdentifierService
 
-    app.dependency_overrides[get_identifier_provider] = lambda: mock_identifier_provider
+    def override_service() -> IdentifierService:
+        return IdentifierService(provider=mock_identifier_provider)
+
+    app.dependency_overrides[get_identifier_service] = override_service
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def mock_fallback_inner_provider() -> MagicMock:
+    from app.exceptions import DataNotFoundError
+
+    mock = MagicMock(spec=PricingProvider)
+    mock.get_price_history.side_effect = DataNotFoundError("PRIV01")
+    mock.get_current_price.side_effect = DataNotFoundError("PRIV01")
+    return mock
+
+
+@pytest.fixture()
+def mock_fallback_id_provider() -> MagicMock:
+    from app.exceptions import IdentifierNotFoundError
+
+    mock = MagicMock(spec=IdentifierProvider)
+    mock.lookup_ticker.side_effect = IdentifierNotFoundError("GB00B0PRVT01")
+    return mock
+
+
+@pytest.fixture()
+def client_with_fallback(
+    mock_fallback_inner_provider: MagicMock,
+    mock_fallback_id_provider: MagicMock,
+) -> Generator[TestClient, None, None]:
+    from pathlib import Path as _Path
+
+    from app.api.identifiers import get_identifier_service
+    from app.api.securities import get_pricing_service
+    from app.providers.fallback_provider import FallbackPricingProvider
+    from app.providers.identifier_provider import FallbackIdentifierProvider
+    from app.repositories.fallback_config import FallbackConfigRepository
+    from app.services.gap_fill import GapFillService
+    from app.services.identifier_service import IdentifierService
+    from app.services.pricing_service import PricingService
+
+    pricing_repo = FallbackConfigRepository(_Path("tests/fixtures/fallback_config.json"))
+    isin_repo = FallbackConfigRepository(_Path("tests/fixtures/fallback_config_isin.json"))
+
+    def override_pricing() -> PricingService:
+        provider = FallbackPricingProvider(
+            inner=mock_fallback_inner_provider, fallback_repo=pricing_repo
+        )
+        return PricingService(provider=provider, gap_fill=GapFillService())
+
+    def override_identifier() -> IdentifierService:
+        provider = FallbackIdentifierProvider(
+            inner=mock_fallback_id_provider, fallback_repo=isin_repo
+        )
+        return IdentifierService(provider=provider)
+
+    app.dependency_overrides[get_pricing_service] = override_pricing
+    app.dependency_overrides[get_identifier_service] = override_identifier
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

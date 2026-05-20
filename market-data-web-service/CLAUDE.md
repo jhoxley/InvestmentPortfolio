@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at:
-specs/006-price-series-fill/plan.md
+specs/007-local-price-fallback/plan.md
 <!-- SPECKIT END -->

@@ -8,8 +8,13 @@ class CacheSettings(BaseModel):
     directory: Path = Path("./cache")
 
 
+class FallbackSettings(BaseModel):
+    config_path: Path | None = None
+
+
 class Settings(BaseModel):
     cache: CacheSettings = CacheSettings()
+    fallback: FallbackSettings = FallbackSettings()
 
 
 def load_settings(config_path: Path = Path("config.yaml")) -> Settings:

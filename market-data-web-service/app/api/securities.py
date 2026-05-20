@@ -6,8 +6,10 @@ from app.cache.repository import CacheRepository
 from app.config import Settings, get_settings
 from app.models.pricing import PriceHistoryResponse, PriceResponse
 from app.providers.cached_provider import CachedPricingProvider
+from app.providers.fallback_provider import FallbackPricingProvider
 from app.providers.fx_provider import FxInnerProvider
 from app.providers.yfinance_provider import YFinanceProvider
+from app.repositories.fallback_config import FallbackConfigRepository
 from app.services.currency_service import CurrencyService
 from app.services.fx_aligner import FxAligner
 from app.services.gap_fill import GapFillService
@@ -21,7 +23,9 @@ _TICKER_PATTERN = r"^[A-Za-z0-9.\-\^=]+$"
 
 def get_pricing_service(settings: Settings = Depends(get_settings)) -> PricingService:
     repo = CacheRepository(settings.cache.directory)
-    provider = CachedPricingProvider(YFinanceProvider(), repo)
+    yf_provider = CachedPricingProvider(YFinanceProvider(), repo)
+    fallback_repo = FallbackConfigRepository(settings.fallback.config_path)
+    provider = FallbackPricingProvider(inner=yf_provider, fallback_repo=fallback_repo)
     return PricingService(provider=provider, gap_fill=GapFillService())
 
 

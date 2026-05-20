@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Market Data API
   description: Locally hosted security pricing API backed by Yahoo Finance (yfinance).
-  version: 0.1.0
+  version: 0.1.1
 paths:
   /securities/{ticker}/price:
     get:
@@ -53,7 +53,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
         '503':
-          description: Upstream data provider unavailable.
+          description: >
+            Upstream data provider unavailable, or a configured fallback CSV file
+            could not be read (missing file or permission error).
           content:
             application/json:
               schema:
@@ -128,7 +130,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
         '503':
-          description: Upstream data provider unavailable.
+          description: >
+            Upstream data provider unavailable, or a configured fallback CSV file
+            could not be read (missing file or permission error).
           content:
             application/json:
               schema:
@@ -210,6 +214,11 @@ paths:
       - Identifiers
       summary: Resolve Identifier to Ticker
       operationId: resolve_identifier_to_ticker
+      description: >
+        When the primary data source cannot resolve the identifier to a ticker, the service
+        consults the local fallback configuration. If a matching entry is found, the identifier
+        itself is returned as the ticker (a "pseudo-ticker"), enabling subsequent pricing
+        requests to route to the local file.
       parameters:
       - name: identifier
         in: path
@@ -241,7 +250,10 @@ paths:
           example: ISIN
       responses:
         '200':
-          description: Identifier resolved successfully.
+          description: >
+            Identifier resolved successfully. The ticker field may be a pseudo-ticker
+            (equal to the identifier) when resolution came from the local fallback
+            configuration rather than the primary data source.
           content:
             application/json:
               schema:
@@ -533,6 +545,45 @@ components:
             Exchange identifier as returned by the underlying data source, with no
             normalisation to MIC codes or common exchange names.
           example: NMS
+    FallbackConfigEntry:
+      type: object
+      required:
+      - csv_path
+      - currency
+      - date_column
+      - price_column
+      properties:
+        csv_path:
+          type: string
+          description: Filesystem path to the CSV file containing price history.
+          example: /data/prices/priv01.csv
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: ISO 4217 currency code of the prices in the CSV file.
+          example: GBP
+        date_column:
+          type: string
+          description: Name of the column in the CSV file that contains date values.
+          example: Date
+        price_column:
+          type: string
+          description: Name of the column in the CSV file that contains price values.
+          example: Close
+        use_local_only:
+          type: boolean
+          default: false
+          description: >
+            When true, the primary data source is bypassed entirely; prices are served
+            from the local file without attempting a YFinance lookup.
+    FallbackConfig:
+      type: object
+      description: >
+        Top-level structure of the fallback configuration JSON file.
+        Keys are security identifiers (ticker symbols, ISINs, CUSIPs, or SEDOLs),
+        normalised to uppercase. Each value is a FallbackConfigEntry.
+      additionalProperties:
+        $ref: '#/components/schemas/FallbackConfigEntry'
     ValidationError:
       properties:
         loc:
