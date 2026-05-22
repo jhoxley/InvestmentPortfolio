@@ -14,14 +14,13 @@
 # .\.venv\Scripts\Python .\PortfolioAnalysis.py Performance data_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentData.xlsx" static_file="C:\Users\jhoxl\OneDrive\Investments\InvestmentDataStatic.json" transactions_sheet="SIPP-Trans" income_sheet="SIPP-Income" output_file="C:\Users\jhoxl\OneDrive\Investments\SIPP_Holdings.xlsx"
 
 import sys
-import yfinance as yf
 import datetime as dt
 import AnalysisFuncs as af
 import DataFormatting
 import DataGeneration as dg
 from Reports import DailyDetails, MonthlySummary, QuarterlySummary, DailySummary, MultiReport, AnnualSummary,ForwardProjection,CurrentHoldings,PeriodicPerformance
 import pandas as pd
-from Data import MarketData
+from Data.MarketDataClient import MarketDataClient
 import json
 
 report_types = {
@@ -68,6 +67,7 @@ static_file = params.get('static_file')
 trans_sheet = params.get('transactions_sheet', 'Transactions')
 income_sheet = params.get('income_sheet', 'Income')
 output_file = params.get('output_file', 'output.csv')
+api_url = params.get('api_url', 'http://localhost:8000')
 
 df = pd.read_excel(data_file, sheet_name=trans_sheet)
 dfIncome = pd.read_excel(data_file, sheet_name=income_sheet)
@@ -83,8 +83,9 @@ position_lookup = {item["name"]: item for item in static_data}
 # get distinct values from the 'Position Name' column except for values equal to "Cash"
 distinct_positions = df['Position Name'].unique()
 frames = []
+market_data_errors = []
 
-mdApi = MarketData.MarketDataApi()
+client = MarketDataClient(api_url)
 
 for position in distinct_positions:
     static = position_lookup.get(position, {})
@@ -95,22 +96,30 @@ for position in distinct_positions:
     print('================================')
     print(f"Processing... Name: {position}, Isin: {static.get('isin','')}, Ticker: {static.get('ticker','')}")
 
-    if static.get("ticker") is not None and static.get("ticker") != "":
+    if static.get("ticker"):
         ticker = static.get("ticker")
     else:
         ident = static.get("isin", "")
-        if static.get("price_file") is None:
-            ticker = yf.Ticker(ident).info.get('symbol', 'N/A') if ident else 'N/A'
-            print(f"   Translated {static.get('isin','')} to ticker {ticker}")
-    
-    
+        if ident:
+            resolved = client.resolve_ticker(ident)
+            if resolved is not None:
+                ticker = resolved
+                print(f"   Translated {ident} to ticker {ticker}")
+            else:
+                ticker = ident  # use identifier directly (e.g. FX tickers like GBP=)
+                print(f"   Could not resolve {ident} via identifier service, using as ticker directly")
+        else:
+            ticker = "N/A"
+
+    identifier = static.get("isin") or static.get("ticker") or "N/A"
+
     df2 = df[df['Position Name'] == position]
 
     df3 = af.cumulative_by_settle_date(df2)
     df3['Position Name'] = position
     df3['ISIN']= static.get("isin", "")
     df3['Ticker'] = ticker
-    
+
     positionFirstTran = pd.to_datetime(df3['Settle date']).min()
     positionLastTran = pd.to_datetime(df3['Settle date']).max()
     if df3['Cm.Qty'].iloc[-1] != 0:
@@ -123,46 +132,48 @@ for position in distinct_positions:
         print(f"   Skipping inclusion of new position '{position}' with insufficient history. Need at least 2 business days of history, looking for data from {positionFirstTran}.")
         continue
 
-    # Fugly hack to handle cash positions, should be removed when we have a better way to handle cash
-    if ticker == 'N/A' and position.lower() == 'cash':
-        ts = pd.DataFrame(ds)
-        ts['Close'] = 1.0  # Assuming cash has a constant value of 1.0
-    elif static.get("price_file") is not None:
-        price_file = static.get("price_file")
-        print(f"   Loading prices from file: {price_file}")
-        ts = pd.read_excel(price_file)
-        ts = ts.rename(columns={ts.columns[0]: 'Settle date', ts.columns[1]: 'Close'})
-        ts['Settle date'] = pd.to_datetime(ts['Settle date'])
-        ts = ts[(ts['Settle date'] >= pd.to_datetime(positionFirstTran)) & (ts['Settle date'] <= pd.to_datetime(positionLastTran))]
-        ts['Close'] = pd.to_numeric(ts['Close'], errors='coerce').fillna(0)
+    try:
         multiplier = static.get("multiplier", 1.0)
-        ts['Close'] = ts['Close'] * multiplier
-        days_gap =  (positionLastTran.date() - ts['Settle date'].max().date()).days
-        if ticker != '' and days_gap > 3:
-            print(f'Loaded price data from file but {days_gap} days missing. Attempting query with {ticker} from YFinance to fill gap.')
-            ts2 = mdApi.get_time_series(pd.to_datetime(ts['Settle date'].max().date()), pd.to_datetime(positionLastTran), ticker, multiplier)
-            ts = pd.concat([ts, ts2]).drop_duplicates(subset=['Settle date']).reset_index(drop=True)
-    else:
-        multiplier = static.get("multiplier", 1.0)
-        ts = mdApi.get_time_series(positionFirstTran, positionLastTran, ticker, multiplier)    
+        if ticker == "N/A" and position.lower() == "cash":
+            ts = ds[["Settle date"]].copy()
+            ts["Close"] = 1.0
+        else:
+            ts = client.get_price_history(ticker, positionFirstTran, positionLastTran, multiplier)
+            if ts is None:
+                print(f"   WARNING: No market data returned for '{position}' (ticker: {ticker}). Skipping.")
+                market_data_errors.append({"Position": position, "Identifier": identifier, "Ticker": ticker, "Error Code": "404", "Message": "No market data found"})
+                continue
 
-    transactions = df[df['Position Name'] == position][['Settle date', 'Reference', 'Adj Qty', 'Value (£)']].rename(columns={'Adj Qty': 'Quantity'})
-    transactions['Value (£)'] = transactions['Value (£)'].abs()
+        transactions = df[df['Position Name'] == position][['Settle date', 'Reference', 'Adj Qty', 'Value (£)']].rename(columns={'Adj Qty': 'Quantity'})
+        transactions['Value (£)'] = transactions['Value (£)'].abs()
 
-    income = dfIncome[dfIncome['Position Name'] == position][['Settle date', 'Quantity', 'Value (£)']]
+        income = dfIncome[dfIncome['Position Name'] == position][['Settle date', 'Quantity', 'Value (£)']]
 
-    theme = static.get("theme", "n/a")
+        theme = static.get("theme", "n/a")
 
-    PositionDf = DataFormatting.create_holding_dataframe(
-        transactions,
-        income,
-        ds,
-        ts,
-        position,
-        theme
-    )
+        PositionDf = DataFormatting.create_holding_dataframe(
+            transactions,
+            income,
+            ds,
+            ts,
+            position,
+            theme
+        )
 
-    frames.append(PositionDf)
+        frames.append(PositionDf)
+
+    except RuntimeError as exc:
+        print(f"   WARNING: Market data service error for '{position}' (ticker: {ticker}): {exc}. Skipping.")
+        market_data_errors.append({"Position": position, "Identifier": identifier, "Ticker": ticker, "Error Code": "ERROR", "Message": str(exc)})
+        continue
+
+if market_data_errors:
+    print(' ')
+    print('================================')
+    print(f"MARKET DATA ERRORS — {len(market_data_errors)} position(s) excluded from report:")
+    error_df = pd.DataFrame(market_data_errors)
+    print(error_df.to_string(index=False))
+    print('================================')
 
 # Concatenate all dataframes in the list into a single dataframe
 print("Generating final dataframe...")
@@ -193,7 +204,7 @@ if missing_measures:
     sys.exit(1)
 
 # Determine params passed into report
-report_args = {key : params[key] for key in params if key not in ['data_file', 'static_file', 'transactions_sheet', 'income_sheet', 'output_file']}
+report_args = {key : params[key] for key in params if key not in ['data_file', 'static_file', 'transactions_sheet', 'income_sheet', 'output_file', 'api_url']}
 
 # Run the report
 print("Generating report, saving to " + output_file)

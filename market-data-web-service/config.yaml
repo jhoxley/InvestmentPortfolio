@@ -1,2 +1,4 @@
 cache:
   directory: ./cache
+fallback:
+  config_path: ./data/fallback_config.json
