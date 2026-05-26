@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Market Data API
   description: Locally hosted security pricing API backed by Yahoo Finance (yfinance).
-  version: 0.1.1
+  version: 0.1.2
 paths:
   /securities/{ticker}/price:
     get:
@@ -35,7 +35,14 @@ paths:
           example: GBP
       responses:
         '200':
-          description: Current price returned (translated if currency parameter provided).
+          description: >
+            Current price returned (translated if currency parameter provided).
+
+            **Sub-unit currency normalisation**: Prices denominated in a sub-unit currency
+            (e.g. GBp — British pence, USd — US cents) are automatically converted to the
+            corresponding major-unit currency (GBP, USD) before being returned. The `currency`
+            field will always reflect the major-unit ISO 4217 code, and the `price` value will
+            always be in major-unit terms. Consumers do not need to perform any additional scaling.
           content:
             application/json:
               schema:
@@ -113,6 +120,12 @@ paths:
             All Mon–Fri business days in the requested range are guaranteed to have an
             entry — gaps from holidays or data outages are filled by forward/backward
             carry of the nearest observation.
+
+            **Sub-unit currency normalisation**: Same normalisation as the `/price` endpoint
+            applies. All `close` values in the returned series are in major-unit terms, and the
+            `currency` field reflects the major-unit code. If a `currency` query parameter is
+            provided for FX conversion, normalisation is applied first so the FX rate is applied
+            to major-unit values.
           content:
             application/json:
               schema:
@@ -417,7 +430,9 @@ components:
           type: number
           exclusiveMinimum: 0.0
           title: Close
-          description: Close price in the response currency.
+          description: >
+            Close price in the response currency. Always in major-unit terms.
+            Pence/cent values are divided by 100 before inclusion.
         fx_rate:
           anyOf:
           - type: number
@@ -443,11 +458,17 @@ components:
           type: number
           exclusiveMinimum: 0.0
           title: Price
-          description: Price in the response currency.
+          description: >
+            Price in the response currency. Always expressed in major-unit terms.
+            Sub-unit prices are divided by the appropriate ratio (100 for pence/cents)
+            before being returned.
         currency:
           type: string
           title: Currency
-          description: Currency of the returned price (target if translated, native otherwise).
+          description: >
+            Currency of the returned price (target if translated, native otherwise).
+            Always a major-unit ISO 4217 code. Sub-unit codes (e.g. GBp) are normalised
+            to their major-unit equivalent (e.g. GBP).
           example: GBP
         timestamp:
           type: string

@@ -1,12 +1,12 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 from fastapi.testclient import TestClient
 from pytest_bdd import given, scenarios, then, when
 
 from app.exceptions import DataNotFoundError
 from app.providers import PricingProvider
+from app.services.minor_unit import SubUnitNormaliser
 
 scenarios("local_price_fallback_current.feature")
 
@@ -30,7 +30,11 @@ def _make_current_client(config_path: Path) -> tuple[TestClient, MagicMock]:
 
     def override_pricing() -> PricingService:
         provider = FallbackPricingProvider(inner=mock_inner, fallback_repo=fallback_repo)
-        return PricingService(provider=provider, gap_fill=GapFillService())
+        return PricingService(
+            provider=provider,
+            gap_fill=GapFillService(),
+            normaliser=SubUnitNormaliser(),
+        )
 
     app.dependency_overrides[get_pricing_service] = override_pricing
     return TestClient(app), mock_inner
@@ -119,7 +123,11 @@ def primary_no_current_unknown() -> TestClient:
 
     def override_pricing() -> PricingService:
         provider = FallbackPricingProvider(inner=mock_inner, fallback_repo=fallback_repo)
-        return PricingService(provider=provider, gap_fill=GapFillService())
+        return PricingService(
+            provider=provider,
+            gap_fill=GapFillService(),
+            normaliser=SubUnitNormaliser(),
+        )
 
     app.dependency_overrides[get_pricing_service] = override_pricing
     return TestClient(app)

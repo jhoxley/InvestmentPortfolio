@@ -12,7 +12,10 @@ def api_running_aod() -> None:
     pass
 
 
-@given('the ticker "AAPL" is a valid security listed on a supported exchange', target_fixture="aapl_valid_aod")
+@given(
+    'the ticker "AAPL" is a valid security listed on a supported exchange',
+    target_fixture="aapl_valid_aod",
+)
 def aapl_valid_aod() -> None:
     pass
 
@@ -67,7 +70,8 @@ def as_of_date_not_weekend(response: object) -> None:
 
 
 @then(
-    'the "as_of_date" in the price response matches the "date" of the last entry in the history "prices" list'
+    "the \"as_of_date\" in the price response matches the \"date\""
+    " of the last entry in the history \"prices\" list"
 )
 def as_of_date_reconciles(price_response: object, history_response: object) -> None:
     price_data = price_response.json()  # type: ignore[union-attr]

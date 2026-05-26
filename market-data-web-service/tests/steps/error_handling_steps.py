@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 from pytest_bdd import given, scenarios, then, when
 
 from app.exceptions import ProviderUnavailableError
-from app.api import securities as securities_module
 
 scenarios("error_handling.feature")
 
@@ -65,7 +64,10 @@ def has_detail_field(response: object) -> None:
     assert "detail" in data
 
 
-@then("the response body contains a field \"detail\" indicating the upstream dependency is unavailable")
+@then(
+    "the response body contains a field \"detail\""
+    " indicating the upstream dependency is unavailable"
+)
 def has_detail_503(response: object) -> None:
     data = response.json()  # type: ignore[union-attr]
     assert "detail" in data

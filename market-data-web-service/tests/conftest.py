@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.providers import PricingProvider
 from app.providers.identifier_provider import IdentifierProvider
+from app.services.minor_unit import SubUnitNormaliser
 
 
 @pytest.fixture()
@@ -57,7 +58,11 @@ def client_with_cache(
     def override_service() -> PricingService:
         repo = CacheRepository(tmp_cache_dir)
         provider = CachedPricingProvider(mock_inner_provider, repo)
-        return PricingService(provider=provider, gap_fill=GapFillService())
+        return PricingService(
+            provider=provider,
+            gap_fill=GapFillService(),
+            normaliser=SubUnitNormaliser(),
+        )
 
     app.dependency_overrides[get_settings] = override_settings
     app.dependency_overrides[get_pricing_service] = override_service
@@ -88,7 +93,11 @@ def client_with_fx(
     def override_service() -> PricingService:
         repo = CacheRepository(tmp_cache_dir)
         provider = CachedPricingProvider(mock_inner_provider, repo)
-        return PricingService(provider=provider, gap_fill=GapFillService())
+        return PricingService(
+            provider=provider,
+            gap_fill=GapFillService(),
+            normaliser=SubUnitNormaliser(),
+        )
 
     def override_currency_service() -> CurrencyService:
         repo = CacheRepository(tmp_cache_dir)
@@ -130,7 +139,11 @@ def client_with_gap_fill(
     def override_service() -> PricingService:
         repo = CacheRepository(tmp_cache_dir)
         provider = CachedPricingProvider(mock_inner_provider, repo)
-        return PricingService(provider=provider, gap_fill=GapFillService())
+        return PricingService(
+            provider=provider,
+            gap_fill=GapFillService(),
+            normaliser=SubUnitNormaliser(),
+        )
 
     def override_currency_service() -> CurrencyService:
         repo = CacheRepository(tmp_cache_dir)
@@ -213,7 +226,11 @@ def client_with_fallback(
         provider = FallbackPricingProvider(
             inner=mock_fallback_inner_provider, fallback_repo=pricing_repo
         )
-        return PricingService(provider=provider, gap_fill=GapFillService())
+        return PricingService(
+            provider=provider,
+            gap_fill=GapFillService(),
+            normaliser=SubUnitNormaliser(),
+        )
 
     def override_identifier() -> IdentifierService:
         provider = FallbackIdentifierProvider(
