@@ -32,7 +32,6 @@ class MarketDataClient:
         ticker: str,
         from_date: datetime.date | datetime.datetime,
         to_date: datetime.date | datetime.datetime,
-        multiplier: float = 1.0,
     ) -> pd.DataFrame:
         """Return a DataFrame with 'Settle date' (datetime64) and 'Close' (float) columns.
         The 'Close' price is multiplied by the given multiplier (default 1.0) to adjust for any necessary scaling.
@@ -68,8 +67,5 @@ class MarketDataClient:
         df = pd.DataFrame([{"Settle date": p["date"], "Close": p["close"]} for p in prices])
         df["Settle date"] = pd.to_datetime(df["Settle date"])
         df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
-
-        if multiplier != 1.0:
-            df["Close"] = df["Close"] * multiplier
 
         return df

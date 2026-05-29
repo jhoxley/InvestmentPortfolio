@@ -32,6 +32,13 @@ Feature: Local price file fallback — price history
     Then the response status is 200
     And the response contains prices from the local file
 
+  Scenario: Fallback file with GBp currency is normalised to GBP before returning
+    Given a fallback configuration maps "PRIV01" to a local CSV file with currency "GBp"
+    When a consumer requests price history for "PRIV01" from "2025-01-02" to "2025-01-06"
+    Then the response status is 200
+    And the response currency is "GBP"
+    And the pence prices are divided by 100
+
   Scenario: use_local_only flag bypasses primary source entirely
     Given a fallback configuration maps "PRIV01" to a local CSV file with use_local_only set
     When a consumer requests price history for "PRIV01"

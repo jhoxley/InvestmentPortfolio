@@ -15,6 +15,7 @@ scenarios("local_price_fallback_history.feature")
 _FALLBACK_CONFIG = Path("tests/fixtures/fallback_config.json")
 _FALLBACK_CONFIG_ISIN = Path("tests/fixtures/fallback_config_isin.json")
 _FALLBACK_CONFIG_LOCAL_ONLY = Path("tests/fixtures/fallback_config_local_only.json")
+_FALLBACK_CONFIG_PENCE = Path("tests/fixtures/fallback_config_pence.json")
 
 
 def _make_fallback_client(config_path: Path) -> tuple[TestClient, MagicMock, MagicMock]:
@@ -270,6 +271,25 @@ def response_has_local_prices(response: object) -> None:
     data = response.json()  # type: ignore[union-attr]
     assert len(data["prices"]) >= 1
     assert data["prices"][0]["close"] == pytest.approx(150.00, abs=0.01)
+
+
+# --- Scenario: pence currency in fallback config is normalised ---
+
+@given(
+    'a fallback configuration maps "PRIV01" to a local CSV file with currency "GBp"',
+    target_fixture="fallback_client",
+)
+def fallback_config_priv01_gbp_pence() -> tuple[TestClient, MagicMock, MagicMock]:
+    client, mock_inner, mock_id = _make_fallback_client(_FALLBACK_CONFIG_PENCE)
+    return client, mock_inner, mock_id
+
+
+@then("the pence prices are divided by 100")
+def pence_prices_divided(response: object) -> None:
+    prices = response.json()["prices"]  # type: ignore[union-attr]
+    by_date = {p["date"]: p["close"] for p in prices}
+    assert by_date["2025-01-02"] == pytest.approx(100.00, rel=1e-4)
+    assert by_date["2025-01-06"] == pytest.approx(110.00, rel=1e-4)
 
 
 # --- Scenario 5: use_local_only ---

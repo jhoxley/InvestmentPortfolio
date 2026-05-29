@@ -25,7 +25,9 @@
       "Bash(.venv/Scripts/python.exe -m pytest tests/steps/cache_full_hit_steps.py::test_request_is_fully_satisfied_by_cached_data tests/steps/cache_miss_steps.py::test_no_cache_exists_for_requested_ticker -v)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/steps/cache_full_hit_steps.py::test_request_is_fully_satisfied_by_cached_data -v)",
       "Bash(python -m pytest tests/steps/pence_normalisation_current_steps.py tests/steps/pence_normalisation_history_steps.py -v --tb=short)",
-      "Bash(.venv\\\\Scripts\\\\python.exe -m pytest tests/steps/pence_normalisation_current_steps.py tests/steps/pence_normalisation_history_steps.py -v --tb=short)"
+      "Bash(.venv\\\\Scripts\\\\python.exe -m pytest tests/steps/pence_normalisation_current_steps.py tests/steps/pence_normalisation_history_steps.py -v --tb=short)",
+      "Bash(python -m pytest tests/steps/local_price_fallback_history_steps.py -v)",
+      "Bash(.venv\\\\Scripts\\\\python.exe -m pytest tests/steps/local_price_fallback_history_steps.py -v)"
     ]
   }
 }

@@ -39,8 +39,7 @@ report_types = {
         AnnualSummary.AnnualSummaryReport(),
         DailySummary.DailySummaryReport(),
         ForwardProjection.ForwardProjectionReport(),
-        CurrentHoldings.CurrentHoldingsReport(),
-        PeriodicPerformance.PeriodicPerformanceReport()
+        CurrentHoldings.CurrentHoldingsReport()
     ])
 }
 
@@ -133,12 +132,11 @@ for position in distinct_positions:
         continue
 
     try:
-        multiplier = static.get("multiplier", 1.0)
         if ticker == "N/A" and position.lower() == "cash":
             ts = ds[["Settle date"]].copy()
             ts["Close"] = 1.0
         else:
-            ts = client.get_price_history(ticker, positionFirstTran, positionLastTran, multiplier)
+            ts = client.get_price_history(ticker, positionFirstTran, positionLastTran)
             if ts is None:
                 print(f"   WARNING: No market data returned for '{position}' (ticker: {ticker}). Skipping.")
                 market_data_errors.append({"Position": position, "Identifier": identifier, "Ticker": ticker, "Error Code": "404", "Message": "No market data found"})

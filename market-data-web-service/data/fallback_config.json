@@ -1,50 +1,58 @@
 {
     "GB00B08HD927" : {
         "name": "BlackRock Consensus 85 Class I - Accumulation (GBP)",
-        "csv_path": "/data/Blackrock_Consensus_85.csv",
+        "csv_path": "./data/Blackrock_Consensus_85.csv",
         "currency": "GBP",
         "date_column": "Date",
-        "price_column": "NAV",
+        "price_column": "Close",
         "use_local_only": true
     },
     "GB00B8F8YX59" : {
         "name": "IFSL Marlborough UK Micro-Cap Growth Class P - Accumulation (GBP)",
-        "csv_path": "/data/IFSL_Marlborough_UK_Micro-Cap_Growth.csv",
-        "currency": "GBP",
+        "csv_path": "./data/IFSL_Marlborough_UK_Micro-Cap_Growth.csv",
+        "currency": "GBp",
         "date_column": "Date",
-        "price_column": "NAV",
+        "price_column": "Close",
         "use_local_only": true
     },
     "BRNXTGENHEALTH" : {
         "name": "BlackRock Next Generation Healthcare Class D2 - Accumulation (EUR)",
-        "csv_path": "/data/Blackrock_NextGen_Healthcare.csv",
+        "csv_path": "./data/Blackrock_NextGen_Healthcare.csv",
         "currency": "EUR",
         "date_column": "Date",
-        "price_column": "NAV",
+        "price_column": "EUR",
         "use_local_only": true
     },
     "AMPS.L" : {
         "name": "WisdomTree Battery Metals ETC",
-        "csv_path": "/data/WisdomTree_Battery_Metals.csv",
+        "csv_path": "./data/WisdomTree_Battery_Metals.csv",
         "currency": "GBP",
         "date_column": "Date",
-        "price_column": "NAV",
+        "price_column": "Close",
         "use_local_only": true
     },
     "LU2112292763" : {
         "name": "BlackRock World Healthscience Class D5 - Income (GBP)",
-        "csv_path": "/data/Blackrock_World_Healthscience.csv",
+        "csv_path": "./data/Blackrock_World_Healthscience.csv",
         "currency": "GBP",
         "date_column": "Date",
-        "price_column": "NAV",
+        "price_column": "Close",
         "use_local_only": true
     },
     "SWPENSION" : {
         "name": "Scottish Widows Pension",
-        "csv_path": "/data/Scottish_Widows_Pension.csv",
+        "csv_path": "./data/Scottish_Widows_Pension.csv",
         "currency": "GBP",
         "date_column": "Date",
-        "price_column": "NAV",
+        "price_column": "Close",
+        "use_local_only": true
+    },
+    "GBPGBP=X" : {
+        "name": "Sterling",
+        "csv_path": "./data/GBP.csv",
+        "currency": "GBP",
+        "date_column": "Date",
+        "price_column": "Close",
         "use_local_only": true
     }
 }

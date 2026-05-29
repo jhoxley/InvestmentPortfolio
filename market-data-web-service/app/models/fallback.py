@@ -17,6 +17,8 @@ class FallbackEntry(BaseModel):
     def _validate_currency(cls, v: str) -> str:
         import re
 
-        if not re.fullmatch(r"[A-Z]{3}", v):
-            raise ValueError(f"currency must be a 3-letter ISO 4217 code, got '{v}'")
+        # Allow major-unit codes (GBP, USD) and minor-unit codes (GBp, USd) — the third
+        # char's case is the discriminator used by SubUnitNormaliser.
+        if not re.fullmatch(r"[A-Za-z]{3}", v):
+            raise ValueError(f"currency must be a 3-letter currency code, got '{v}'")
         return v
