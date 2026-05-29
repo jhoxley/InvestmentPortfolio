@@ -1,0 +1,633 @@
+openapi: 3.1.0
+info:
+  title: Market Data API
+  description: Locally hosted security pricing API backed by Yahoo Finance (yfinance).
+  version: 0.1.2
+paths:
+  /securities/{ticker}/price:
+    get:
+      tags:
+      - Securities
+      summary: Get Current Price
+      operationId: get_current_price_securities__ticker__price_get
+      parameters:
+      - name: ticker
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          pattern: ^[A-Za-z0-9.\-\^=]+$
+          title: Ticker
+      - name: currency
+        in: query
+        required: false
+        description: >
+          Target ISO 4217 3-letter currency code. When provided and different from
+          the security's native currency, the price is converted using the latest
+          available FX rate.
+        schema:
+          anyOf:
+          - type: string
+            pattern: ^[A-Z]{3}$
+          - type: 'null'
+          title: Currency
+          example: GBP
+      responses:
+        '200':
+          description: >
+            Current price returned (translated if currency parameter provided).
+
+            **Sub-unit currency normalisation**: Prices denominated in a sub-unit currency
+            (e.g. GBp — British pence, USd — US cents) are automatically converted to the
+            corresponding major-unit currency (GBP, USD) before being returned. The `currency`
+            field will always reflect the major-unit ISO 4217 code, and the `price` value will
+            always be in major-unit terms. Consumers do not need to perform any additional scaling.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceResponse'
+        '404':
+          description: Ticker not found or FX data unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '503':
+          description: >
+            Upstream data provider unavailable, or a configured fallback CSV file
+            could not be read (missing file or permission error).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /securities/{ticker}/history:
+    get:
+      tags:
+      - Securities
+      summary: Get Price History
+      operationId: get_price_history_securities__ticker__history_get
+      parameters:
+      - name: ticker
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          pattern: ^[A-Za-z0-9.\-\^=]+$
+          title: Ticker
+      - name: from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: From
+      - name: to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: To
+      - name: currency
+        in: query
+        required: false
+        description: >
+          Target ISO 4217 3-letter currency code. When provided, each price entry
+          is converted to this currency and includes the FX rate applied.
+        schema:
+          anyOf:
+          - type: string
+            pattern: ^[A-Z]{3}$
+          - type: 'null'
+          title: Currency
+          example: GBP
+      responses:
+        '200':
+          description: >
+            Price history returned (translated if currency parameter provided).
+            All Mon–Fri business days in the requested range are guaranteed to have an
+            entry — gaps from holidays or data outages are filled by forward/backward
+            carry of the nearest observation.
+
+            **Sub-unit currency normalisation**: Same normalisation as the `/price` endpoint
+            applies. All `close` values in the returned series are in major-unit terms, and the
+            `currency` field reflects the major-unit code. If a `currency` query parameter is
+            provided for FX conversion, normalisation is applied first so the FX rate is applied
+            to major-unit values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceHistoryResponse'
+        '404':
+          description: Ticker not found or FX alignment failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '503':
+          description: >
+            Upstream data provider unavailable, or a configured fallback CSV file
+            could not be read (missing file or permission error).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /fx/{pair}/history:
+    get:
+      tags:
+      - FX
+      summary: Get FX Pair History
+      operationId: get_fx_history_fx__pair__history_get
+      parameters:
+      - name: pair
+        in: path
+        required: true
+        description: >
+          Six-character concatenation of two ISO 4217 currency codes (e.g., USDGBP).
+          Base currency is the first three characters; quote currency is the last three.
+        schema:
+          type: string
+          pattern: ^[A-Za-z]{6}$
+          title: Pair
+          example: USDGBP
+      - name: from
+        in: query
+        required: false
+        description: Start date (inclusive) in YYYY-MM-DD format. Defaults to 30 days ago.
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: From
+          example: "2025-01-02"
+      - name: to
+        in: query
+        required: false
+        description: End date (inclusive) in YYYY-MM-DD format. Defaults to today.
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: To
+          example: "2025-03-31"
+      responses:
+        '200':
+          description: >
+            FX rate history returned successfully. All Mon–Fri business days in the
+            requested range are guaranteed to have a rate entry — gaps from holidays
+            or data outages are filled by forward/backward carry of the nearest
+            available rate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxHistoryResponse'
+        '404':
+          description: FX pair not found or no data available for the requested period.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: >
+            Validation error — invalid currency code, reversed date range, or
+            identical base and quote currencies.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '503':
+          description: Upstream data provider unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /identifiers/{identifier}:
+    get:
+      tags:
+      - Identifiers
+      summary: Resolve Identifier to Ticker
+      operationId: resolve_identifier_to_ticker
+      description: >
+        When the primary data source cannot resolve the identifier to a ticker, the service
+        consults the local fallback configuration. If a matching entry is found, the identifier
+        itself is returned as the ticker (a "pseudo-ticker"), enabling subsequent pricing
+        requests to route to the local file.
+      parameters:
+      - name: identifier
+        in: path
+        required: true
+        description: >
+          Security identifier to resolve. Accepted formats: ISIN (12 chars, ISO 3166-1 country
+          prefix), CUSIP (9 alphanumeric chars), SEDOL (6–7 alphanumeric chars). Normalised to
+          uppercase before processing.
+        schema:
+          type: string
+          minLength: 1
+          title: Identifier
+          example: US0378331005
+      - name: type
+        in: query
+        required: false
+        description: >
+          Optional type hint. When provided, the identifier is validated against the specified
+          format only; auto-detection is skipped.
+        schema:
+          anyOf:
+          - type: string
+            enum:
+            - ISIN
+            - CUSIP
+            - SEDOL
+          - type: 'null'
+          title: Type
+          example: ISIN
+      responses:
+        '200':
+          description: >
+            Identifier resolved successfully. The ticker field may be a pseudo-ticker
+            (equal to the identifier) when resolution came from the local fallback
+            configuration rather than the primary data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TickerResolutionResponse'
+        '404':
+          description: Identifier is validly formatted but could not be resolved to a ticker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Identifier does not match any supported format, or conflicts with the provided type hint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Upstream data provider unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /cache/{ticker}:
+    delete:
+      tags:
+      - Cache Management
+      summary: Delete Ticker Cache
+      operationId: delete_ticker_cache
+      parameters:
+      - name: ticker
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          title: Ticker
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheDeleteResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /cache:
+    delete:
+      tags:
+      - Cache Management
+      summary: Clear All Cache
+      operationId: clear_all_cache
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheClearResponse'
+components:
+  schemas:
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ErrorResponse:
+      type: object
+      required:
+      - detail
+      properties:
+        detail:
+          type: string
+          title: Detail
+        code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Code
+    FxRateEntry:
+      type: object
+      required:
+      - date
+      - rate
+      properties:
+        date:
+          type: string
+          format: date
+          title: Date
+          description: Trading date of the FX observation.
+          example: "2025-01-02"
+        rate:
+          type: number
+          format: float
+          exclusiveMinimum: 0.0
+          title: Rate
+          description: Rate of 1 BASE expressed in QUOTE units.
+          example: 0.7912
+    FxHistoryResponse:
+      type: object
+      required:
+      - pair
+      - base_currency
+      - quote_currency
+      - rates
+      properties:
+        pair:
+          type: string
+          title: Pair
+          description: Concatenated ISO 4217 pair code.
+          example: USDGBP
+        base_currency:
+          type: string
+          title: Base Currency
+          description: ISO 4217 base currency code.
+          example: USD
+        quote_currency:
+          type: string
+          title: Quote Currency
+          description: ISO 4217 quote currency code.
+          example: GBP
+        rates:
+          type: array
+          items:
+            $ref: '#/components/schemas/FxRateEntry'
+          title: Rates
+          description: Chronologically ascending list of dated FX rates.
+    PriceHistoryResponse:
+      properties:
+        ticker:
+          type: string
+          title: Ticker
+        currency:
+          type: string
+          title: Currency
+        prices:
+          items:
+            $ref: '#/components/schemas/PricePoint'
+          type: array
+          title: Prices
+      type: object
+      required:
+      - ticker
+      - currency
+      - prices
+      title: PriceHistoryResponse
+    PricePoint:
+      properties:
+        date:
+          type: string
+          format: date
+          title: Date
+        close:
+          type: number
+          exclusiveMinimum: 0.0
+          title: Close
+          description: >
+            Close price in the response currency. Always in major-unit terms.
+            Pence/cent values are divided by 100 before inclusion.
+        fx_rate:
+          anyOf:
+          - type: number
+            format: float
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Fx Rate
+          description: >
+            FX rate applied to this entry (BASE→QUOTE). Present only when
+            currency translation was performed; null otherwise.
+          example: 0.7912
+      type: object
+      required:
+      - date
+      - close
+      title: PricePoint
+    PriceResponse:
+      properties:
+        ticker:
+          type: string
+          title: Ticker
+        price:
+          type: number
+          exclusiveMinimum: 0.0
+          title: Price
+          description: >
+            Price in the response currency. Always expressed in major-unit terms.
+            Sub-unit prices are divided by the appropriate ratio (100 for pence/cents)
+            before being returned.
+        currency:
+          type: string
+          title: Currency
+          description: >
+            Currency of the returned price (target if translated, native otherwise).
+            Always a major-unit ISO 4217 code. Sub-unit codes (e.g. GBp) are normalised
+            to their major-unit equivalent (e.g. GBP).
+          example: GBP
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        market_status:
+          type: string
+          enum:
+          - open
+          - closed
+          title: Market Status
+        as_of_date:
+          type: string
+          format: date
+          title: As Of Date
+        fx_rate:
+          anyOf:
+          - type: number
+            format: float
+          - type: 'null'
+          title: Fx Rate
+          description: >
+            FX rate applied to the current price. Present only when currency
+            translation was performed; null otherwise.
+          example: 0.7912
+      type: object
+      required:
+      - ticker
+      - price
+      - currency
+      - timestamp
+      - market_status
+      - as_of_date
+      title: PriceResponse
+    CacheDeleteResponse:
+      properties:
+        ticker:
+          type: string
+          title: Ticker
+        deleted:
+          type: boolean
+          title: Deleted
+      type: object
+      required:
+      - ticker
+      - deleted
+      title: CacheDeleteResponse
+    CacheClearResponse:
+      properties:
+        deleted_count:
+          type: integer
+          minimum: 0
+          title: Deleted Count
+      type: object
+      required:
+      - deleted_count
+      title: CacheClearResponse
+    TickerResolutionResponse:
+      type: object
+      required:
+      - identifier
+      - identifier_type
+      - ticker
+      - security_name
+      - exchange
+      properties:
+        identifier:
+          type: string
+          title: Identifier
+          description: The original identifier value, normalised to uppercase.
+          example: US0378331005
+        identifier_type:
+          type: string
+          enum:
+          - ISIN
+          - CUSIP
+          - SEDOL
+          title: Identifier Type
+          description: The detected or caller-confirmed identifier type.
+          example: ISIN
+        ticker:
+          type: string
+          title: Ticker
+          description: Resolved ticker symbol as returned by the underlying data source.
+          example: AAPL
+        security_name:
+          type: string
+          title: Security Name
+          description: Security name as returned by the underlying data source.
+          example: Apple Inc.
+        exchange:
+          type: string
+          title: Exchange
+          description: >
+            Exchange identifier as returned by the underlying data source, with no
+            normalisation to MIC codes or common exchange names.
+          example: NMS
+    FallbackConfigEntry:
+      type: object
+      required:
+      - csv_path
+      - currency
+      - date_column
+      - price_column
+      properties:
+        csv_path:
+          type: string
+          description: Filesystem path to the CSV file containing price history.
+          example: /data/prices/priv01.csv
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: ISO 4217 currency code of the prices in the CSV file.
+          example: GBP
+        date_column:
+          type: string
+          description: Name of the column in the CSV file that contains date values.
+          example: Date
+        price_column:
+          type: string
+          description: Name of the column in the CSV file that contains price values.
+          example: Close
+        use_local_only:
+          type: boolean
+          default: false
+          description: >
+            When true, the primary data source is bypassed entirely; prices are served
+            from the local file without attempting a YFinance lookup.
+    FallbackConfig:
+      type: object
+      description: >
+        Top-level structure of the fallback configuration JSON file.
+        Keys are security identifiers (ticker symbols, ISINs, CUSIPs, or SEDOLs),
+        normalised to uppercase. Each value is a FallbackConfigEntry.
+      additionalProperties:
+        $ref: '#/components/schemas/FallbackConfigEntry'
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

@@ -1,0 +1,9 @@
+{
+  "PRIV01": {
+    "csv_path": "tests/fixtures/priv01_prices.csv",
+    "currency": "GBP",
+    "date_column": "Date",
+    "price_column": "Close",
+    "use_local_only": true
+  }
+}

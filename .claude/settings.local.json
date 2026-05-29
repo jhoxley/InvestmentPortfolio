@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/pip show *)",
+      "Bash(.venv/Scripts/pytest tests/ -v --tb=short)",
+      "Bash(.venv/Scripts/pytest tests/ -v --collect-only)",
+      "Bash(.venv/Scripts/python -c \"from tests.steps import current_price_steps\")",
+      "Bash(.venv/Scripts/pytest tests/ --collect-only)",
+      "Bash(.venv/Scripts/pytest tests/ -v --tb=line)",
+      "Bash(.venv/Scripts/pytest tests/steps/current_price_steps.py -v --tb=short)",
+      "Bash(.venv/Scripts/pytest tests/steps/historical_price_steps.py -v --tb=short)",
+      "Bash(.venv/Scripts/pytest tests/steps/error_handling_steps.py -v --tb=short)",
+      "Bash(.venv/Scripts/pip freeze *)",
+      "Bash(git -C \"C:/GitHub/JHoxley/InvestmentPortfolio/market-data-web-service\" rev-parse --is-inside-work-tree)",
+      "PowerShell(Get-ChildItem -Recurse \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\market-data-web-service\\\\tests\" -File | ForEach-Object { $_.FullName })"
+    ]
+  }
+}

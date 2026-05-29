@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fallback-config.schema.json",
+  "title": "FallbackConfig",
+  "description": "Local price file fallback configuration. Keys are security identifiers (ticker, ISIN, CUSIP, or SEDOL), normalised to uppercase. Each value describes the local CSV file to use when the primary data source has no data for that identifier.",
+  "type": "object",
+  "additionalProperties": {
+    "$ref": "#/$defs/FallbackEntry"
+  },
+  "$defs": {
+    "FallbackEntry": {
+      "type": "object",
+      "required": ["csv_path", "currency", "date_column", "price_column"],
+      "additionalProperties": false,
+      "properties": {
+        "csv_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Filesystem path to the CSV file. May be absolute or relative to the config file's directory.",
+          "examples": ["/data/prices/priv01.csv", "./prices/priv01.csv"]
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "ISO 4217 3-letter currency code of the prices in the CSV file.",
+          "examples": ["GBP", "USD", "EUR"]
+        },
+        "date_column": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the column header in the CSV file that contains the date for each observation.",
+          "examples": ["Date", "date", "TradeDate"]
+        },
+        "price_column": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the column header in the CSV file that contains the price for each observation.",
+          "examples": ["Close", "Price", "NAV", "close_price"]
+        },
+        "use_local_only": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the primary data source (YFinance) is bypassed entirely for this identifier. Use for assets that are known in advance to be unavailable on the primary source. When false (default), YFinance is tried first; the local file is only used if YFinance returns no data."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "PRIV01": {
+        "csv_path": "/data/prices/priv01.csv",
+        "currency": "GBP",
+        "date_column": "Date",
+        "price_column": "Close",
+        "use_local_only": false
+      },
+      "GB00B0PRVT01": {
+        "csv_path": "/data/prices/gb00b0prvt01.csv",
+        "currency": "GBP",
+        "date_column": "Date",
+        "price_column": "Price",
+        "use_local_only": true
+      }
+    }
+  ]
+}

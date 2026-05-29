@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& \".specify\\\\scripts\\\\powershell\\\\check-prerequisites.ps1\" -Json -PathsOnly)",
+      "PowerShell(& \".specify\\\\scripts\\\\powershell\\\\setup-plan.ps1\" -Json)",
+      "PowerShell(& \".specify\\\\scripts\\\\powershell\\\\setup-tasks.ps1\" -Json)",
+      "PowerShell(& \".specify\\\\scripts\\\\powershell\\\\check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks 2>$null)",
+      "Bash(.venv/Scripts/python -m mypy app/config.py app/cache/repository.py app/providers/cached_provider.py app/api/cache.py app/models/pricing.py app/api/securities.py app/main.py)",
+      "Bash(.venv/Scripts/python -m ruff check app/config.py app/cache/ app/providers/cached_provider.py app/api/cache.py app/models/pricing.py app/api/securities.py app/main.py tests/conftest.py tests/steps/cache_full_hit_steps.py tests/steps/cache_partial_hit_steps.py tests/steps/cache_miss_steps.py tests/steps/cache_management_steps.py)",
+      "Bash(.venv/Scripts/ruff check *)",
+      "Bash(python -m ruff --version)",
+      "Bash(pip show *)",
+      "Bash(/c/GitHub/JHoxley/InvestmentPortfolio/market-data-web-service/.venv/Scripts/pip install *)",
+      "PowerShell(Set-Content *)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:ranaroussi.github.io)",
+      "PowerShell(New-Item *)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/steps/price_gap_fill_steps.py -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/steps/fx_gap_fill_steps.py -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/steps/gap_fill_fx_conversion_steps.py -v)",
+      "Bash(.venv/Scripts/python.exe -m ruff check app/services/gap_fill.py app/services/pricing_service.py app/services/currency_service.py app/api/fx.py app/api/securities.py tests/conftest.py tests/steps/price_gap_fill_steps.py tests/steps/fx_gap_fill_steps.py tests/steps/gap_fill_fx_conversion_steps.py)",
+      "Bash(.venv/Scripts/python.exe -m mypy app/services/gap_fill.py app/services/pricing_service.py app/services/currency_service.py app/api/fx.py app/api/securities.py --strict)",
+      "Bash(.venv/Scripts/python.exe -m pytest -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/steps/cache_full_hit_steps.py::test_request_is_fully_satisfied_by_cached_data tests/steps/cache_miss_steps.py::test_no_cache_exists_for_requested_ticker -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/steps/cache_full_hit_steps.py::test_request_is_fully_satisfied_by_cached_data -v)",
+      "Bash(python -m pytest tests/steps/pence_normalisation_current_steps.py tests/steps/pence_normalisation_history_steps.py -v --tb=short)",
+      "Bash(.venv\\\\Scripts\\\\python.exe -m pytest tests/steps/pence_normalisation_current_steps.py tests/steps/pence_normalisation_history_steps.py -v --tb=short)",
+      "Bash(python -m pytest tests/steps/local_price_fallback_history_steps.py -v)",
+      "Bash(.venv\\\\Scripts\\\\python.exe -m pytest tests/steps/local_price_fallback_history_steps.py -v)"
+    ]
+  }
+}
