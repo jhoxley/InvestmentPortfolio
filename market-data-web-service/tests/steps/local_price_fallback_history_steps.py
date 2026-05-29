@@ -8,6 +8,7 @@ from pytest_bdd import given, scenarios, then, when
 from app.exceptions import DataNotFoundError, IdentifierNotFoundError
 from app.providers import PricingProvider
 from app.providers.identifier_provider import IdentifierProvider
+from app.services.minor_unit import SubUnitNormaliser
 
 scenarios("local_price_fallback_history.feature")
 
@@ -23,7 +24,6 @@ def _make_fallback_client(config_path: Path) -> tuple[TestClient, MagicMock, Mag
     from app.providers.fallback_provider import FallbackPricingProvider
     from app.providers.identifier_provider import (
         FallbackIdentifierProvider,
-        YFinanceIdentifierProvider,
     )
     from app.repositories.fallback_config import FallbackConfigRepository
     from app.services.gap_fill import GapFillService
@@ -42,7 +42,11 @@ def _make_fallback_client(config_path: Path) -> tuple[TestClient, MagicMock, Mag
 
     def override_pricing() -> PricingService:
         provider = FallbackPricingProvider(inner=mock_inner, fallback_repo=fallback_repo)
-        return PricingService(provider=provider, gap_fill=GapFillService())
+        return PricingService(
+            provider=provider,
+            gap_fill=GapFillService(),
+            normaliser=SubUnitNormaliser(),
+        )
 
     def override_identifier() -> IdentifierService:
         provider = FallbackIdentifierProvider(
@@ -175,7 +179,11 @@ def primary_no_data_unknown() -> TestClient:
 
     def override_pricing() -> PricingService:
         provider = FallbackPricingProvider(inner=mock_inner, fallback_repo=fallback_repo)
-        return PricingService(provider=provider, gap_fill=GapFillService())
+        return PricingService(
+            provider=provider,
+            gap_fill=GapFillService(),
+            normaliser=SubUnitNormaliser(),
+        )
 
     app.dependency_overrides[get_pricing_service] = override_pricing
     return TestClient(app)

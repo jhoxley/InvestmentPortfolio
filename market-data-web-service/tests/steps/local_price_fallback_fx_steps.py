@@ -2,12 +2,12 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 from fastapi.testclient import TestClient
 from pytest_bdd import given, scenarios, then, when
 
 from app.exceptions import DataNotFoundError
 from app.providers import PricingProvider
+from app.services.minor_unit import SubUnitNormaliser
 
 scenarios("local_price_fallback_fx.feature")
 
@@ -60,7 +60,11 @@ def fx_rate_gbpusd_125(fx_mocks: tuple[MagicMock, MagicMock]) -> TestClient:
 
     def override_pricing() -> PricingService:
         provider = FallbackPricingProvider(inner=mock_inner, fallback_repo=fallback_repo)
-        return PricingService(provider=provider, gap_fill=GapFillService())
+        return PricingService(
+            provider=provider,
+            gap_fill=GapFillService(),
+            normaliser=SubUnitNormaliser(),
+        )
 
     def override_currency() -> CurrencyService:
         return CurrencyService(

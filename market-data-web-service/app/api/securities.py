@@ -13,6 +13,7 @@ from app.repositories.fallback_config import FallbackConfigRepository
 from app.services.currency_service import CurrencyService
 from app.services.fx_aligner import FxAligner
 from app.services.gap_fill import GapFillService
+from app.services.minor_unit import SubUnitNormaliser
 from app.services.pricing_service import PricingService
 from app.validators.currency import validate_currency_code
 
@@ -26,7 +27,9 @@ def get_pricing_service(settings: Settings = Depends(get_settings)) -> PricingSe
     yf_provider = CachedPricingProvider(YFinanceProvider(), repo)
     fallback_repo = FallbackConfigRepository(settings.fallback.config_path)
     provider = FallbackPricingProvider(inner=yf_provider, fallback_repo=fallback_repo)
-    return PricingService(provider=provider, gap_fill=GapFillService())
+    return PricingService(
+        provider=provider, gap_fill=GapFillService(), normaliser=SubUnitNormaliser()
+    )
 
 
 def get_currency_service(settings: Settings = Depends(get_settings)) -> CurrencyService:

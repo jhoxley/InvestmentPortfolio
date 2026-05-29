@@ -1,4 +1,3 @@
-import pytest
 from fastapi.testclient import TestClient
 from pytest_bdd import given, scenarios, then, when
 
