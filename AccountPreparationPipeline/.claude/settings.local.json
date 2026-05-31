@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\" rev-parse --git-dir)",
+      "Bash(mkdir -p \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\src\\\\modes\\\\example\")",
+      "Bash(mkdir -p \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\tests\\\\unit\")",
+      "Bash(mkdir -p \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\tests\\\\features\\\\steps\")",
+      "Bash(mkdir -p \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\tests\\\\integration\")",
+      "Bash(mkdir -p \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\tests\\\\data\")"
+    ]
+  }
+}
