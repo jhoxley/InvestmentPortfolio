@@ -16,6 +16,7 @@ from src.context import ExecutionContext
 from src.dispatcher import dispatch
 from src.logging_config import configure_logging
 from src.metrics import MetricsRecord, emit_metrics
+from src.modes.consolidate_journals.mode import ConsolidateJournalsMode
 from src.modes.example.mode import ExampleMode
 from src.registry import ModeRegistry
 
@@ -23,6 +24,7 @@ from src.registry import ModeRegistry
 def _build_registry() -> ModeRegistry:
     registry = ModeRegistry()
     registry.register(ExampleMode())
+    registry.register(ConsolidateJournalsMode())
     return registry
 
 
