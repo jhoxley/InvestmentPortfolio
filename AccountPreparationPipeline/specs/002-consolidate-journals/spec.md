@@ -2,7 +2,7 @@
 
 **Feature Branch**: `002-consolidate-journals`  
 **Created**: 2026-05-31  
-**Status**: Draft  
+**Status**: Implemented  
 **Input**: User description: "Add a mode for consolidate_journals that takes 4 arguments to the script."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -21,7 +21,7 @@ A user has a directory of Hargreaves Lansdown CSV export files and wants to prod
 2. **Given** an HL CSV that has extra rows before the header, **When** processing, **Then** pre-header rows are skipped and only rows following the "Trade date / Settle date" header are imported.
 3. **Given** an HL CSV row where the Reference starts with 'B' followed by digits, **When** processed, **Then** the event action is recorded as `buy`.
 4. **Given** an HL CSV row where the Reference starts with 'S' followed by digits, **When** processed, **Then** the event action is recorded as `sell`.
-5. **Given** an HL CSV row where the action/type column contains `Deposit` or `BACS`, **When** processed, **Then** the event action is recorded as `contrib`.
+5. **Given** an HL CSV row where the Reference is `Deposit` or `BACS`, **When** processed, **Then** the event action is recorded as `deposit`.
 6. **Given** an HL CSV Description of "Vanguard US Equity Index Fund 500 @ £10.23", **When** processed, **Then** the sub-account is recorded as "Vanguard US Equity Index Fund" (with the quantity/unit-cost suffix stripped).
 7. **Given** a successful run, **When** the pipeline finishes, **Then** the console and log both display a success summary with a count of inserted events.
 
@@ -66,8 +66,9 @@ A user's input directory contains a mix of valid HL CSVs and one or more malform
 - What happens when a Description field contains no `@` separator (no unit cost/quantity suffix to strip)?
 - What happens when the value column is missing or non-numeric for a given row?
 - What happens when the output XLSX path's parent directory does not exist?
-- What happens when a Reference does not match any known pattern (not `B<digits>`, `S<digits>`, `Deposit`, or `BACS`)?
+- What happens when a Reference does not match any known action pattern?
 - What happens when non-CSV files (e.g. `.xlsx`, `.txt`) are present in the input directory?
+- What happens when an HL CSV file is encoded in Windows-1252 rather than UTF-8?
 
 ## Requirements *(mandatory)*
 
@@ -75,7 +76,7 @@ A user's input directory contains a mix of valid HL CSVs and one or more malform
 
 - **FR-001**: The pipeline MUST support a `consolidate_journals` mode, invoked with four positional arguments: (1) consolidated journal XLSX path, (2) input directory path, (3) consolidation method, (4) account name.
 - **FR-002**: If no file exists at the consolidated journal path, the system MUST create a new XLSX file there with the standardised schema.
-- **FR-003**: If a consolidated journal already exists, the system MUST merge new events from fragment files into it, applying deduplication to avoid inserting events that are already present. [NEEDS CLARIFICATION: What constitutes a duplicate — is a duplicate identified by the combination of `date + reference + sub_account`, or a different composite key? And should an exact duplicate silently skip or be counted as "merged" in the summary?]
+- **FR-003**: If a consolidated journal already exists, the system MUST merge new events from fragment files into it, applying deduplication to avoid inserting events that are already present. Duplicates are identified by `date + reference` for buy/sell transactions; cash and non-trade events use `date + action + value` as the fallback key. Exact duplicates are silently skipped and counted as "merged" in the summary.
 - **FR-004**: The system MUST process every file in the input directory using the rules for the specified consolidation method.
 - **FR-005**: The consolidated journal MUST use a fixed standardised schema with the following columns in order: `date`, `account`, `sub_account`, `action`, `reference`, `value`, `quantity`.
 - **FR-006**: The `date` column MUST use the settlement date where available; trade date is used only when settlement date is absent.
@@ -83,11 +84,28 @@ A user's input directory contains a mix of valid HL CSVs and one or more malform
 - **FR-008**: For the `HL` consolidation method, only CSV files in the input directory are processed; other file types are skipped without error.
 - **FR-009**: For HL CSVs, the parser MUST skip all rows until it finds a header row whose first cell is "Trade date" and second cell is "Settle date"; rows before that header are discarded.
 - **FR-010**: For HL CSVs, the `date` column MUST be populated from the "Settle date" column.
-- **FR-011**: For HL CSVs, a Reference value matching the pattern of the letter `B` immediately followed by one or more digits MUST produce an action of `buy`.
-- **FR-012**: For HL CSVs, a Reference value matching the pattern of the letter `S` immediately followed by one or more digits MUST produce an action of `sell`.
-- **FR-013**: For HL CSVs, a row where the action/type field equals `Deposit` or `BACS` MUST produce an action of `contrib`.
-- **FR-014**: For HL CSVs, the `sub_account` MUST be derived from the Description column by stripping any trailing suffix that contains a quantity and unit cost separated by `@` (e.g. "500 @ £10.23" or similar).
-- **FR-015**: For HL CSVs, the original Reference value MUST be passed through to the `reference` column unchanged.
+- **FR-011**: For HL CSVs, the `value` and `quantity` columns MUST be stored as numeric (number) cells in the XLSX output, not as text. `value` uses format `#,##0.00`; `quantity` uses format `#,##0.######`.
+- **FR-012**: For HL CSVs, the parser MUST apply the following Reference-to-action mapping rules in order:
+
+  | Reference pattern | Action |
+  |---|---|
+  | Starts with `B` followed by one or more digits | `buy` |
+  | Starts with `S` followed by one or more digits | `sell` |
+  | Equals `Deposit` or `BACS` (or starts with `BACS`) | `deposit` |
+  | Equals `contrib` (any case) | `deposit` |
+  | Equals `Transfer` (any case) and Description contains "income" | `income` |
+  | Equals `Transfer` (any case) — all other descriptions | `deposit` |
+  | Starts with `URI` (any case) | `income` |
+  | Equals `MANAGE FEE` (any case) | `fee` |
+  | Equals `INTEREST` or `RDP CR` (any case) | `income` |
+  | No rule matches | Parse error for that row |
+
+- **FR-013**: For HL CSVs, the `sub_account` MUST be determined as follows, applied in order:
+  1. If the action is `deposit`, `fee`, or `income`, the sub_account is always `"Cash"`, regardless of the Description column.
+  2. Otherwise, the sub_account is derived from the Description column by stripping any trailing quantity/unit-cost suffix of the form `<quantity> @ <price>`.
+  3. After step 2, any trailing ` Fee Sale -` suffix MUST be stripped from the result.
+- **FR-014**: For HL CSVs, the original Reference value MUST be passed through to the `reference` column unchanged.
+- **FR-015**: For HL CSVs, the parser MUST attempt to read fragment files as UTF-8 first, falling back to Windows-1252 (CP1252) if the file cannot be decoded as UTF-8. Files that cannot be decoded under either encoding are reported as a parse error.
 - **FR-016**: The pipeline MUST continue processing remaining files when a parse error is encountered for one file, rather than aborting the entire run.
 - **FR-017**: On completion, the pipeline MUST output a two-section summary to both the console and the log:
   - **Success**: count of distinct events inserted, merged (deduplicated), and removed.
@@ -98,7 +116,7 @@ A user's input directory contains a mix of valid HL CSVs and one or more malform
 - **Consolidated Journal**: The canonical XLSX output file accumulating all processed events across runs. Has a fixed schema and is the sole output artifact for this mode.
 - **Journal Fragment**: An input file (e.g. CSV for the HL method) containing raw exported transaction data from a provider.
 - **Consolidation Method**: An enumeration value (e.g. `HL`) that selects the parser and field-mapping rules for interpreting fragment files.
-- **Journal Event**: A single normalised row in the consolidated journal representing one financial transaction or cash movement.
+- **Journal Event**: A single normalised row in the consolidated journal representing one financial transaction or cash movement. The `action` field is one of: `buy`, `sell`, `deposit`, `income`, `fee`, `withdrawal`.
 
 ## Success Criteria *(mandatory)*
 
@@ -115,7 +133,7 @@ A user's input directory contains a mix of valid HL CSVs and one or more malform
 - Input fragment files for the `HL` method are CSV files (`.csv` extension); other file types in the input directory are silently skipped.
 - The consolidated journal XLSX, once created, is not manually edited between pipeline runs; the pipeline is the sole writer.
 - Monetary values in HL fragment files are already denominated in GBP; no currency conversion is required.
-- The `quantity` column may be empty or zero for non-unit-based events such as cash contributions.
+- The `quantity` column may be empty for non-unit-based events such as cash deposits and fee charges.
 - The pipeline is run interactively from the command line; no background scheduling is required.
 - The HL CSV export format is consistent with Hargreaves Lansdown's current layout; changes to the HL export schema are out of scope.
 - Events whose Reference does not match any known action pattern are recorded in the error section rather than silently dropped or passed through with an unknown action.

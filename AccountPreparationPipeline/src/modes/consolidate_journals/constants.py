@@ -18,13 +18,20 @@ DEDUP_FALLBACK_KEY_COLUMNS: list[str] = ["date", "action", "value"]
 HL_HEADER_COL0: str = "Trade date"
 HL_HEADER_COL1: str = "Settle date"
 
-HL_CONTRIB_REFERENCES: frozenset[str] = frozenset({"Deposit", "BACS"})
+HL_DEPOSIT_REFERENCES: frozenset[str] = frozenset({"Deposit", "BACS"})
 
 RE_BUY: re.Pattern[str] = re.compile(r"^B\d+$")
 RE_SELL: re.Pattern[str] = re.compile(r"^S\d+$")
 RE_BACS: re.Pattern[str] = re.compile(r"^BACS", re.IGNORECASE)
 
 RE_DESCRIPTION_SUFFIX: re.Pattern[str] = re.compile(r"\s+[\d.,]+\s*@.*$")
+
+CASH_SUB_ACCOUNT: str = "Cash"
+CASH_ACTION_TYPES: frozenset[str] = frozenset({"deposit", "fee", "income"})
+SUB_ACCOUNT_STRIP_SUFFIXES: tuple[str, ...] = (" Fee Sale -",)
+
+NUMBER_FORMAT_VALUE: str = "#,##0.00"
+NUMBER_FORMAT_QUANTITY: str = "#,##0.######"
 
 LOG_CJ_CORRELATION_ID: str = "correlation_id"
 LOG_CJ_FILE: str = "file"

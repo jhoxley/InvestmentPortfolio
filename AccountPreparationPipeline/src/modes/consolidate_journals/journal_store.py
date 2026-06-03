@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -8,12 +9,16 @@ import pandas as pd
 
 from src.modes.consolidate_journals.constants import (
     JOURNAL_COLUMNS,
+    NUMBER_FORMAT_QUANTITY,
+    NUMBER_FORMAT_VALUE,
     RE_BUY,
     RE_SELL,
 )
 from src.modes.consolidate_journals.schema import JournalEvent
 
 _logger = logging.getLogger("pipeline.modes.consolidate_journals.journal_store")
+
+_NUMERIC_COLUMNS = ("value", "quantity")
 
 
 def _is_transaction_reference(reference: str) -> bool:
@@ -30,8 +35,12 @@ class JournalStore:
             df = pd.read_excel(path, engine="openpyxl", dtype=str)
             missing = [c for c in JOURNAL_COLUMNS if c not in df.columns]
             if missing:
-                raise ValueError(f"Consolidated journal at {path} is missing columns: {missing}")
+                raise ValueError(
+                    f"Consolidated journal at {path} is missing columns: {missing}"
+                )
             df = df[JOURNAL_COLUMNS]
+            for col in _NUMERIC_COLUMNS:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
             _logger.info("Loaded existing journal", extra={"path": str(path), "rows": len(df)})
         else:
             df = pd.DataFrame(columns=JOURNAL_COLUMNS)
@@ -54,8 +63,8 @@ class JournalStore:
                     "sub_account": e.sub_account,
                     "action": str(e.action),
                     "reference": e.reference,
-                    "value": str(e.value),
-                    "quantity": str(e.quantity) if e.quantity is not None else "",
+                    "value": float(e.value),
+                    "quantity": float(e.quantity) if e.quantity is not None else None,
                 }
                 for e in events
             ]
@@ -104,10 +113,20 @@ class JournalStore:
         )
         tmp_path = Path(tmp_path_str)
         try:
-            import os
-
             os.close(tmp_fd)
-            self._df[JOURNAL_COLUMNS].to_excel(tmp_path, index=False, engine="openpyxl")
+            value_col = JOURNAL_COLUMNS.index("value") + 1
+            qty_col = JOURNAL_COLUMNS.index("quantity") + 1
+
+            with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+                self._df[JOURNAL_COLUMNS].to_excel(writer, index=False)
+                ws = writer.sheets["Sheet1"]
+                for row in ws.iter_rows(min_row=2, min_col=value_col, max_col=value_col):
+                    for cell in row:
+                        cell.number_format = NUMBER_FORMAT_VALUE
+                for row in ws.iter_rows(min_row=2, min_col=qty_col, max_col=qty_col):
+                    for cell in row:
+                        cell.number_format = NUMBER_FORMAT_QUANTITY
+
             tmp_path.replace(path)
             _logger.info("Journal saved", extra={"path": str(path), "rows": len(self._df)})
         except Exception:

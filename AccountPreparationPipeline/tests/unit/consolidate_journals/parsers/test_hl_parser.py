@@ -51,17 +51,59 @@ class TestActionMapping:
         assert len(sell_events) == 1
         assert sell_events[0].reference == "S67890"
 
-    def test_deposit_reference_maps_to_contrib(self) -> None:
+    def test_deposit_reference_maps_to_deposit(self) -> None:
         parser = HLFragmentParser()
         result = parser.parse(DATA_DIR / "valid_hl_contrib.csv", ACCOUNT)
-        contrib_events = [e for e in result.events if e.action == ActionType.CONTRIB]
-        assert len(contrib_events) == 2
+        deposit_events = [e for e in result.events if e.action == ActionType.DEPOSIT]
+        assert len(deposit_events) == 2
 
-    def test_bacs_reference_maps_to_contrib(self) -> None:
+    def test_bacs_reference_maps_to_deposit(self) -> None:
         parser = HLFragmentParser()
         result = parser.parse(DATA_DIR / "valid_hl_contrib.csv", ACCOUNT)
         bacs_event = next(e for e in result.events if e.reference == "BACS")
-        assert bacs_event.action == ActionType.CONTRIB
+        assert bacs_event.action == ActionType.DEPOSIT
+
+    def test_contrib_reference_maps_to_deposit(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_contrib_ref.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "contrib")
+        assert event.action == ActionType.DEPOSIT
+
+    def test_transfer_without_income_description_maps_to_deposit(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_transfer_uri.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "Transfer")
+        assert event.action == ActionType.DEPOSIT
+
+    def test_transfer_with_income_description_maps_to_income(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_income_transfer.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "Transfer")
+        assert event.action == ActionType.INCOME
+
+    def test_uri_reference_maps_to_income(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_transfer_uri.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "URI0745088")
+        assert event.action == ActionType.INCOME
+
+    def test_manage_fee_reference_maps_to_fee(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_fee_interest.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "MANAGE FEE")
+        assert event.action == ActionType.FEE
+
+    def test_interest_reference_maps_to_income(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_fee_interest.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "INTEREST")
+        assert event.action == ActionType.INCOME
+
+    def test_rdp_cr_reference_maps_to_income(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_rdp_cr.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "RDP CR")
+        assert event.action == ActionType.INCOME
 
 
 class TestDateParsing:
@@ -90,11 +132,36 @@ class TestDescriptionStripping:
         assert "@" not in vanguard_event.sub_account
         assert vanguard_event.sub_account == "Vanguard US Equity Index Fund Acc"
 
-    def test_description_without_suffix_unchanged(self) -> None:
+    def test_deposit_action_sub_account_is_cash(self) -> None:
         parser = HLFragmentParser()
         result = parser.parse(DATA_DIR / "valid_hl_contrib.csv", ACCOUNT)
         deposit_event = next(e for e in result.events if e.reference == "Deposit")
-        assert deposit_event.sub_account == "Bank transfer"
+        assert deposit_event.sub_account == "Cash"
+
+    def test_fee_action_sub_account_is_cash(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_fee_interest.csv", ACCOUNT)
+        fee_event = next(e for e in result.events if e.reference == "MANAGE FEE")
+        assert fee_event.sub_account == "Cash"
+
+    def test_income_action_sub_account_is_cash(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_fee_interest.csv", ACCOUNT)
+        interest_event = next(e for e in result.events if e.reference == "INTEREST")
+        assert interest_event.sub_account == "Cash"
+
+    def test_buy_action_sub_account_from_description(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_simple.csv", ACCOUNT)
+        buy_event = next(e for e in result.events if e.reference == "B12345")
+        assert buy_event.sub_account == "Vanguard US Equity Index Fund Acc"
+
+    def test_fee_sale_suffix_stripped_from_sub_account(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_fee_sale.csv", ACCOUNT)
+        assert len(result.errors) == 0
+        event = result.events[0]
+        assert event.sub_account == "BlackRock Consensus 85 Class I - Accumulation (GBP)"
 
 
 class TestValueAndQuantity:

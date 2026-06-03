@@ -10,7 +10,9 @@ from pathlib import Path
 class ActionType(StrEnum):
     BUY = "buy"
     SELL = "sell"
-    CONTRIB = "contrib"
+    DEPOSIT = "deposit"
+    INCOME = "income"
+    FEE = "fee"
     WITHDRAWAL = "withdrawal"
 
 

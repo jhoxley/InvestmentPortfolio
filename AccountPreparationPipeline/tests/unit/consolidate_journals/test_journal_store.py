@@ -107,18 +107,18 @@ class TestMerge:
         assert merged == 1
         assert store2.row_count == 2
 
-    def test_contrib_fallback_key_date_action_value(self, tmp_path: Path) -> None:
+    def test_deposit_fallback_key_date_action_value(self, tmp_path: Path) -> None:
         path = tmp_path / "j.xlsx"
         store = JournalStore.load(path)
-        contrib = make_event(
+        deposit = make_event(
             reference="Deposit",
-            action=ActionType.CONTRIB,
+            action=ActionType.DEPOSIT,
             quantity=None,
             value=Decimal("1000.00"),
         )
-        store.merge([contrib])
+        store.merge([deposit])
         store.save(path)
         store2 = JournalStore.load(path)
-        inserted, merged = store2.merge([contrib])
+        inserted, merged = store2.merge([deposit])
         assert inserted == 0
         assert merged == 1

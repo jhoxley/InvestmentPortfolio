@@ -22,8 +22,14 @@ class TestActionType:
     def test_sell_string_value(self) -> None:
         assert ActionType.SELL == "sell"
 
-    def test_contrib_string_value(self) -> None:
-        assert ActionType.CONTRIB == "contrib"
+    def test_deposit_string_value(self) -> None:
+        assert ActionType.DEPOSIT == "deposit"
+
+    def test_income_string_value(self) -> None:
+        assert ActionType.INCOME == "income"
+
+    def test_fee_string_value(self) -> None:
+        assert ActionType.FEE == "fee"
 
     def test_withdrawal_string_value(self) -> None:
         assert ActionType.WITHDRAWAL == "withdrawal"

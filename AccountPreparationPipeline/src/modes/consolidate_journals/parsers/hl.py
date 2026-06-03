@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import csv
 import datetime
+import io
 import logging
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from src.modes.consolidate_journals.constants import (
-    HL_CONTRIB_REFERENCES,
+    CASH_ACTION_TYPES,
+    CASH_SUB_ACCOUNT,
+    HL_DEPOSIT_REFERENCES,
     HL_HEADER_COL0,
     HL_HEADER_COL1,
     RE_BUY,
     RE_DESCRIPTION_SUFFIX,
     RE_SELL,
+    SUB_ACCOUNT_STRIP_SUFFIXES,
 )
 from src.modes.consolidate_journals.schema import (
     ActionType,
@@ -24,6 +28,16 @@ from src.modes.consolidate_journals.schema import (
 _logger = logging.getLogger("pipeline.modes.consolidate_journals.parsers.hl")
 
 _DATE_FORMATS = ("%d/%m/%Y", "%Y-%m-%d")
+_ENCODINGS = ("utf-8-sig", "cp1252")
+
+
+def _read_text(file_path: Path) -> str:
+    for encoding in _ENCODINGS:
+        try:
+            return file_path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeDecodeError("all", b"", 0, 1, f"Cannot decode {file_path.name} as UTF-8 or cp1252")
 
 
 def _parse_date(raw: str) -> datetime.date:
@@ -51,14 +65,24 @@ def _strip_description_suffix(description: str) -> str:
     return result if result else description
 
 
-def _map_action(reference: str) -> ActionType:
+def _map_action(reference: str, description: str) -> ActionType:
     ref = reference.strip()
     if RE_BUY.match(ref):
         return ActionType.BUY
     if RE_SELL.match(ref):
         return ActionType.SELL
-    if ref in HL_CONTRIB_REFERENCES or ref.upper().startswith("BACS"):
-        return ActionType.CONTRIB
+    if ref in HL_DEPOSIT_REFERENCES or ref.upper().startswith("BACS"):
+        return ActionType.DEPOSIT
+    if ref.lower() == "contrib":
+        return ActionType.DEPOSIT
+    if ref.lower() == "transfer":
+        return ActionType.INCOME if "income" in description.lower() else ActionType.DEPOSIT
+    if ref.upper().startswith("URI"):
+        return ActionType.INCOME
+    if ref.upper() == "MANAGE FEE":
+        return ActionType.FEE
+    if ref.upper() in ("INTEREST", "RDP CR"):
+        return ActionType.INCOME
     raise ValueError(f"Unknown action for reference: {ref!r}")
 
 
@@ -68,53 +92,53 @@ class HLFragmentParser:
         errors: list[ParseError] = []
 
         try:
-            with file_path.open(newline="", encoding="utf-8-sig") as fh:
-                reader = csv.reader(fh)
-                col_indices: dict[str, int] | None = None
+            content = _read_text(file_path)
+            reader = csv.reader(io.StringIO(content))
+            col_indices: dict[str, int] | None = None
 
-                for row in reader:
-                    if col_indices is None:
-                        if (
-                            len(row) >= 2
-                            and row[0].strip() == HL_HEADER_COL0
-                            and row[1].strip() == HL_HEADER_COL1
-                        ):
-                            col_indices = {cell.strip(): idx for idx, cell in enumerate(row)}
-                        continue
-
-                    if not any(cell.strip() for cell in row):
-                        continue
-
-                    line = reader.line_num
-                    try:
-                        event = _parse_row(row, col_indices, account, file_path, line)
-                        events.append(event)
-                    except _RowParseError as exc:
-                        errors.append(exc.as_parse_error())
-                    except Exception as exc:
-                        errors.append(
-                            ParseError(
-                                file_path=file_path,
-                                line_number=line,
-                                message=str(exc),
-                            )
-                        )
-
+            for row in reader:
                 if col_indices is None:
+                    if (
+                        len(row) >= 2
+                        and row[0].strip() == HL_HEADER_COL0
+                        and row[1].strip() == HL_HEADER_COL1
+                    ):
+                        col_indices = {cell.strip(): idx for idx, cell in enumerate(row)}
+                    continue
+
+                if not any(cell.strip() for cell in row):
+                    continue
+
+                line = reader.line_num
+                try:
+                    event = _parse_row(row, col_indices, account, file_path, line)
+                    events.append(event)
+                except _RowParseError as exc:
+                    errors.append(exc.as_parse_error())
+                except Exception as exc:
                     errors.append(
                         ParseError(
                             file_path=file_path,
-                            line_number=None,
-                            message="No header row found matching 'Trade date / Settle date'",
+                            line_number=line,
+                            message=str(exc),
                         )
                     )
 
-        except OSError as exc:
+            if col_indices is None:
+                errors.append(
+                    ParseError(
+                        file_path=file_path,
+                        line_number=None,
+                        message="No header row found matching 'Trade date / Settle date'",
+                    )
+                )
+
+        except (OSError, UnicodeDecodeError) as exc:
             errors.append(
                 ParseError(
                     file_path=file_path,
                     line_number=None,
-                    message=f"Cannot open file: {exc}",
+                    message=f"Cannot read file: {exc}",
                 )
             )
 
@@ -171,7 +195,7 @@ def _parse_row(
         raise _RowParseError(file_path, line, f"Invalid date: {exc}") from exc
 
     try:
-        action = _map_action(reference)
+        action = _map_action(reference, description)
     except ValueError as exc:
         raise _RowParseError(file_path, line, str(exc)) from exc
 
@@ -188,9 +212,14 @@ def _parse_row(
     except ValueError:
         quantity = None
 
-    sub_account = _strip_description_suffix(description) if description else ""
-    if not sub_account:
-        sub_account = description or reference
+    if str(action) in CASH_ACTION_TYPES:
+        sub_account = CASH_SUB_ACCOUNT
+    else:
+        sub_account = _strip_description_suffix(description) if description else ""
+        if not sub_account:
+            sub_account = description or reference
+        for suffix in SUB_ACCOUNT_STRIP_SUFFIXES:
+            sub_account = sub_account.removesuffix(suffix).rstrip()
 
     return JournalEvent(
         date=date,
