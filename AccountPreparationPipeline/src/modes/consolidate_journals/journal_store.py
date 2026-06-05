@@ -35,9 +35,7 @@ class JournalStore:
             df = pd.read_excel(path, engine="openpyxl", dtype=str)
             missing = [c for c in JOURNAL_COLUMNS if c not in df.columns]
             if missing:
-                raise ValueError(
-                    f"Consolidated journal at {path} is missing columns: {missing}"
-                )
+                raise ValueError(f"Consolidated journal at {path} is missing columns: {missing}")
             df = df[JOURNAL_COLUMNS]
             for col in _NUMERIC_COLUMNS:
                 df[col] = pd.to_numeric(df[col], errors="coerce")

@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import logging
+from argparse import ArgumentParser, Namespace
+from pathlib import Path
+
+import pandas as pd
+
+from src.constants import EXIT_INVALID_ARGS, EXIT_SUCCESS
+from src.context import ExecutionContext
+from src.modes.consolidate_journals.constants import (
+    JOURNAL_COLUMNS,
+    NUMBER_FORMAT_QUANTITY,
+    NUMBER_FORMAT_VALUE,
+)
+from src.modes.create_ledger.constants import COMPLETION_MSG, LOG_CL_CORRELATION_ID
+from src.modes.create_ledger.engine import LedgerEngine
+
+_logger = logging.getLogger("pipeline.modes.create_ledger")
+
+
+class CreateLedgerMode:
+    name = "create_ledger"
+    description = "Compute running position balances from a consolidated journal"
+
+    def register_arguments(self, parser: ArgumentParser) -> None:
+        parser.add_argument(
+            "input_path",
+            metavar="INPUT_PATH",
+            help="Path to an existing consolidated journal XLSX produced by consolidate_journals.",
+        )
+        parser.add_argument(
+            "output_path",
+            metavar="OUTPUT_PATH",
+            help="Path for the ledger output XLSX. Parent directory must exist.",
+        )
+
+    def execute(self, context: ExecutionContext, args: Namespace) -> int:
+        input_path = Path(args.input_path)
+        output_path = Path(args.output_path)
+
+        _logger.info(
+            "create_ledger started",
+            extra={
+                LOG_CL_CORRELATION_ID: context.correlation_id,
+                "input_path": str(input_path),
+                "output_path": str(output_path),
+            },
+        )
+
+        if not input_path.exists():
+            _logger.error(
+                "Invalid input journal",
+                extra={"detail": f"Input file not found: {input_path}"},
+            )
+            return EXIT_INVALID_ARGS
+
+        df = pd.read_excel(input_path, engine="openpyxl")
+
+        try:
+            result = LedgerEngine().run(df)
+        except ValueError as exc:
+            _logger.error("Invalid input journal", extra={"detail": str(exc)})
+            return EXIT_INVALID_ARGS
+
+        value_col = JOURNAL_COLUMNS.index("value") + 1
+        qty_col = JOURNAL_COLUMNS.index("quantity") + 1
+
+        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+            result.to_excel(writer, index=False)
+            ws = writer.sheets["Sheet1"]
+            for row in ws.iter_rows(min_row=2, min_col=value_col, max_col=value_col):
+                for cell in row:
+                    cell.number_format = NUMBER_FORMAT_VALUE
+            for row in ws.iter_rows(min_row=2, min_col=qty_col, max_col=qty_col):
+                for cell in row:
+                    cell.number_format = NUMBER_FORMAT_QUANTITY
+
+        rows = len(result)
+        print(f"{COMPLETION_MSG}: {rows} rows processed -> {output_path}")
+
+        _logger.info(
+            COMPLETION_MSG,
+            extra={
+                LOG_CL_CORRELATION_ID: context.correlation_id,
+                "input_path": str(input_path),
+                "output_path": str(output_path),
+                "rows_processed": rows,
+                "rows_written": rows,
+            },
+        )
+
+        return EXIT_SUCCESS
