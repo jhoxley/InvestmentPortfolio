@@ -22,6 +22,9 @@ HL_DEPOSIT_REFERENCES: frozenset[str] = frozenset({"Deposit", "BACS"})
 
 RE_BUY: re.Pattern[str] = re.compile(r"^B\d+$")
 RE_SELL: re.Pattern[str] = re.compile(r"^S\d+$")
+RE_OFFSET: re.Pattern[str] = re.compile(r"^[BS]\d+-offset$")
+
+OFFSET_SUFFIX: str = "-offset"
 RE_BACS: re.Pattern[str] = re.compile(r"^BACS", re.IGNORECASE)
 
 RE_DESCRIPTION_SUFFIX: re.Pattern[str] = re.compile(r"\s+[\d.,]+\s*@.*$")

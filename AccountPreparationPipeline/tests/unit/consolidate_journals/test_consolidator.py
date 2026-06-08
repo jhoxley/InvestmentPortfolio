@@ -95,5 +95,5 @@ class TestConsolidationEngineRun:
             method=ConsolidationMethod.HL,
             account="Test ISA",
         )
-        assert summary.events_inserted == 3
+        assert summary.events_inserted == 6  # 3 real events + 3 offsets
         assert len(summary.errors) >= 1

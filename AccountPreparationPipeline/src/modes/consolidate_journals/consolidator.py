@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.modes.consolidate_journals.constants import LOG_CJ_CORRELATION_ID, LOG_CJ_FILE
 from src.modes.consolidate_journals.journal_store import JournalStore
+from src.modes.consolidate_journals.offset_generator import OffsetGenerator
 from src.modes.consolidate_journals.parsers.base import FragmentParser
 from src.modes.consolidate_journals.parsers.hl import HLFragmentParser
 from src.modes.consolidate_journals.schema import (
@@ -75,6 +76,17 @@ class ConsolidationEngine:
                 total_merged += merged
 
         store.save(journal_path)
+
+        missing = store.missing_offset_trades()
+        if not missing.empty:
+            offsets = OffsetGenerator().generate_from_df(missing)
+            inserted_offsets, _ = store.merge(offsets)
+            total_inserted += inserted_offsets
+            store.save(journal_path)
+            _logger.info(
+                "Offset backfill complete",
+                extra={"offsets_generated": inserted_offsets},
+            )
 
         summary = ConsolidationSummary(
             files_processed=len(files),

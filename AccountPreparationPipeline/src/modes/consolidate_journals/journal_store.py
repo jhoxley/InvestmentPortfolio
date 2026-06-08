@@ -11,10 +11,12 @@ from src.modes.consolidate_journals.constants import (
     JOURNAL_COLUMNS,
     NUMBER_FORMAT_QUANTITY,
     NUMBER_FORMAT_VALUE,
+    OFFSET_SUFFIX,
     RE_BUY,
+    RE_OFFSET,
     RE_SELL,
 )
-from src.modes.consolidate_journals.schema import JournalEvent
+from src.modes.consolidate_journals.schema import ActionType, JournalEvent
 
 _logger = logging.getLogger("pipeline.modes.consolidate_journals.journal_store")
 
@@ -22,7 +24,7 @@ _NUMERIC_COLUMNS = ("value", "quantity")
 
 
 def _is_transaction_reference(reference: str) -> bool:
-    return bool(RE_BUY.match(reference) or RE_SELL.match(reference))
+    return bool(RE_BUY.match(reference) or RE_SELL.match(reference) or RE_OFFSET.match(reference))
 
 
 class JournalStore:
@@ -48,6 +50,19 @@ class JournalStore:
     @property
     def row_count(self) -> int:
         return len(self._df)
+
+    def missing_offset_trades(self) -> pd.DataFrame:
+        """Return buy/sell rows that have no corresponding offset row in the journal."""
+        if self._df.empty:
+            return self._df.iloc[0:0]
+        trade_mask = self._df["action"].isin({ActionType.BUY.value, ActionType.SELL.value})
+        existing_offset_refs: set[str] = set(
+            self._df.loc[self._df["action"] == ActionType.TRADING.value, "reference"]
+        )
+        needs_offset = trade_mask & ~self._df["reference"].apply(
+            lambda ref: (str(ref) + OFFSET_SUFFIX) in existing_offset_refs
+        )
+        return self._df[needs_offset].copy()
 
     def merge(self, events: list[JournalEvent]) -> tuple[int, int]:
         if not events:

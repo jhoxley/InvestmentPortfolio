@@ -12,14 +12,14 @@ Feature: Journal Fragment Consolidation
     Then the exit code is 0
     And the consolidated journal XLSX is created
     And the journal contains the correct columns
-    And the journal contains 3 events
+    And the journal contains 6 events
 
   Scenario: Skips preamble rows before HL CSV header
     Given an HL CSV file with metadata preamble rows before the header
     And no existing consolidated journal
     When I run consolidate_journals with method HL and account "Test ISA"
     Then the exit code is 0
-    And the journal contains 3 events
+    And the journal contains 6 events
 
   Scenario: Maps B-reference to buy action
     Given a valid HL CSV file with a buy transaction reference
@@ -64,7 +64,7 @@ Feature: Journal Fragment Consolidation
     When I run consolidate_journals with method HL and account "Test ISA"
     Then the exit code is 0
     And the stdout summary shows 2 events inserted
-    And the journal contains 5 events total
+    And the journal contains 8 events total
 
   # ─── User Story 3: Graceful Error Handling ─────────────────────────────────
 
@@ -89,5 +89,49 @@ Feature: Journal Fragment Consolidation
     And no existing consolidated journal
     When I run consolidate_journals with method HL and account "Test ISA"
     Then the exit code is 0
-    And the journal contains 1 event from the valid row
+    And the journal contains 2 events total
     And the stdout summary contains an ERRORS section
+
+  # ─── Trade Cash Offset Entries ──────────────────────────────────────────────
+
+  Scenario: Offset rows are generated for buy and sell trades
+    Given a directory of valid HL CSV files
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 3 rows with action "trading"
+
+  Scenario: No offset rows generated for deposit-only input
+    Given a valid HL CSV file with Deposit and BACS rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 0 rows with action "trading"
+
+  Scenario: Existing journal receives backfilled offsets on first post-deployment run
+    Given a journal already containing a buy trade but no offset row
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 1 rows with action "trading"
+
+  Scenario: Re-running with same inputs does not duplicate offset rows
+    Given a directory of valid HL CSV files
+    And no existing consolidated journal
+    And I have already run consolidate_journals once
+    When I run consolidate_journals again with the same inputs
+    Then the exit code is 0
+    And the journal contains 3 rows with action "trading"
+
+  Scenario: Incremental run adds offsets only for new trades
+    Given an existing consolidated journal with 3 events
+    And a directory containing a new HL CSV file with 2 different events
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 3 rows with action "trading"
+
+  Scenario: Events inserted count includes offset rows
+    Given a directory of valid HL CSV files
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the stdout summary shows 6 events inserted

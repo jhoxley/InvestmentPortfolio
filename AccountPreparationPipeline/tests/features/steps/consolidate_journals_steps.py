@@ -89,6 +89,36 @@ def test_bad_value_row() -> None:
     pass
 
 
+@scenario(FEATURE_FILE, "Offset rows are generated for buy and sell trades")
+def test_offsets_generated() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "No offset rows generated for deposit-only input")
+def test_no_offsets_for_deposits() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Existing journal receives backfilled offsets on first post-deployment run")
+def test_backfill_existing_trade() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Re-running with same inputs does not duplicate offset rows")
+def test_offsets_not_duplicated() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Incremental run adds offsets only for new trades")
+def test_incremental_offsets() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Events inserted count includes offset rows")
+def test_summary_includes_offsets() -> None:
+    pass
+
+
 # ── Given steps ──────────────────────────────────────────────────────────────
 
 
@@ -297,10 +327,40 @@ def check_invalid_file_mentioned(result: subprocess.CompletedProcess[str]) -> No
 @then("the journal contains events from the valid file only")
 def check_only_valid_events(state: dict) -> None:
     df = pd.read_excel(state["journal_path"], engine="openpyxl")
-    assert len(df) == 3, f"Expected 3 valid events, got {len(df)}"
+    assert len(df) == 6, f"Expected 6 events (3 real + 3 offsets from valid file), got {len(df)}"
 
 
 @then(parsers.parse("the journal contains {count:d} event from the valid row"))
 def check_one_valid_event(state: dict, count: int) -> None:
     df = pd.read_excel(state["journal_path"], engine="openpyxl")
     assert len(df) == count, f"Expected {count} event(s), got {len(df)}"
+
+
+# ── Trade Cash Offset step ────────────────────────────────────────────────────
+
+
+@given(
+    "a journal already containing a buy trade but no offset row",
+    target_fixture="state",
+)
+def state_journal_with_trade_no_offset(tmp_path: Path) -> dict:
+    from src.modes.consolidate_journals.constants import JOURNAL_COLUMNS
+
+    journal_path = tmp_path / "journal.xlsx"
+    pd.DataFrame(
+        [
+            {
+                "date": "2024-01-17",
+                "account": "Test ISA",
+                "sub_account": "Vanguard Fund",
+                "action": "buy",
+                "reference": "B12345",
+                "value": 2000.0,
+                "quantity": 10.0,
+            }
+        ],
+        columns=JOURNAL_COLUMNS,
+    ).to_excel(journal_path, index=False, engine="openpyxl")
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    return {"tmp_path": tmp_path, "journal_path": journal_path, "frags_dir": frags_dir}
