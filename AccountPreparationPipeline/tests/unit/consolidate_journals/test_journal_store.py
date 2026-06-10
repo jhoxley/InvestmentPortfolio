@@ -122,3 +122,145 @@ class TestMerge:
         inserted, merged = store2.merge([deposit])
         assert inserted == 0
         assert merged == 1
+
+
+class TestRectifyOffsets:
+    def _store_with_buy_and_wrong_offset(self) -> JournalStore:
+        buy = make_event(reference="B12345", action=ActionType.BUY, value=Decimal("-1000.00"))
+        wrong_offset = make_event(
+            reference="B12345-offset",
+            action=ActionType.TRADING,
+            sub_account="Cash",
+            value=Decimal("1000.00"),
+            quantity=Decimal("1000.00"),
+        )
+        store = JournalStore(
+            pd.DataFrame(
+                [
+                    {
+                        "date": str(buy.date),
+                        "account": buy.account,
+                        "sub_account": buy.sub_account,
+                        "action": str(buy.action),
+                        "reference": buy.reference,
+                        "value": float(buy.value),
+                        "quantity": float(buy.quantity),  # type: ignore[arg-type]
+                    },
+                    {
+                        "date": str(wrong_offset.date),
+                        "account": wrong_offset.account,
+                        "sub_account": wrong_offset.sub_account,
+                        "action": str(wrong_offset.action),
+                        "reference": wrong_offset.reference,
+                        "value": float(wrong_offset.value),
+                        "quantity": float(wrong_offset.quantity),  # type: ignore[arg-type]
+                    },
+                ]
+            )
+        )
+        return store
+
+    def test_rectify_offsets_corrects_wrong_sign_buy(self) -> None:
+        store = self._store_with_buy_and_wrong_offset()
+        corrected = store.rectify_offsets()
+        assert corrected == 1
+        df = store._df
+        offset_row = df[df["reference"] == "B12345-offset"].iloc[0]
+        assert float(offset_row["value"]) == -1000.0
+
+    def test_rectify_offsets_corrects_wrong_sign_sell(self) -> None:
+        sell = make_event(reference="S67890", action=ActionType.SELL, value=Decimal("500.00"))
+        wrong_offset = make_event(
+            reference="S67890-offset",
+            action=ActionType.TRADING,
+            sub_account="Cash",
+            value=Decimal("-500.00"),
+            quantity=Decimal("-500.00"),
+        )
+        store = JournalStore(
+            pd.DataFrame(
+                [
+                    {
+                        "date": str(sell.date),
+                        "account": sell.account,
+                        "sub_account": sell.sub_account,
+                        "action": str(sell.action),
+                        "reference": sell.reference,
+                        "value": float(sell.value),
+                        "quantity": float(sell.quantity),  # type: ignore[arg-type]
+                    },
+                    {
+                        "date": str(wrong_offset.date),
+                        "account": wrong_offset.account,
+                        "sub_account": wrong_offset.sub_account,
+                        "action": str(wrong_offset.action),
+                        "reference": wrong_offset.reference,
+                        "value": float(wrong_offset.value),
+                        "quantity": float(wrong_offset.quantity),  # type: ignore[arg-type]
+                    },
+                ]
+            )
+        )
+        corrected = store.rectify_offsets()
+        assert corrected == 1
+        offset_row = store._df[store._df["reference"] == "S67890-offset"].iloc[0]
+        assert float(offset_row["value"]) == 500.0
+
+    def test_rectify_offsets_no_change_when_correct(self) -> None:
+        buy = make_event(reference="B11111", action=ActionType.BUY, value=Decimal("-750.00"))
+        correct_offset = make_event(
+            reference="B11111-offset",
+            action=ActionType.TRADING,
+            sub_account="Cash",
+            value=Decimal("-750.00"),
+            quantity=Decimal("-750.00"),
+        )
+        store = JournalStore(
+            pd.DataFrame(
+                [
+                    {
+                        "date": str(buy.date),
+                        "account": buy.account,
+                        "sub_account": buy.sub_account,
+                        "action": str(buy.action),
+                        "reference": buy.reference,
+                        "value": float(buy.value),
+                        "quantity": float(buy.quantity),  # type: ignore[arg-type]
+                    },
+                    {
+                        "date": str(correct_offset.date),
+                        "account": correct_offset.account,
+                        "sub_account": correct_offset.sub_account,
+                        "action": str(correct_offset.action),
+                        "reference": correct_offset.reference,
+                        "value": float(correct_offset.value),
+                        "quantity": float(correct_offset.quantity),  # type: ignore[arg-type]
+                    },
+                ]
+            )
+        )
+        corrected = store.rectify_offsets()
+        assert corrected == 0
+        offset_row = store._df[store._df["reference"] == "B11111-offset"].iloc[0]
+        assert float(offset_row["value"]) == -750.0
+
+    def test_rectify_offsets_does_not_touch_non_offset_rows(self) -> None:
+        store = self._store_with_buy_and_wrong_offset()
+        deposit = make_event(
+            reference="Deposit",
+            action=ActionType.DEPOSIT,
+            value=Decimal("2000.00"),
+            quantity=None,
+        )
+        store.merge([deposit])
+        original_deposit_value = store._df[store._df["reference"] == "Deposit"].iloc[0]["value"]
+        original_buy_value = store._df[store._df["reference"] == "B12345"].iloc[0]["value"]
+
+        store.rectify_offsets()
+
+        assert float(store._df[store._df["reference"] == "Deposit"].iloc[0]["value"]) == float(
+            original_deposit_value
+        )
+        assert float(store._df[store._df["reference"] == "B12345"].iloc[0]["value"]) == float(
+            original_buy_value
+        )

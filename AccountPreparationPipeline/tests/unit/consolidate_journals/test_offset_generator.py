@@ -12,7 +12,7 @@ from src.modes.consolidate_journals.schema import ActionType, JournalEvent
 
 def _buy(
     reference: str = "B001",
-    value: str = "1000.00",
+    value: str = "-1000.00",
     quantity: str = "10.00",
     date: str = "2024-01-15",
 ) -> JournalEvent:
@@ -29,7 +29,7 @@ def _buy(
 
 def _sell(
     reference: str = "S001",
-    value: str = "-75.00",
+    value: str = "75.00",
     quantity: str = "50.00",
     date: str = "2024-02-20",
 ) -> JournalEvent:
@@ -73,12 +73,12 @@ class TestGenerateFromList:
         offset = OffsetGenerator().generate([_buy(reference="B12345")])[0]
         assert offset.reference == "B12345-offset"
 
-    def test_buy_offset_value_is_negated(self) -> None:
-        offset = OffsetGenerator().generate([_buy(value="1000.00")])[0]
+    def test_buy_offset_value_mirrors_trade(self) -> None:
+        offset = OffsetGenerator().generate([_buy(value="-1000.00")])[0]
         assert offset.value == Decimal("-1000.00")
 
-    def test_buy_offset_quantity_equals_negated_value(self) -> None:
-        offset = OffsetGenerator().generate([_buy(value="1000.00", quantity="10.00")])[0]
+    def test_buy_offset_quantity_mirrors_trade_value(self) -> None:
+        offset = OffsetGenerator().generate([_buy(value="-1000.00", quantity="10.00")])[0]
         assert offset.quantity == Decimal("-1000.00")
 
     def test_buy_offset_date_matches_trade(self) -> None:
@@ -90,13 +90,12 @@ class TestGenerateFromList:
         offset = OffsetGenerator().generate([_buy()])[0]
         assert offset.account == "ISA"
 
-    def test_sell_produces_offset_with_positive_value(self) -> None:
-        # HL stores sell proceeds as negative; negating gives positive cash inflow
-        offset = OffsetGenerator().generate([_sell(value="-75.00")])[0]
+    def test_sell_offset_value_mirrors_trade(self) -> None:
+        offset = OffsetGenerator().generate([_sell(value="75.00")])[0]
         assert offset.value == Decimal("75.00")
 
-    def test_sell_offset_quantity_equals_negated_sell_value(self) -> None:
-        offset = OffsetGenerator().generate([_sell(value="-75.00", quantity="50.00")])[0]
+    def test_sell_offset_quantity_mirrors_trade_value(self) -> None:
+        offset = OffsetGenerator().generate([_sell(value="75.00", quantity="50.00")])[0]
         assert offset.quantity == Decimal("75.00")
 
     def test_deposit_produces_no_offset(self) -> None:
@@ -150,7 +149,7 @@ class TestGenerateFromDf:
                     "sub_account": "Vanguard Fund",
                     "action": "buy",
                     "reference": "B12345",
-                    "value": 1000.0,
+                    "value": -1000.0,
                     "quantity": 10.0,
                 }
             ],
@@ -166,7 +165,7 @@ class TestGenerateFromDf:
                     "sub_account": "Barclays PLC",
                     "action": "sell",
                     "reference": "S67890",
-                    "value": -75.0,
+                    "value": 75.0,
                     "quantity": 50.0,
                 }
             ],
@@ -178,11 +177,11 @@ class TestGenerateFromDf:
         assert len(offsets) == 1
         assert offsets[0].reference == "B12345" + OFFSET_SUFFIX
 
-    def test_buy_df_offset_value_negated(self) -> None:
+    def test_buy_df_offset_value_mirrors_trade(self) -> None:
         offsets = OffsetGenerator().generate_from_df(self._df_with_buy())
         assert offsets[0].value == Decimal("-1000.0")
 
-    def test_sell_df_offset_value_positive(self) -> None:
+    def test_sell_df_offset_value_mirrors_trade(self) -> None:
         offsets = OffsetGenerator().generate_from_df(self._df_with_sell())
         assert offsets[0].value == Decimal("75.0")
 

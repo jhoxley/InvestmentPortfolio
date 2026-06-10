@@ -169,7 +169,7 @@ class TestValueAndQuantity:
         parser = HLFragmentParser()
         result = parser.parse(DATA_DIR / "valid_hl_simple.csv", ACCOUNT)
         buy_event = next(e for e in result.events if e.reference == "B12345")
-        assert buy_event.value == Decimal("2000.00")
+        assert buy_event.value == Decimal("-2000.00")
 
     def test_quantity_parsed_when_present(self) -> None:
         parser = HLFragmentParser()

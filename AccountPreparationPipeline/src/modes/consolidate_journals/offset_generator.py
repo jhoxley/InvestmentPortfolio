@@ -46,6 +46,6 @@ class OffsetGenerator:
             sub_account=CASH_SUB_ACCOUNT,
             action=ActionType.TRADING,
             reference=event.reference + OFFSET_SUFFIX,
-            value=-event.value,
-            quantity=-event.value,  # Cash quantity always mirrors value
+            value=event.value,
+            quantity=event.value,  # Cash quantity always mirrors value
         )

@@ -35,12 +35,12 @@ Feature: Journal Fragment Consolidation
     Then the exit code is 0
     And the journal contains a row with action "sell"
 
-  Scenario: Maps Deposit and BACS references to contrib action
+  Scenario: Maps Deposit and BACS references to deposit action
     Given a valid HL CSV file with Deposit and BACS rows
     And no existing consolidated journal
     When I run consolidate_journals with method HL and account "Test ISA"
     Then the exit code is 0
-    And the journal contains 2 rows with action "contrib"
+    And the journal contains 2 rows with action "deposit"
 
   Scenario: Strips unit cost and quantity suffix from description
     Given a valid HL CSV file with a buy transaction reference
@@ -135,3 +135,11 @@ Feature: Journal Fragment Consolidation
     When I run consolidate_journals with method HL and account "Test ISA"
     Then the exit code is 0
     And the stdout summary shows 6 events inserted
+
+  # ─── User Story 3: Stale Offset Correction ──────────────────────────────────
+
+  Scenario: Re-running corrects a wrong-sign buy offset from a previous run
+    Given a journal with a wrong-sign buy offset row
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the buy offset row has a negative value

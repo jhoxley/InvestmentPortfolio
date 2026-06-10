@@ -11,6 +11,17 @@ from pytest_bdd import given, scenario, then, when
 FEATURE_FILE = str(Path(__file__).parent.parent / "create_ledger.feature")
 PIPELINE_PATH = Path(__file__).parent.parent.parent.parent / "pipeline.py"
 JOURNAL_COLUMNS = ["date", "account", "sub_account", "action", "reference", "value", "quantity"]
+LEDGER_COLUMNS = [
+    "date",
+    "account",
+    "sub_account",
+    "action",
+    "reference",
+    "Account Value",
+    "Account Quantity",
+    "Transaction Value",
+    "Transaction Quantity",
+]
 
 
 def _make_input(tmp_path: Path, rows: list[dict]) -> dict:
@@ -48,7 +59,9 @@ def _row(
 # ── Scenario bindings ────────────────────────────────────────────────────────
 
 
-SCENARIO_BUY = "Buy events produce negated cumulative value and positive cumulative quantity"
+SCENARIO_BUY = (
+    "Buy events produce negated cumulative Account Value and positive cumulative Account Quantity"
+)
 
 
 @scenario(FEATURE_FILE, SCENARIO_BUY)
@@ -56,7 +69,7 @@ def test_buy_events() -> None:
     pass
 
 
-@scenario(FEATURE_FILE, "Sell events negate both value and quantity in cumulation")
+@scenario(FEATURE_FILE, "Sell events negate both Account Value and Account Quantity in cumulation")
 def test_sell_events() -> None:
     pass
 
@@ -86,7 +99,37 @@ def test_missing_input() -> None:
     pass
 
 
+@scenario(FEATURE_FILE, "Single buy produces Transaction Value equal to Account Value")
+def test_single_buy_transaction() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Second buy produces Transaction Value equal to the row delta")
+def test_second_buy_transaction() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Sell row Transaction Value reflects the sell contribution")
+def test_sell_transaction() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Transaction columns are independent per position")
+def test_transaction_position_isolation() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Output contains exactly nine columns in defined order")
+def test_nine_column_schema() -> None:
+    pass
+
+
 # ── Given steps ──────────────────────────────────────────────────────────────
+
+
+@given("a consolidated journal with a single buy event", target_fixture="state")
+def state_single_buy(tmp_path: Path) -> dict:
+    return _make_input(tmp_path, [_row(value=1000.0, quantity=10.0, reference="B001")])
 
 
 @given(
@@ -224,48 +267,50 @@ def check_exit_two(result: subprocess.CompletedProcess[str]) -> None:
     )
 
 
-@then("the first output row value equals the negated first buy value")
+@then("the first output row Account Value equals the negated first buy value")
 def check_first_buy_value(state: dict) -> None:
     df = pd.read_excel(state["output_path"], engine="openpyxl")
-    assert df.iloc[0]["value"] == pytest.approx(-1000.0)
+    assert df.iloc[0]["Account Value"] == pytest.approx(-1000.0)
 
 
-@then("the second output row value equals the negated sum of both buy values")
+@then("the second output row Account Value equals the negated sum of both buy values")
 def check_second_buy_value(state: dict) -> None:
     df = pd.read_excel(state["output_path"], engine="openpyxl")
-    assert df.iloc[1]["value"] == pytest.approx(-1500.0)
+    assert df.iloc[1]["Account Value"] == pytest.approx(-1500.0)
 
 
-@then("the second output row quantity equals the sum of both buy quantities")
+@then("the second output row Account Quantity equals the sum of both buy quantities")
 def check_second_buy_quantity(state: dict) -> None:
     df = pd.read_excel(state["output_path"], engine="openpyxl")
-    assert df.iloc[1]["quantity"] == pytest.approx(15.0)
+    assert df.iloc[1]["Account Quantity"] == pytest.approx(15.0)
 
 
-@then("the final output row quantity equals the buy quantity minus the sell quantity")
+@then("the final output row Account Quantity equals the buy quantity minus the sell quantity")
 def check_final_sell_quantity(state: dict) -> None:
     df = pd.read_excel(state["output_path"], engine="openpyxl")
-    assert df.iloc[-1]["quantity"] == pytest.approx(7.0)
+    assert df.iloc[-1]["Account Quantity"] == pytest.approx(7.0)
 
 
-@then("the final output row value equals the negated buy value minus the negated sell value")
+@then(
+    "the final output row Account Value equals the negated buy value minus the negated sell value"
+)
 def check_final_sell_value(state: dict) -> None:
     df = pd.read_excel(state["output_path"], engine="openpyxl")
-    assert df.iloc[-1]["value"] == pytest.approx(-1300.0)
+    assert df.iloc[-1]["Account Value"] == pytest.approx(-1300.0)
 
 
-@then("the final Cash row value equals the sum of both deposit values")
+@then("the final Cash row Account Value equals the sum of both deposit values")
 def check_final_cash_value(state: dict) -> None:
     df = pd.read_excel(state["output_path"], engine="openpyxl")
     cash_rows = df[df["sub_account"] == "Cash"]
-    assert cash_rows.iloc[-1]["value"] == pytest.approx(1500.0)
+    assert cash_rows.iloc[-1]["Account Value"] == pytest.approx(1500.0)
 
 
-@then("the final Cash row quantity equals the sum of both deposit values")
+@then("the final Cash row Account Quantity equals the sum of both deposit values")
 def check_final_cash_quantity(state: dict) -> None:
     df = pd.read_excel(state["output_path"], engine="openpyxl")
     cash_rows = df[df["sub_account"] == "Cash"]
-    assert cash_rows.iloc[-1]["quantity"] == pytest.approx(1500.0)
+    assert cash_rows.iloc[-1]["Account Quantity"] == pytest.approx(1500.0)
 
 
 @then("each position accumulates independently")
@@ -273,8 +318,8 @@ def check_position_isolation(state: dict) -> None:
     df = pd.read_excel(state["output_path"], engine="openpyxl")
     fund_a = df[df["sub_account"] == "Fund A"].iloc[0]
     fund_b = df[df["sub_account"] == "Fund B"].iloc[0]
-    assert fund_a["value"] == pytest.approx(-1000.0)
-    assert fund_b["value"] == pytest.approx(-2000.0)
+    assert fund_a["Account Value"] == pytest.approx(-1000.0)
+    assert fund_b["Account Value"] == pytest.approx(-2000.0)
 
 
 @then("the output has exactly 5 rows")
@@ -303,3 +348,51 @@ def check_reference_unchanged(state: dict) -> None:
         .reset_index(drop=True)
     )
     assert list(out_df["reference"]) == list(inp_sorted["reference"])
+
+
+@then("the first row Transaction Value equals the first row Account Value")
+def check_first_row_transaction_equals_account(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    assert df.iloc[0]["Transaction Value"] == pytest.approx(df.iloc[0]["Account Value"])
+
+
+@then("the second row Transaction Value equals the negated second buy value")
+def check_second_row_transaction_value(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    assert df.iloc[1]["Transaction Value"] == pytest.approx(-500.0)
+
+
+@then("the second row Account Value equals the negated sum of both buy values")
+def check_second_row_account_value(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    assert df.iloc[1]["Account Value"] == pytest.approx(-1500.0)
+
+
+@then("the sell row Transaction Value equals the negated sell value")
+def check_sell_transaction_value(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    assert df.iloc[-1]["Transaction Value"] == pytest.approx(-300.0)
+
+
+@then("the sell row Account Value satisfies the invariant")
+def check_sell_invariant(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    prev_account_value = df.iloc[-2]["Account Value"]
+    assert df.iloc[-1]["Account Value"] == pytest.approx(
+        prev_account_value + df.iloc[-1]["Transaction Value"]
+    )
+
+
+@then("each position Transaction Value equals its Account Value")
+def check_position_transaction_equals_account(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    fund_a = df[df["sub_account"] == "Fund A"].iloc[0]
+    fund_b = df[df["sub_account"] == "Fund B"].iloc[0]
+    assert fund_a["Transaction Value"] == pytest.approx(fund_a["Account Value"])
+    assert fund_b["Transaction Value"] == pytest.approx(fund_b["Account Value"])
+
+
+@then("the output has exactly nine columns in the defined order")
+def check_nine_column_schema(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    assert list(df.columns) == LEDGER_COLUMNS

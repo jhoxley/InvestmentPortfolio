@@ -54,7 +54,7 @@ def test_maps_sell() -> None:
     pass
 
 
-@scenario(FEATURE_FILE, "Maps Deposit and BACS references to contrib action")
+@scenario(FEATURE_FILE, "Maps Deposit and BACS references to deposit action")
 def test_maps_contrib() -> None:
     pass
 
@@ -116,6 +116,11 @@ def test_incremental_offsets() -> None:
 
 @scenario(FEATURE_FILE, "Events inserted count includes offset rows")
 def test_summary_includes_offsets() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Re-running corrects a wrong-sign buy offset from a previous run")
+def test_stale_offset_corrected() -> None:
     pass
 
 
@@ -336,7 +341,49 @@ def check_one_valid_event(state: dict, count: int) -> None:
     assert len(df) == count, f"Expected {count} event(s), got {len(df)}"
 
 
-# ── Trade Cash Offset step ────────────────────────────────────────────────────
+# ── Trade Cash Offset steps ──────────────────────────────────────────────────
+
+
+@then("the buy offset row has a negative value")
+def check_buy_offset_negative(state: dict) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    offset_rows = df[df["reference"] == "B99999-offset"]
+    assert len(offset_rows) == 1, "Expected exactly one B99999-offset row"
+    offset_value = float(offset_rows.iloc[0]["value"])
+    assert offset_value < 0, f"Expected buy offset value < 0 (negative), got {offset_value}"
+
+
+@given("a journal with a wrong-sign buy offset row", target_fixture="state")
+def state_journal_with_wrong_sign_offset(tmp_path: Path) -> dict:
+    from src.modes.consolidate_journals.constants import JOURNAL_COLUMNS
+
+    journal_path = tmp_path / "journal.xlsx"
+    pd.DataFrame(
+        [
+            {
+                "date": "2024-01-17",
+                "account": "Test ISA",
+                "sub_account": "Vanguard Fund",
+                "action": "buy",
+                "reference": "B99999",
+                "value": -1000.0,
+                "quantity": 10.0,
+            },
+            {
+                "date": "2024-01-17",
+                "account": "Test ISA",
+                "sub_account": "Cash",
+                "action": "trading",
+                "reference": "B99999-offset",
+                "value": 1000.0,
+                "quantity": 1000.0,
+            },
+        ],
+        columns=JOURNAL_COLUMNS,
+    ).to_excel(journal_path, index=False, engine="openpyxl")
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    return {"tmp_path": tmp_path, "journal_path": journal_path, "frags_dir": frags_dir}
 
 
 @given(

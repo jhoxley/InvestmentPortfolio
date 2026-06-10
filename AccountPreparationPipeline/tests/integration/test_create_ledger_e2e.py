@@ -96,8 +96,8 @@ class TestCreateLedgerE2E:
         out_df = pd.read_excel(output_path, engine="openpyxl")
         # buy: adj_value = -1000 → cumsum = -1000
         # sell: adj_value = -400 → cumsum = -1400
-        assert out_df.iloc[0]["value"] == pytest.approx(-1000.0)
-        assert out_df.iloc[1]["value"] == pytest.approx(-1400.0)
+        assert out_df.iloc[0]["Account Value"] == pytest.approx(-1000.0)
+        assert out_df.iloc[1]["Account Value"] == pytest.approx(-1400.0)
 
     def test_cumulative_quantity_for_buy_sell(self, tmp_path: Path) -> None:
         input_path = _make_input(
@@ -112,8 +112,8 @@ class TestCreateLedgerE2E:
         output_path = tmp_path / "ledger.xlsx"
         _run(input_path, output_path)
         out_df = pd.read_excel(output_path, engine="openpyxl")
-        assert out_df.iloc[0]["quantity"] == pytest.approx(10.0)
-        assert out_df.iloc[1]["quantity"] == pytest.approx(6.0)
+        assert out_df.iloc[0]["Account Quantity"] == pytest.approx(10.0)
+        assert out_df.iloc[1]["Account Quantity"] == pytest.approx(6.0)
 
     def test_cash_deposit_uses_value_as_quantity(self, tmp_path: Path) -> None:
         input_path = _make_input(
@@ -131,8 +131,8 @@ class TestCreateLedgerE2E:
         output_path = tmp_path / "ledger.xlsx"
         _run(input_path, output_path)
         out_df = pd.read_excel(output_path, engine="openpyxl")
-        assert out_df.iloc[0]["value"] == pytest.approx(500.0)
-        assert out_df.iloc[0]["quantity"] == pytest.approx(500.0)
+        assert out_df.iloc[0]["Account Value"] == pytest.approx(500.0)
+        assert out_df.iloc[0]["Account Quantity"] == pytest.approx(500.0)
 
     def test_two_positions_independent(self, tmp_path: Path) -> None:
         input_path = _make_input(
@@ -147,12 +147,96 @@ class TestCreateLedgerE2E:
         out_df = pd.read_excel(output_path, engine="openpyxl")
         fund_a = out_df[out_df["sub_account"] == "Fund A"].iloc[0]
         fund_b = out_df[out_df["sub_account"] == "Fund B"].iloc[0]
-        assert fund_a["value"] == pytest.approx(-1000.0)
-        assert fund_b["value"] == pytest.approx(-2000.0)
+        assert fund_a["Account Value"] == pytest.approx(-1000.0)
+        assert fund_b["Account Value"] == pytest.approx(-2000.0)
 
     def test_missing_input_returns_exit_code_2(self, tmp_path: Path) -> None:
-        result = _run(tmp_path / "nonexistent.xlsx", tmp_path / "ledger.xlsx")
+        output_path = tmp_path / "ledger.xlsx"
+        result = _run(tmp_path / "nonexistent.xlsx", output_path)
         assert result.returncode == 2
+        assert not output_path.exists()
+
+    def test_invariant_holds_for_all_rows(self, tmp_path: Path) -> None:
+        input_path = _make_input(
+            tmp_path,
+            [
+                _row(
+                    date="2024-01-01", action="buy", value=1000.0, quantity=10.0, reference="B001"
+                ),
+                _row(date="2024-01-02", action="buy", value=500.0, quantity=5.0, reference="B002"),
+                _row(date="2024-01-03", action="sell", value=200.0, quantity=2.0, reference="S001"),
+                _row(
+                    date="2024-01-01",
+                    sub_account="Cash",
+                    action="deposit",
+                    value=1000.0,
+                    quantity=None,
+                    reference="D001",
+                ),
+                _row(
+                    date="2024-01-02",
+                    sub_account="Cash",
+                    action="trading",
+                    value=500.0,
+                    quantity=None,
+                    reference="B001",
+                ),
+            ],
+        )
+        output_path = tmp_path / "ledger.xlsx"
+        result = _run(input_path, output_path)
+        assert result.returncode == 0
+        out_df = pd.read_excel(output_path, engine="openpyxl")
+        for (_, _), group in out_df.groupby(["account", "sub_account"], sort=False):
+            prev_value = 0.0
+            prev_qty = 0.0
+            for _, row in group.iterrows():
+                assert row["Account Value"] == pytest.approx(prev_value + row["Transaction Value"])
+                assert row["Account Quantity"] == pytest.approx(
+                    prev_qty + row["Transaction Quantity"]
+                )
+                prev_value = float(row["Account Value"])
+                prev_qty = float(row["Account Quantity"])
+
+    def test_cash_balance_coherence_deposit_buy_sell(self, tmp_path: Path) -> None:
+        # SC-003: deposit +2000, buy offset -1000, sell offset +300 → Cash = +1300
+        input_path = _make_input(
+            tmp_path,
+            [
+                _row(
+                    date="2024-01-01",
+                    sub_account="Cash",
+                    action="deposit",
+                    value=2000.0,
+                    quantity=None,
+                    reference="Deposit",
+                ),
+                _row(
+                    date="2024-01-02",
+                    sub_account="Cash",
+                    action="trading",
+                    value=-1000.0,
+                    quantity=None,
+                    reference="B001-offset",
+                ),
+                _row(
+                    date="2024-01-03",
+                    sub_account="Cash",
+                    action="trading",
+                    value=300.0,
+                    quantity=None,
+                    reference="S001-offset",
+                ),
+            ],
+        )
+        output_path = tmp_path / "ledger.xlsx"
+        result = _run(input_path, output_path)
+        assert result.returncode == 0
+        out_df = pd.read_excel(output_path, engine="openpyxl")
+        cash_rows = (
+            out_df[out_df["sub_account"] == "Cash"].sort_values("date").reset_index(drop=True)
+        )
+        assert cash_rows.iloc[-1]["Account Value"] == pytest.approx(1300.0)
 
     def test_regression_consolidate_journals_still_listed(self, tmp_path: Path) -> None:
         result = subprocess.run(

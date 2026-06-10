@@ -77,6 +77,14 @@ class ConsolidationEngine:
 
         store.save(journal_path)
 
+        rectified = store.rectify_offsets()
+        if rectified:
+            store.save(journal_path)
+            _logger.info(
+                "Stale offset correction complete",
+                extra={"rectified_offsets": rectified},
+            )
+
         missing = store.missing_offset_trades()
         if not missing.empty:
             offsets = OffsetGenerator().generate_from_df(missing)

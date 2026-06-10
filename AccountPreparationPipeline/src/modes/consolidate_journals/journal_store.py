@@ -64,6 +64,37 @@ class JournalStore:
         )
         return self._df[needs_offset].copy()
 
+    def rectify_offsets(self) -> int:
+        """Update any offset rows whose value or quantity differs from the originating trade.
+
+        Returns the count of offset rows corrected in place.
+        """
+        if self._df.empty:
+            return 0
+
+        trade_mask = self._df["action"].isin({ActionType.BUY.value, ActionType.SELL.value})
+        trades = self._df[trade_mask]
+        corrected = 0
+
+        for _, trade in trades.iterrows():
+            offset_ref = str(trade["reference"]) + OFFSET_SUFFIX
+            offset_mask = self._df["reference"] == offset_ref
+            if not offset_mask.any():
+                continue
+            trade_value = float(trade["value"])
+            existing_value = float(self._df.loc[offset_mask, "value"].iloc[0])
+            if existing_value != trade_value:
+                self._df.loc[offset_mask, "value"] = trade_value
+                self._df.loc[offset_mask, "quantity"] = trade_value
+                corrected += 1
+
+        if corrected:
+            _logger.info(
+                "Stale offsets rectified",
+                extra={"rectified_offsets": corrected},
+            )
+        return corrected
+
     def merge(self, events: list[JournalEvent]) -> tuple[int, int]:
         if not events:
             return 0, 0

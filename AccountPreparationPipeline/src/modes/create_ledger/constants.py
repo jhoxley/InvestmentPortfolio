@@ -6,3 +6,20 @@ SELL_ACTION: str = "sell"
 
 LOG_CL_CORRELATION_ID: str = "correlation_id"
 COMPLETION_MSG: str = "Ledger written"
+
+LEDGER_COL_ACCOUNT_VALUE: str = "Account Value"
+LEDGER_COL_ACCOUNT_QUANTITY: str = "Account Quantity"
+LEDGER_COL_TRANSACTION_VALUE: str = "Transaction Value"
+LEDGER_COL_TRANSACTION_QUANTITY: str = "Transaction Quantity"
+
+LEDGER_COLUMNS: list[str] = [
+    "date",
+    "account",
+    "sub_account",
+    "action",
+    "reference",
+    LEDGER_COL_ACCOUNT_VALUE,
+    LEDGER_COL_ACCOUNT_QUANTITY,
+    LEDGER_COL_TRANSACTION_VALUE,
+    LEDGER_COL_TRANSACTION_QUANTITY,
+]

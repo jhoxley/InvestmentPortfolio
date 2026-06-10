@@ -5,7 +5,16 @@ import logging
 import pandas as pd
 
 from src.modes.consolidate_journals.constants import JOURNAL_COLUMNS
-from src.modes.create_ledger.constants import BUY_SELL_ACTIONS, CASH_SUB_ACCOUNT, SELL_ACTION
+from src.modes.create_ledger.constants import (
+    BUY_SELL_ACTIONS,
+    CASH_SUB_ACCOUNT,
+    LEDGER_COL_ACCOUNT_QUANTITY,
+    LEDGER_COL_ACCOUNT_VALUE,
+    LEDGER_COL_TRANSACTION_QUANTITY,
+    LEDGER_COL_TRANSACTION_VALUE,
+    LEDGER_COLUMNS,
+    SELL_ACTION,
+)
 
 _logger = logging.getLogger("pipeline.modes.create_ledger.engine")
 
@@ -19,7 +28,7 @@ class LedgerEngine:
         df = input_df[JOURNAL_COLUMNS].copy()
 
         if df.empty:
-            return df
+            return pd.DataFrame(columns=LEDGER_COLUMNS)
 
         # Cash rule: copy value to quantity where sub_account is Cash and quantity is blank
         cash_blank = (df["sub_account"] == CASH_SUB_ACCOUNT) & df["quantity"].isna()
@@ -39,10 +48,18 @@ class LedgerEngine:
         )
 
         # Cumulative sums per (account, sub_account) position
-        df["value"] = df.groupby(["account", "sub_account"], sort=False)["adj_value"].cumsum()
-        df["quantity"] = df.groupby(["account", "sub_account"], sort=False)["adj_quantity"].cumsum()
+        df[LEDGER_COL_ACCOUNT_VALUE] = df.groupby(["account", "sub_account"], sort=False)[
+            "adj_value"
+        ].cumsum()
+        df[LEDGER_COL_ACCOUNT_QUANTITY] = df.groupby(["account", "sub_account"], sort=False)[
+            "adj_quantity"
+        ].cumsum()
 
-        df = df.drop(columns=["adj_value", "adj_quantity"])
+        # Per-row deltas (the sign-adjusted contribution of each individual event)
+        df[LEDGER_COL_TRANSACTION_VALUE] = df["adj_value"]
+        df[LEDGER_COL_TRANSACTION_QUANTITY] = df["adj_quantity"]
+
+        df = df.drop(columns=["value", "quantity", "adj_value", "adj_quantity"])
 
         _logger.debug("Ledger computation complete", extra={"rows": len(df)})
-        return df[JOURNAL_COLUMNS]
+        return df[LEDGER_COLUMNS]
