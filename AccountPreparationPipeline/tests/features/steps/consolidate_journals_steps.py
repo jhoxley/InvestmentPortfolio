@@ -59,6 +59,21 @@ def test_maps_contrib() -> None:
     pass
 
 
+@scenario(FEATURE_FILE, "Maps Card Web reference to deposit action")
+def test_maps_card_web() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps FPC reference to deposit action")
+def test_maps_fpc() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps Commission reference to income action")
+def test_maps_commission() -> None:
+    pass
+
+
 @scenario(FEATURE_FILE, "Strips unit cost and quantity suffix from description")
 def test_strips_description() -> None:
     pass
@@ -164,6 +179,30 @@ def state_contrib_dir(tmp_path: Path) -> dict:
     frags_dir = tmp_path / "frags"
     frags_dir.mkdir()
     shutil.copy(DATA_DIR / "valid_hl_contrib.csv", frags_dir / "valid_hl_contrib.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with Card Web rows", target_fixture="state")
+def state_card_web_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_card_web.csv", frags_dir / "valid_hl_card_web.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with FPC rows", target_fixture="state")
+def state_fpc_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_fpc.csv", frags_dir / "valid_hl_fpc.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with Commission rows", target_fixture="state")
+def state_commission_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_commission.csv", frags_dir / "valid_hl_commission.csv")
     return {"tmp_path": tmp_path, "frags_dir": frags_dir}
 
 

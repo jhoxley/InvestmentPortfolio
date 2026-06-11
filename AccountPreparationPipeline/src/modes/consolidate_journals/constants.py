@@ -19,6 +19,8 @@ HL_HEADER_COL0: str = "Trade date"
 HL_HEADER_COL1: str = "Settle date"
 
 HL_DEPOSIT_REFERENCES: frozenset[str] = frozenset({"Deposit", "BACS"})
+HL_DEPOSIT_REFERENCE_ALIASES: frozenset[str] = frozenset({"CARD WEB", "FPC"})
+HL_INCOME_REFERENCES: frozenset[str] = frozenset({"INTEREST", "RDP CR", "COMMISSION"})
 
 RE_BUY: re.Pattern[str] = re.compile(r"^B\d+$")
 RE_SELL: re.Pattern[str] = re.compile(r"^S\d+$")

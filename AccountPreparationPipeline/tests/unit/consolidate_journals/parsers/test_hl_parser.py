@@ -4,7 +4,9 @@ import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from src.modes.consolidate_journals.parsers.hl import HLFragmentParser
+import pytest
+
+from src.modes.consolidate_journals.parsers.hl import HLFragmentParser, _map_action
 from src.modes.consolidate_journals.schema import ActionType
 
 DATA_DIR = Path(__file__).parent.parent.parent.parent / "data" / "consolidate_journals"
@@ -104,6 +106,73 @@ class TestActionMapping:
         result = parser.parse(DATA_DIR / "valid_hl_rdp_cr.csv", ACCOUNT)
         event = next(e for e in result.events if e.reference == "RDP CR")
         assert event.action == ActionType.INCOME
+
+    def test_card_web_reference_maps_to_deposit(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_card_web.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "Card Web")
+        assert event.action == ActionType.DEPOSIT
+
+    def test_card_web_reference_is_case_insensitive(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_card_web.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "card web")
+        assert event.action == ActionType.DEPOSIT
+
+    def test_card_web_sub_account_is_cash(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_card_web.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "Card Web")
+        assert event.sub_account == "Cash"
+
+    def test_fpc_reference_maps_to_deposit(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_fpc.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "FPC")
+        assert event.action == ActionType.DEPOSIT
+
+    def test_fpc_reference_is_case_insensitive(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_fpc.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "fpc")
+        assert event.action == ActionType.DEPOSIT
+
+    def test_fpc_sub_account_is_cash(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_fpc.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "FPC")
+        assert event.sub_account == "Cash"
+
+    def test_card_web_prefix_does_not_map_to_deposit(self) -> None:
+        with pytest.raises(ValueError, match="Unknown action"):
+            _map_action("Card Web2", "")
+
+    def test_mixed_reference_file_parses_without_error(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_mixed_refs.csv", ACCOUNT)
+        assert len(result.errors) == 0
+        refs = {e.reference for e in result.events}
+        assert "Card Web" in refs
+        assert "Deposit" in refs
+        assert "INTEREST" in refs
+
+    def test_commission_reference_maps_to_income(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_commission.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "Commission")
+        assert event.action == ActionType.INCOME
+
+    def test_commission_reference_is_case_insensitive(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_commission.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "COMMISSION")
+        assert event.action == ActionType.INCOME
+
+    def test_commission_sub_account_is_cash(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_commission.csv", ACCOUNT)
+        event = next(e for e in result.events if e.reference == "Commission")
+        assert event.sub_account == "Cash"
 
 
 class TestDateParsing:

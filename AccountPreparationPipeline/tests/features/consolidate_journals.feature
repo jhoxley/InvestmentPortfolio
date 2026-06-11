@@ -48,6 +48,27 @@ Feature: Journal Fragment Consolidation
     When I run consolidate_journals with method HL and account "Test ISA"
     Then the journal sub_account does not contain "@"
 
+  Scenario: Maps Card Web reference to deposit action
+    Given a valid HL CSV file with Card Web rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 2 rows with action "deposit"
+
+  Scenario: Maps FPC reference to deposit action
+    Given a valid HL CSV file with FPC rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 2 rows with action "deposit"
+
+  Scenario: Maps Commission reference to income action
+    Given a valid HL CSV file with Commission rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 2 rows with action "income"
+
   # ─── User Story 2: Incremental Update ─────────────────────────────────────
 
   Scenario: Re-running with same inputs inserts zero events

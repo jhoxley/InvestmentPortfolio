@@ -43,7 +43,11 @@
       "Bash(python -m pytest tests/unit/create_ledger/test_transaction_id.py tests/integration/test_create_ledger_e2e.py tests/features/steps/create_ledger_steps.py -v)",
       "Bash(python -m ruff check .)",
       "Bash(python -m ruff format --check .)",
-      "Bash(python -m mypy --strict src/ pipeline.py)"
+      "Bash(python -m mypy --strict src/ pipeline.py)",
+      "Bash(powershell -Command \".specify/scripts/powershell/setup-plan.ps1 -Json\")",
+      "PowerShell(.specify/scripts/powershell/check-prerequisites.ps1 -Json -PathsOnly)",
+      "PowerShell(.specify/scripts/powershell/setup-tasks.ps1 -Json)",
+      "PowerShell(.specify/scripts/powershell/check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks)"
     ]
   }
 }

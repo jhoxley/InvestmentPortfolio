@@ -10,9 +10,11 @@ from pathlib import Path
 from src.modes.consolidate_journals.constants import (
     CASH_ACTION_TYPES,
     CASH_SUB_ACCOUNT,
+    HL_DEPOSIT_REFERENCE_ALIASES,
     HL_DEPOSIT_REFERENCES,
     HL_HEADER_COL0,
     HL_HEADER_COL1,
+    HL_INCOME_REFERENCES,
     RE_BUY,
     RE_DESCRIPTION_SUFFIX,
     RE_SELL,
@@ -71,7 +73,11 @@ def _map_action(reference: str, description: str) -> ActionType:
         return ActionType.BUY
     if RE_SELL.match(ref):
         return ActionType.SELL
-    if ref in HL_DEPOSIT_REFERENCES or ref.upper().startswith("BACS"):
+    if (
+        ref in HL_DEPOSIT_REFERENCES
+        or ref.upper().startswith("BACS")
+        or ref.upper() in HL_DEPOSIT_REFERENCE_ALIASES
+    ):
         return ActionType.DEPOSIT
     if ref.lower() == "contrib":
         return ActionType.DEPOSIT
@@ -81,7 +87,7 @@ def _map_action(reference: str, description: str) -> ActionType:
         return ActionType.INCOME
     if ref.upper() == "MANAGE FEE":
         return ActionType.FEE
-    if ref.upper() in ("INTEREST", "RDP CR"):
+    if ref.upper() in HL_INCOME_REFERENCES:
         return ActionType.INCOME
     raise ValueError(f"Unknown action for reference: {ref!r}")
 
