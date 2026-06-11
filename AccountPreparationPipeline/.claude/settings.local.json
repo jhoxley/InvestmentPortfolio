@@ -36,7 +36,14 @@
       "Bash(.venv/Scripts/python.exe -m pytest tests/ -v)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/unit/consolidate_journals/parsers/test_hl_parser.py::TestValueAndQuantity::test_value_parsed_as_decimal -v)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/unit/consolidate_journals/parsers/test_hl_parser.py -v -k \"value\")",
-      "Bash(.venv/Scripts/python.exe -m pytest tests/)"
+      "Bash(.venv/Scripts/python.exe -m pytest tests/)",
+      "PowerShell(& \".specify/scripts/powershell/check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks 2>&1)",
+      "Bash(python -m pytest tests/features/ -v -k \"rerun or idempotent or appends\")",
+      "Bash(python -m pytest tests/integration/test_create_ledger_e2e.py -v -k \"rerun or idempotent or append\")",
+      "Bash(python -m pytest tests/unit/create_ledger/test_transaction_id.py tests/integration/test_create_ledger_e2e.py tests/features/steps/create_ledger_steps.py -v)",
+      "Bash(python -m ruff check .)",
+      "Bash(python -m ruff format --check .)",
+      "Bash(python -m mypy --strict src/ pipeline.py)"
     ]
   }
 }

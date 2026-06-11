@@ -325,6 +325,72 @@ class TestInvariant:
         self._assert_invariant(LedgerEngine().run(df))
 
 
+class TestTransactionIDSort:
+    def test_cash_sorts_before_vanguard_same_date(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01", sub_account="Vanguard Fund", action="buy", reference="B001"
+                ),
+                _row(
+                    date="2024-01-01",
+                    sub_account="Cash",
+                    action="deposit",
+                    value=1000.0,
+                    quantity=None,
+                    reference="B001-offset",
+                ),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction ID"] == "00001-001"
+        assert result.iloc[0]["sub_account"] == "Cash"
+        assert result.iloc[1]["Transaction ID"] == "00002-001"
+        assert result.iloc[1]["sub_account"] == "Vanguard Fund"
+
+    def test_reference_tiebreaker_within_same_sub_account_date(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01", sub_account="Cash", action="deposit", reference="B002-offset"
+                ),
+                _row(
+                    date="2024-01-01", sub_account="Cash", action="deposit", reference="B001-offset"
+                ),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction ID"] == "00001-001"
+        assert result.iloc[0]["reference"] == "B001-offset"
+        assert result.iloc[1]["Transaction ID"] == "00002-001"
+        assert result.iloc[1]["reference"] == "B002-offset"
+
+    def test_account_included_in_sort_key(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01",
+                    account="SIPP",
+                    sub_account="Cash",
+                    action="deposit",
+                    reference="B001",
+                ),
+                _row(
+                    date="2024-01-01",
+                    account="ISA",
+                    sub_account="Cash",
+                    action="deposit",
+                    reference="B001",
+                ),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction ID"] == "00001-001"
+        assert result.iloc[0]["account"] == "ISA"
+        assert result.iloc[1]["Transaction ID"] == "00002-001"
+        assert result.iloc[1]["account"] == "SIPP"
+
+
 class TestRowCountAndSchema:
     def test_row_count_preserved(self) -> None:
         df = _make_df([_row(reference=f"B00{i}") for i in range(5)])

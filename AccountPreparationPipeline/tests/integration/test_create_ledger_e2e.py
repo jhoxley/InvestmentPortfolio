@@ -238,6 +238,81 @@ class TestCreateLedgerE2E:
         )
         assert cash_rows.iloc[-1]["Account Value"] == pytest.approx(1300.0)
 
+    def test_transaction_id_column_present_on_first_run(self, tmp_path: Path) -> None:
+        import openpyxl
+
+        input_path = _make_input(
+            tmp_path,
+            [
+                _row(date="2024-01-01", reference="B001"),
+                _row(date="2024-01-02", reference="B002"),
+                _row(date="2024-01-03", reference="B003"),
+            ],
+        )
+        output_path = tmp_path / "ledger.xlsx"
+        result = _run(input_path, output_path)
+        assert result.returncode == 0
+        out_df = pd.read_excel(output_path, engine="openpyxl")
+        assert "Transaction ID" in out_df.columns
+        assert out_df["Transaction ID"].iloc[0] == "00001-001"
+        assert out_df["Transaction ID"].iloc[2] == "00003-001"
+        assert out_df["Transaction ID"].notna().all()
+        wb = openpyxl.load_workbook(output_path)
+        ws = wb.active
+        assert ws.cell(row=2, column=1).number_format == "@"
+
+    def test_same_date_cash_offset_invariant(self, tmp_path: Path) -> None:
+        # Input rows deliberately NOT in canonical order
+        input_path = _make_input(
+            tmp_path,
+            [
+                _row(
+                    date="2024-03-15",
+                    sub_account="Cash",
+                    action="trading",
+                    reference="B002-offset",
+                    value=-500.0,
+                    quantity=None,
+                ),
+                _row(
+                    date="2024-03-15",
+                    sub_account="Vanguard Fund",
+                    action="buy",
+                    reference="B001",
+                    value=1000.0,
+                    quantity=10.0,
+                ),
+                _row(
+                    date="2024-03-15",
+                    sub_account="Cash",
+                    action="trading",
+                    reference="B001-offset",
+                    value=-1000.0,
+                    quantity=None,
+                ),
+                _row(
+                    date="2024-03-15",
+                    sub_account="Vanguard Fund",
+                    action="buy",
+                    reference="B002",
+                    value=500.0,
+                    quantity=5.0,
+                ),
+            ],
+        )
+        output_path = tmp_path / "ledger.xlsx"
+        result = _run(input_path, output_path)
+        assert result.returncode == 0
+        out_df = pd.read_excel(output_path, engine="openpyxl")
+        cash_rows = (
+            out_df[out_df["sub_account"] == "Cash"]
+            .sort_values("Transaction ID")
+            .reset_index(drop=True)
+        )
+        assert cash_rows.iloc[1]["Account Value"] == pytest.approx(
+            cash_rows.iloc[0]["Account Value"] + cash_rows.iloc[1]["Transaction Value"]
+        )
+
     def test_regression_consolidate_journals_still_listed(self, tmp_path: Path) -> None:
         result = subprocess.run(
             [sys.executable, str(PIPELINE_PATH), "--help"],
@@ -246,3 +321,77 @@ class TestCreateLedgerE2E:
         )
         assert "consolidate_journals" in result.stdout
         assert "create_ledger" in result.stdout
+
+    def test_rerun_insertion_assigns_suffix_incremented_id(self, tmp_path: Path) -> None:
+        rows = [
+            _row(date="2024-01-01", reference="B001"),
+            _row(date="2024-01-02", reference="B002"),
+            _row(date="2024-01-03", reference="B003"),
+        ]
+        input_path = _make_input(tmp_path, rows)
+        output_path = tmp_path / "ledger.xlsx"
+        result = _run(input_path, output_path)
+        assert result.returncode == 0
+
+        # Second run: add B001a (2024-01-01) between B001 and B002
+        rows_with_insertion = [*rows, _row(date="2024-01-01", reference="B001a")]
+        df_updated = pd.DataFrame(rows_with_insertion, columns=JOURNAL_COLUMNS)
+        df_updated.to_excel(input_path, index=False, engine="openpyxl")
+        result2 = _run(input_path, output_path)
+        assert result2.returncode == 0
+
+        out_df = pd.read_excel(output_path, engine="openpyxl")
+        df_sorted = out_df.sort_values(["date", "account", "sub_account", "reference"]).reset_index(
+            drop=True
+        )
+        assert (
+            df_sorted.loc[df_sorted["reference"] == "B001", "Transaction ID"].iloc[0] == "00001-001"
+        )
+        assert (
+            df_sorted.loc[df_sorted["reference"] == "B001a", "Transaction ID"].iloc[0]
+            == "00001-002"
+        )
+        assert (
+            df_sorted.loc[df_sorted["reference"] == "B002", "Transaction ID"].iloc[0] == "00002-001"
+        )
+        assert (
+            df_sorted.loc[df_sorted["reference"] == "B003", "Transaction ID"].iloc[0] == "00003-001"
+        )
+
+    def test_idempotent_rerun_preserves_transaction_ids(self, tmp_path: Path) -> None:
+        rows = [
+            _row(date="2024-01-01", reference="B001"),
+            _row(date="2024-01-02", reference="B002"),
+            _row(date="2024-01-03", reference="B003"),
+        ]
+        input_path = _make_input(tmp_path, rows)
+        output_path = tmp_path / "ledger.xlsx"
+        _run(input_path, output_path)
+        prior_df = pd.read_excel(output_path, engine="openpyxl")
+        prior_ids = list(prior_df["Transaction ID"])
+
+        result = _run(input_path, output_path)
+        assert result.returncode == 0
+        out_df = pd.read_excel(output_path, engine="openpyxl")
+        assert list(out_df["Transaction ID"]) == prior_ids
+
+    def test_rerun_append_gets_next_sequential_prefix(self, tmp_path: Path) -> None:
+        rows = [
+            _row(date="2024-01-01", reference="B001"),
+            _row(date="2024-01-02", reference="B002"),
+            _row(date="2024-01-03", reference="B003"),
+        ]
+        input_path = _make_input(tmp_path, rows)
+        output_path = tmp_path / "ledger.xlsx"
+        result = _run(input_path, output_path)
+        assert result.returncode == 0
+
+        rows_with_append = [*rows, _row(date="2024-01-04", reference="B004")]
+        df_updated = pd.DataFrame(rows_with_append, columns=JOURNAL_COLUMNS)
+        df_updated.to_excel(input_path, index=False, engine="openpyxl")
+        result2 = _run(input_path, output_path)
+        assert result2.returncode == 0
+
+        out_df = pd.read_excel(output_path, engine="openpyxl")
+        new_row = out_df.loc[out_df["reference"] == "B004"]
+        assert new_row["Transaction ID"].iloc[0] == "00004-001"

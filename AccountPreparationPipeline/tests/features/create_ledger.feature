@@ -75,8 +75,46 @@ Feature: Ledger Running Balance
     Then the exit code is 0
     And each position Transaction Value equals its Account Value
 
-  Scenario: Output contains exactly nine columns in defined order
+  Scenario: Output contains exactly ten columns in defined order
     Given a consolidated journal with a single buy event
     When I run create_ledger
     Then the exit code is 0
-    And the output has exactly nine columns in the defined order
+    And the output has exactly ten columns in the defined order
+
+  Scenario: First-time run produces Transaction ID column with sequential IDs
+    Given a consolidated journal with a single buy event
+    When I run create_ledger
+    Then the exit code is 0
+    And the Transaction ID column exists and first row value is 00001-001
+
+  Scenario: Transaction IDs are sequential with 001 suffix on first run
+    Given a consolidated journal with 3 events on different dates
+    When I run create_ledger
+    Then the exit code is 0
+    And the Transaction IDs are 00001-001 00002-001 00003-001 in ascending row order
+
+  Scenario: Same-date Cash offsets are ordered by reference to preserve per-position invariant
+    Given a journal with two same-date buys and their Cash offsets
+    When I run create_ledger
+    Then the exit code is 0
+    And the Cash rows in Transaction ID order satisfy the per-position invariant
+
+  Scenario: Re-running with a new row between existing rows assigns suffix-incremented ID
+    Given an existing ledger produced from a 3-row journal
+    And a new journal event inserted between the first and second existing rows
+    When I run create_ledger
+    Then the exit code is 0
+    And the original three IDs are unchanged and the new row gets 00001-002
+
+  Scenario: Idempotent re-run produces identical Transaction IDs
+    Given an existing ledger produced from a 3-row journal
+    When I run create_ledger
+    Then the exit code is 0
+    And all Transaction IDs are identical to the prior run
+
+  Scenario: New row after all existing rows gets next sequential prefix
+    Given an existing ledger produced from a 3-row journal
+    And a new journal event appended after all existing rows
+    When I run create_ledger
+    Then the exit code is 0
+    And the new row gets Transaction ID 00004-001

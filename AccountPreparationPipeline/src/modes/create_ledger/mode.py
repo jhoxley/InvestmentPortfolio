@@ -13,14 +13,39 @@ from src.modes.create_ledger.constants import (
     COMPLETION_MSG,
     LEDGER_COL_ACCOUNT_QUANTITY,
     LEDGER_COL_ACCOUNT_VALUE,
+    LEDGER_COL_TRANSACTION_ID,
     LEDGER_COL_TRANSACTION_QUANTITY,
     LEDGER_COL_TRANSACTION_VALUE,
     LEDGER_COLUMNS,
     LOG_CL_CORRELATION_ID,
 )
 from src.modes.create_ledger.engine import LedgerEngine
+from src.modes.create_ledger.transaction_id import _normalise_date
 
 _logger = logging.getLogger("pipeline.modes.create_ledger")
+
+
+def _load_prior_ids(
+    output_path: Path,
+) -> dict[tuple[str, str, str, str], str]:
+    if not output_path.exists():
+        return {}
+    try:
+        df = pd.read_excel(output_path, engine="openpyxl")
+        if "Transaction ID" not in df.columns:
+            return {}
+        result: dict[tuple[str, str, str, str], str] = {}
+        for _, row in df.iterrows():
+            key = (
+                _normalise_date(row["date"]),
+                str(row["account"]),
+                str(row["sub_account"]),
+                str(row["reference"]),
+            )
+            result[key] = str(row["Transaction ID"])
+        return result
+    except Exception:
+        return {}
 
 
 class CreateLedgerMode:
@@ -60,9 +85,10 @@ class CreateLedgerMode:
             return EXIT_INVALID_ARGS
 
         df = pd.read_excel(input_path, engine="openpyxl")
+        prior_ids = _load_prior_ids(output_path)
 
         try:
-            result = LedgerEngine().run(df)
+            result = LedgerEngine().run(df, prior_ids=prior_ids)
         except ValueError as exc:
             _logger.error("Invalid input journal", extra={"detail": str(exc)})
             return EXIT_INVALID_ARGS
@@ -80,6 +106,11 @@ class CreateLedgerMode:
                 for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
                     for cell in row:
                         cell.number_format = fmt
+
+            tid_col_idx = LEDGER_COLUMNS.index(LEDGER_COL_TRANSACTION_ID) + 1
+            for row in ws.iter_rows(min_row=2, min_col=tid_col_idx, max_col=tid_col_idx):
+                for cell in row:
+                    cell.number_format = "@"
 
         rows = len(result)
         _logger.info(

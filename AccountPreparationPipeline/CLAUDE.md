@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at
-specs/006-fix-cash-offset-signs/plan.md
+specs/007-ledger-transaction-id/plan.md
 <!-- SPECKIT END -->

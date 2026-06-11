@@ -10,17 +10,24 @@ from src.modes.create_ledger.constants import (
     CASH_SUB_ACCOUNT,
     LEDGER_COL_ACCOUNT_QUANTITY,
     LEDGER_COL_ACCOUNT_VALUE,
+    LEDGER_COL_TRANSACTION_ID,
     LEDGER_COL_TRANSACTION_QUANTITY,
     LEDGER_COL_TRANSACTION_VALUE,
     LEDGER_COLUMNS,
     SELL_ACTION,
+    TRANSACTION_ID_SORT_COLS,
 )
+from src.modes.create_ledger.transaction_id import TransactionIDAssigner
 
 _logger = logging.getLogger("pipeline.modes.create_ledger.engine")
 
 
 class LedgerEngine:
-    def run(self, input_df: pd.DataFrame) -> pd.DataFrame:
+    def run(
+        self,
+        input_df: pd.DataFrame,
+        prior_ids: dict[tuple[str, str, str, str], str] | None = None,
+    ) -> pd.DataFrame:
         missing = [c for c in JOURNAL_COLUMNS if c not in input_df.columns]
         if missing:
             raise ValueError(f"Input journal is missing columns: {missing}")
@@ -42,10 +49,7 @@ class LedgerEngine:
         # Sign-adjust quantity: negate for sell
         df["adj_quantity"] = df["quantity"].where(df["action"] != SELL_ACTION, -df["quantity"])
 
-        # Stable sort preserves within-date input order
-        df = df.sort_values(["account", "sub_account", "date"], kind="stable").reset_index(
-            drop=True
-        )
+        df = df.sort_values(TRANSACTION_ID_SORT_COLS, kind="stable").reset_index(drop=True)
 
         # Cumulative sums per (account, sub_account) position
         df[LEDGER_COL_ACCOUNT_VALUE] = df.groupby(["account", "sub_account"], sort=False)[
@@ -60,6 +64,8 @@ class LedgerEngine:
         df[LEDGER_COL_TRANSACTION_QUANTITY] = df["adj_quantity"]
 
         df = df.drop(columns=["value", "quantity", "adj_value", "adj_quantity"])
+
+        df[LEDGER_COL_TRANSACTION_ID] = TransactionIDAssigner().assign(df, prior_ids or {})
 
         _logger.debug("Ledger computation complete", extra={"rows": len(df)})
         return df[LEDGER_COLUMNS]

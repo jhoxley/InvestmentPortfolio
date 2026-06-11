@@ -12,6 +12,7 @@ FEATURE_FILE = str(Path(__file__).parent.parent / "create_ledger.feature")
 PIPELINE_PATH = Path(__file__).parent.parent.parent.parent / "pipeline.py"
 JOURNAL_COLUMNS = ["date", "account", "sub_account", "action", "reference", "value", "quantity"]
 LEDGER_COLUMNS = [
+    "Transaction ID",
     "date",
     "account",
     "sub_account",
@@ -119,8 +120,44 @@ def test_transaction_position_isolation() -> None:
     pass
 
 
-@scenario(FEATURE_FILE, "Output contains exactly nine columns in defined order")
-def test_nine_column_schema() -> None:
+@scenario(FEATURE_FILE, "Output contains exactly ten columns in defined order")
+def test_ten_column_schema() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "First-time run produces Transaction ID column with sequential IDs")
+def test_first_time_transaction_ids() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Transaction IDs are sequential with 001 suffix on first run")
+def test_sequential_transaction_ids() -> None:
+    pass
+
+
+@scenario(
+    FEATURE_FILE,
+    "Same-date Cash offsets are ordered by reference to preserve per-position invariant",
+)
+def test_same_date_cash_offsets_invariant() -> None:
+    pass
+
+
+@scenario(
+    FEATURE_FILE,
+    "Re-running with a new row between existing rows assigns suffix-incremented ID",
+)
+def test_rerun_inserts_between() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Idempotent re-run produces identical Transaction IDs")
+def test_idempotent_rerun_bdd() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "New row after all existing rows gets next sequential prefix")
+def test_rerun_appends_sequential() -> None:
     pass
 
 
@@ -216,6 +253,60 @@ def state_buy_and_sell(tmp_path: Path) -> dict:
         [
             _row(date="2024-01-01", action="buy", reference="B001"),
             _row(date="2024-01-02", action="sell", reference="S001"),
+        ],
+    )
+
+
+@given("a consolidated journal with 3 events on different dates", target_fixture="state")
+def state_three_events(tmp_path: Path) -> dict:
+    return _make_input(
+        tmp_path,
+        [
+            _row(date="2024-01-01", reference="B001"),
+            _row(date="2024-01-02", reference="B002"),
+            _row(date="2024-01-03", reference="B003"),
+        ],
+    )
+
+
+@given("a journal with two same-date buys and their Cash offsets", target_fixture="state")
+def state_same_date_cash_offsets(tmp_path: Path) -> dict:
+    # Rows deliberately NOT in canonical order to verify engine sorts correctly
+    return _make_input(
+        tmp_path,
+        [
+            _row(
+                date="2024-03-15",
+                sub_account="Cash",
+                action="trading",
+                reference="B002-offset",
+                value=-500.0,
+                quantity=None,
+            ),
+            _row(
+                date="2024-03-15",
+                sub_account="Vanguard Fund",
+                action="buy",
+                reference="B001",
+                value=1000.0,
+                quantity=10.0,
+            ),
+            _row(
+                date="2024-03-15",
+                sub_account="Cash",
+                action="trading",
+                reference="B001-offset",
+                value=-1000.0,
+                quantity=None,
+            ),
+            _row(
+                date="2024-03-15",
+                sub_account="Vanguard Fund",
+                action="buy",
+                reference="B002",
+                value=500.0,
+                quantity=5.0,
+            ),
         ],
     )
 
@@ -333,7 +424,7 @@ def check_action_unchanged(state: dict) -> None:
     out_df = pd.read_excel(state["output_path"], engine="openpyxl")
     inp_sorted = (
         state["input_df"]
-        .sort_values(["account", "sub_account", "date"], kind="stable")
+        .sort_values(["date", "account", "sub_account", "reference"], kind="stable")
         .reset_index(drop=True)
     )
     assert list(out_df["action"]) == list(inp_sorted["action"])
@@ -344,7 +435,7 @@ def check_reference_unchanged(state: dict) -> None:
     out_df = pd.read_excel(state["output_path"], engine="openpyxl")
     inp_sorted = (
         state["input_df"]
-        .sort_values(["account", "sub_account", "date"], kind="stable")
+        .sort_values(["date", "account", "sub_account", "reference"], kind="stable")
         .reset_index(drop=True)
     )
     assert list(out_df["reference"]) == list(inp_sorted["reference"])
@@ -392,7 +483,107 @@ def check_position_transaction_equals_account(state: dict) -> None:
     assert fund_b["Transaction Value"] == pytest.approx(fund_b["Account Value"])
 
 
-@then("the output has exactly nine columns in the defined order")
-def check_nine_column_schema(state: dict) -> None:
+@then("the output has exactly ten columns in the defined order")
+def check_ten_column_schema(state: dict) -> None:
     df = pd.read_excel(state["output_path"], engine="openpyxl")
     assert list(df.columns) == LEDGER_COLUMNS
+
+
+@then("the Transaction ID column exists and first row value is 00001-001")
+def check_transaction_id_first_row(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    assert "Transaction ID" in df.columns
+    assert df["Transaction ID"].iloc[0] == "00001-001"
+
+
+@then("the Transaction IDs are 00001-001 00002-001 00003-001 in ascending row order")
+def check_sequential_transaction_ids(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    assert list(df["Transaction ID"]) == ["00001-001", "00002-001", "00003-001"]
+
+
+@then("the Cash rows in Transaction ID order satisfy the per-position invariant")
+def check_cash_invariant_by_transaction_id(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    cash_rows = df[df["sub_account"] == "Cash"].sort_values("Transaction ID").reset_index(drop=True)
+    assert cash_rows.iloc[1]["Account Value"] == pytest.approx(
+        cash_rows.iloc[0]["Account Value"] + cash_rows.iloc[1]["Transaction Value"]
+    )
+
+
+# ── Re-run Given steps ────────────────────────────────────────────────────────
+
+
+@given("an existing ledger produced from a 3-row journal", target_fixture="state")
+def state_existing_ledger(tmp_path: Path) -> dict:
+    rows = [
+        _row(date="2024-01-01", reference="B001"),
+        _row(date="2024-01-02", reference="B002"),
+        _row(date="2024-01-03", reference="B003"),
+    ]
+    state = _make_input(tmp_path, rows)
+    subprocess.run(
+        [
+            sys.executable,
+            str(PIPELINE_PATH),
+            "create_ledger",
+            str(state["input_path"]),
+            str(state["output_path"]),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    prior_df = pd.read_excel(state["output_path"], engine="openpyxl")
+    state["prior_ids"] = list(prior_df["Transaction ID"])
+    return state
+
+
+@given("a new journal event inserted between the first and second existing rows")
+def insert_between_rows(state: dict) -> None:
+    new_row = _row(date="2024-01-01", reference="B001a")
+    updated = pd.concat(
+        [state["input_df"], pd.DataFrame([new_row], columns=JOURNAL_COLUMNS)],
+        ignore_index=True,
+    )
+    state["input_df"] = updated
+    updated.to_excel(state["input_path"], index=False, engine="openpyxl")
+
+
+@given("a new journal event appended after all existing rows")
+def append_after_rows(state: dict) -> None:
+    new_row = _row(date="2024-01-04", reference="B004")
+    updated = pd.concat(
+        [state["input_df"], pd.DataFrame([new_row], columns=JOURNAL_COLUMNS)],
+        ignore_index=True,
+    )
+    state["input_df"] = updated
+    updated.to_excel(state["input_path"], index=False, engine="openpyxl")
+
+
+# ── Re-run Then steps ─────────────────────────────────────────────────────────
+
+
+@then("the original three IDs are unchanged and the new row gets 00001-002")
+def check_insertion_ids(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    df_sorted = df.sort_values(["date", "account", "sub_account", "reference"]).reset_index(
+        drop=True
+    )
+    assert df_sorted.loc[df_sorted["reference"] == "B001", "Transaction ID"].iloc[0] == "00001-001"
+    assert df_sorted.loc[df_sorted["reference"] == "B001a", "Transaction ID"].iloc[0] == "00001-002"
+    assert df_sorted.loc[df_sorted["reference"] == "B002", "Transaction ID"].iloc[0] == "00002-001"
+    assert df_sorted.loc[df_sorted["reference"] == "B003", "Transaction ID"].iloc[0] == "00003-001"
+
+
+@then("all Transaction IDs are identical to the prior run")
+def check_idempotent_ids(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    assert list(df["Transaction ID"]) == state["prior_ids"]
+
+
+@then("the new row gets Transaction ID 00004-001")
+def check_appended_id(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    new_row = df.loc[df["reference"] == "B004"]
+    assert new_row["Transaction ID"].iloc[0] == "00004-001"
