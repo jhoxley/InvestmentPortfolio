@@ -69,6 +69,36 @@ Feature: Journal Fragment Consolidation
     Then the exit code is 0
     And the journal contains 2 rows with action "income"
 
+  # ─── Feature 009: Income Dividend Mappings ──────────────────────────────────
+
+  Scenario: Maps ST DIV reference to dividend action
+    Given a valid HL CSV file with ST DIV rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 2 rows with action "dividend"
+
+  Scenario: Maps OVR CR reference to dividend action
+    Given a valid HL CSV file with OVR CR rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 2 rows with action "dividend"
+
+  Scenario: Maps UTC CR reference to dividend action
+    Given a valid HL CSV file with UTC CR rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 2 rows with action "dividend"
+
+  Scenario: Maps LOYALTYU reference to dividend action
+    Given a valid HL CSV file with LOYALTYU rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains 3 rows with action "dividend"
+
   # ─── User Story 2: Incremental Update ─────────────────────────────────────
 
   Scenario: Re-running with same inputs inserts zero events

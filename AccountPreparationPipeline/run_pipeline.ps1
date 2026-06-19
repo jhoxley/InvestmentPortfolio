@@ -34,12 +34,28 @@ $Accounts = @(
         LedgerPath   = Join-Path $InvestmentsDir "HL_SIPP_Ledger.xlsx"
     }
     @{
+        Name         = "HL SIPP Income"
+        AccountLabel = "HL Group SIPP Income"
+        Method       = "HL"
+        FragmentsDir = Join-Path $JournalsDir "HL Group Sipp - Income Account"
+        JournalPath  = Join-Path $JournalsDir "HL_SIPP_Income_Journal.xlsx"
+        LedgerPath   = Join-Path $InvestmentsDir "HL_SIPP_Income_Ledger.xlsx"
+    }
+    @{
         Name         = "HL ISA"
         AccountLabel = "HL Stocks and Shares ISA"
         Method       = "HL"
         FragmentsDir = Join-Path $JournalsDir "HL Stocks and Shares ISA - Capital Account"
-        JournalPath  = Join-Path $JournalsDir "HL_ISA.xlsx"
+        JournalPath  = Join-Path $JournalsDir "HL_ISA_Journal.xlsx"
         LedgerPath   = Join-Path $InvestmentsDir "HL_ISA_Ledger.xlsx"
+    }
+    @{
+        Name         = "HL ISA Income"
+        AccountLabel = "HL Stocks and Shares ISA Income"
+        Method       = "HL"
+        FragmentsDir = Join-Path $JournalsDir "HL Stocks and Shares ISA - Income Account"
+        JournalPath  = Join-Path $JournalsDir "HL_ISA_Income_Journal.xlsx"
+        LedgerPath   = Join-Path $InvestmentsDir "HL_ISA_Income_Ledger.xlsx"
     }
 )
 

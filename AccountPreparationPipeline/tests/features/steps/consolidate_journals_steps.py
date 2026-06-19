@@ -139,6 +139,26 @@ def test_stale_offset_corrected() -> None:
     pass
 
 
+@scenario(FEATURE_FILE, "Maps ST DIV reference to dividend action")
+def test_maps_st_div() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps OVR CR reference to dividend action")
+def test_maps_ovr_cr() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps UTC CR reference to dividend action")
+def test_maps_utc_cr() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps LOYALTYU reference to dividend action")
+def test_maps_loyaltyu() -> None:
+    pass
+
+
 # ── Given steps ──────────────────────────────────────────────────────────────
 
 
@@ -203,6 +223,38 @@ def state_commission_dir(tmp_path: Path) -> dict:
     frags_dir = tmp_path / "frags"
     frags_dir.mkdir()
     shutil.copy(DATA_DIR / "valid_hl_commission.csv", frags_dir / "valid_hl_commission.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with ST DIV rows", target_fixture="state")
+def state_st_div_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_st_div.csv", frags_dir / "valid_hl_st_div.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with OVR CR rows", target_fixture="state")
+def state_ovr_cr_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_ovr_cr.csv", frags_dir / "valid_hl_ovr_cr.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with UTC CR rows", target_fixture="state")
+def state_utc_cr_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_utc_cr.csv", frags_dir / "valid_hl_utc_cr.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with LOYALTYU rows", target_fixture="state")
+def state_loyaltyu_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_loyaltyu.csv", frags_dir / "valid_hl_loyaltyu.csv")
     return {"tmp_path": tmp_path, "frags_dir": frags_dir}
 
 

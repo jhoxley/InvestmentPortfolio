@@ -12,11 +12,14 @@ from src.modes.consolidate_journals.constants import (
     CASH_SUB_ACCOUNT,
     HL_DEPOSIT_REFERENCE_ALIASES,
     HL_DEPOSIT_REFERENCES,
+    HL_DIVIDEND_REFERENCES,
+    HL_DIVIDEND_SUFFIX_MAP,
     HL_HEADER_COL0,
     HL_HEADER_COL1,
     HL_INCOME_REFERENCES,
     RE_BUY,
     RE_DESCRIPTION_SUFFIX,
+    RE_LOYALTYU_SUFFIX,
     RE_SELL,
     SUB_ACCOUNT_STRIP_SUFFIXES,
 )
@@ -67,6 +70,26 @@ def _strip_description_suffix(description: str) -> str:
     return result if result else description
 
 
+def _strip_dividend_suffix(reference: str, description: str) -> str:
+    ref = reference.strip()
+    ref_upper = ref.upper()
+    if ref_upper in ("LOYALTYU", "LOYALTYC"):
+        if not RE_LOYALTYU_SUFFIX.search(description):
+            raise ValueError(
+                f"LOYALTYU description does not match expected"
+                f" '\\d{{2}} \\d{{2}} Gross Loyalty' or '\\d{{2}} \\d{{4}} Gross Loyalty'"
+                f" pattern: {description!r}"
+            )
+        return RE_LOYALTYU_SUFFIX.sub("", description).strip() or ref
+    for suffix in HL_DIVIDEND_SUFFIX_MAP.get(ref_upper, ()):
+        if description.endswith(suffix):
+            stripped = description[: -len(suffix)].rstrip()
+            # Suffix consumed the entire description — use reference as last resort
+            return stripped or ref
+    # Suffix absent — return the full unmodified description (FR-009)
+    return description or ref
+
+
 def _map_action(reference: str, description: str) -> ActionType:
     ref = reference.strip()
     if RE_BUY.match(ref):
@@ -89,6 +112,8 @@ def _map_action(reference: str, description: str) -> ActionType:
         return ActionType.FEE
     if ref.upper() in HL_INCOME_REFERENCES:
         return ActionType.INCOME
+    if ref.upper() in HL_DIVIDEND_REFERENCES:
+        return ActionType.DIVIDEND
     raise ValueError(f"Unknown action for reference: {ref!r}")
 
 
@@ -220,6 +245,11 @@ def _parse_row(
 
     if str(action) in CASH_ACTION_TYPES:
         sub_account = CASH_SUB_ACCOUNT
+    elif action is ActionType.DIVIDEND:
+        try:
+            sub_account = _strip_dividend_suffix(reference, description)
+        except ValueError as exc:
+            raise _RowParseError(file_path, line, str(exc)) from exc
     else:
         sub_account = _strip_description_suffix(description) if description else ""
         if not sub_account:

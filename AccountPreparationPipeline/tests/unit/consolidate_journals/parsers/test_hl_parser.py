@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.modes.consolidate_journals.parsers.hl import HLFragmentParser, _map_action
+from src.modes.consolidate_journals.parsers.hl import HLFragmentParser, _map_action, _strip_dividend_suffix
 from src.modes.consolidate_journals.schema import ActionType
 
 DATA_DIR = Path(__file__).parent.parent.parent.parent / "data" / "consolidate_journals"
@@ -173,6 +173,128 @@ class TestActionMapping:
         result = parser.parse(DATA_DIR / "valid_hl_commission.csv", ACCOUNT)
         event = next(e for e in result.events if e.reference == "Commission")
         assert event.sub_account == "Cash"
+
+    def test_correction_reference_maps_to_income(self) -> None:
+        result = _map_action("CORRECTION", "Reverse LF Equity Income 12 22 Gross Loyalty")
+        assert result == ActionType.INCOME
+
+    def test_st_div_reference_maps_to_dividend(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_st_div.csv", ACCOUNT)
+        assert len(result.errors) == 0
+        assert all(e.action == ActionType.DIVIDEND for e in result.events)
+
+    def test_ovr_cr_reference_maps_to_dividend(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_ovr_cr.csv", ACCOUNT)
+        assert len(result.errors) == 0
+        assert all(e.action == ActionType.DIVIDEND for e in result.events)
+
+    def test_utc_cr_reference_maps_to_dividend(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_utc_cr.csv", ACCOUNT)
+        assert len(result.errors) == 0
+        assert all(e.action == ActionType.DIVIDEND for e in result.events)
+
+    def test_loyaltyu_reference_maps_to_dividend(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_loyaltyu.csv", ACCOUNT)
+        assert len(result.errors) == 0
+        assert all(e.action == ActionType.DIVIDEND for e in result.events)
+
+    def test_uto_cr_reference_maps_to_dividend(self) -> None:
+        result = _map_action("UTO CR", "Lindsell Train Global Equity Class D - Income (GBP) UT Offshore Dividend")
+        assert result == ActionType.DIVIDEND
+
+    def test_loyaltyc_reference_maps_to_dividend(self) -> None:
+        result = _map_action("LOYALTYC", "LF Equity Income Class Z - Accumulation (GBP) 12 22 Gross Loyalty")
+        assert result == ActionType.DIVIDEND
+
+
+class TestDividendSubAccount:
+    def test_st_div_sub_account_strips_dividend_payment_suffix(self) -> None:
+        result = _strip_dividend_suffix("ST DIV", "Barclays plc Ordinary 25p Dividend Payment")
+        assert result == "Barclays plc Ordinary 25p"
+
+    def test_ovr_cr_sub_account_strips_overseas_dividend_payment_suffix(self) -> None:
+        result = _strip_dividend_suffix("OVR CR", "Man Group plc ORD USD0.0342857142 Overseas Dividend Payment")
+        assert result == "Man Group plc ORD USD0.0342857142"
+
+    def test_utc_cr_eql_suffix_stripped(self) -> None:
+        result = _strip_dividend_suffix("UTC CR", "HSBC FTSE 250 Index Class S - Income (GBP) Eql - UT Cash Payment")
+        assert result == "HSBC FTSE 250 Index Class S - Income (GBP)"
+
+    def test_utc_cr_plain_suffix_stripped(self) -> None:
+        result = _strip_dividend_suffix("UTC CR", "HSBC FTSE 250 Index Class S - Income (GBP) UT Cash Payment")
+        assert result == "HSBC FTSE 250 Index Class S - Income (GBP)"
+
+    def test_loyaltyu_sub_account_strips_04_26_suffix(self) -> None:
+        result = _strip_dividend_suffix(
+            "LOYALTYU",
+            "JPMorgan Emerging Markets Class C - Accumulation (GBP) 04 26 Gross Loyalty",
+        )
+        assert result == "JPMorgan Emerging Markets Class C - Accumulation (GBP)"
+
+    def test_loyaltyu_sub_account_strips_01_26_suffix(self) -> None:
+        result = _strip_dividend_suffix(
+            "LOYALTYU",
+            "JPMorgan Emerging Markets Class C - Accumulation (GBP) 01 26 Gross Loyalty",
+        )
+        assert result == "JPMorgan Emerging Markets Class C - Accumulation (GBP)"
+
+    def test_loyaltyu_sub_account_strips_07_25_suffix(self) -> None:
+        result = _strip_dividend_suffix(
+            "LOYALTYU",
+            "JPMorgan Emerging Markets Class C - Accumulation (GBP) 07 25 Gross Loyalty",
+        )
+        assert result == "JPMorgan Emerging Markets Class C - Accumulation (GBP)"
+
+    def test_st_div_fallback_when_suffix_absent(self) -> None:
+        result = _strip_dividend_suffix("ST DIV", "Barclays plc Ordinary 25p")
+        assert result == "Barclays plc Ordinary 25p"
+
+    def test_st_div_fallback_when_description_equals_suffix_only(self) -> None:
+        result = _strip_dividend_suffix("ST DIV", " Dividend Payment")
+        assert result == "ST DIV"
+
+    def test_uto_cr_eql_suffix_stripped(self) -> None:
+        result = _strip_dividend_suffix(
+            "UTO CR",
+            "GS Global High Yield Portfolio Class R - Income (Hedged GBP) Eql - UT Offshore Dividend",
+        )
+        assert result == "GS Global High Yield Portfolio Class R - Income (Hedged GBP)"
+
+    def test_uto_cr_plain_suffix_stripped(self) -> None:
+        result = _strip_dividend_suffix(
+            "UTO CR",
+            "Lindsell Train Global Equity Class D - Income (GBP) UT Offshore Dividend",
+        )
+        assert result == "Lindsell Train Global Equity Class D - Income (GBP)"
+
+    def test_loyaltyc_sub_account_strips_loyalty_suffix(self) -> None:
+        result = _strip_dividend_suffix(
+            "LOYALTYC",
+            "LF Equity Income Class Z - Accumulation (GBP) 12 22 Gross Loyalty",
+        )
+        assert result == "LF Equity Income Class Z - Accumulation (GBP)"
+
+    def test_loyaltyu_sub_account_strips_4_digit_year_suffix(self) -> None:
+        result = _strip_dividend_suffix(
+            "LOYALTYU",
+            "Man Japan CoreAlpha Professional Class - Accumulation (GBP) 05 2016 Gross Loyalty",
+        )
+        assert result == "Man Japan CoreAlpha Professional Class - Accumulation (GBP)"
+
+    def test_loyaltyu_non_matching_pattern_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="LOYALTYU"):
+            _strip_dividend_suffix("LOYALTYU", "Some Fund 4 26 Gross Loyalty")
+
+    def test_mixed_income_file_parses_without_error(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_mixed_income.csv", ACCOUNT)
+        assert len(result.errors) == 0
+        assert len(result.events) == 4
+        assert all(e.action == ActionType.DIVIDEND for e in result.events)
 
 
 class TestDateParsing:
