@@ -139,6 +139,41 @@ def test_stale_offset_corrected() -> None:
     pass
 
 
+@scenario(FEATURE_FILE, "Maps ST DIV reference to dividend action")
+def test_maps_st_div() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps OVR CR reference to dividend action")
+def test_maps_ovr_cr() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps UTC CR reference to dividend action")
+def test_maps_utc_cr() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps LOYALTYU reference to dividend action")
+def test_maps_loyaltyu() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Dividend event generates same-sign Cash offset")
+def test_dividend_offset_generated() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Income account Cash balance is non-negative after dividend processing")
+def test_dividend_cash_balance_nonnegative() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Re-running consolidate_journals does not duplicate dividend offsets")
+def test_dividend_offsets_not_duplicated() -> None:
+    pass
+
+
 # ── Given steps ──────────────────────────────────────────────────────────────
 
 
@@ -203,6 +238,46 @@ def state_commission_dir(tmp_path: Path) -> dict:
     frags_dir = tmp_path / "frags"
     frags_dir.mkdir()
     shutil.copy(DATA_DIR / "valid_hl_commission.csv", frags_dir / "valid_hl_commission.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with ST DIV rows", target_fixture="state")
+def state_st_div_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_st_div.csv", frags_dir / "valid_hl_st_div.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with OVR CR rows", target_fixture="state")
+def state_ovr_cr_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_ovr_cr.csv", frags_dir / "valid_hl_ovr_cr.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with UTC CR rows", target_fixture="state")
+def state_utc_cr_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_utc_cr.csv", frags_dir / "valid_hl_utc_cr.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with LOYALTYU rows", target_fixture="state")
+def state_loyaltyu_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_loyaltyu.csv", frags_dir / "valid_hl_loyaltyu.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with mixed income rows", target_fixture="state")
+def state_mixed_income_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_mixed_income.csv", frags_dir / "valid_hl_mixed_income.csv")
     return {"tmp_path": tmp_path, "frags_dir": frags_dir}
 
 
@@ -378,6 +453,25 @@ def check_only_valid_events(state: dict) -> None:
 def check_one_valid_event(state: dict, count: int) -> None:
     df = pd.read_excel(state["journal_path"], engine="openpyxl")
     assert len(df) == count, f"Expected {count} event(s), got {len(df)}"
+
+
+@then(parsers.parse('the journal contains a row with reference "{reference}"'))
+def check_reference_present(state: dict, reference: str) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert reference in df["reference"].values, (
+        f"Reference '{reference}' not found in journal. References: {df['reference'].tolist()}"
+    )
+
+
+@then("the journal contains no trading rows with a negative value")
+def check_no_negative_trading_rows(state: dict) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    trading = df[df["action"] == "trading"]
+    negative = trading[trading["value"] < 0]
+    assert len(negative) == 0, (
+        f"Found {len(negative)} trading row(s) with negative value:\n"
+        f"{negative[['reference', 'value']].to_string()}"
+    )
 
 
 # ── Trade Cash Offset steps ──────────────────────────────────────────────────

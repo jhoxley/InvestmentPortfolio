@@ -10,12 +10,14 @@ from src.modes.consolidate_journals.schema import ActionType, JournalEvent
 
 
 class OffsetGenerator:
-    """Generate synthetic Cash offset entries for buy/sell trade events."""
+    """Generate synthetic Cash offset entries for buy, sell, and dividend events."""
 
     def generate(self, events: list[JournalEvent]) -> list[JournalEvent]:
-        """Return one Cash offset JournalEvent for each buy/sell event in `events`."""
+        """Return one Cash offset JournalEvent for each buy/sell/dividend event in `events`."""
         return [
-            self._make_offset(e) for e in events if e.action in (ActionType.BUY, ActionType.SELL)
+            self._make_offset(e)
+            for e in events
+            if e.action in (ActionType.BUY, ActionType.SELL, ActionType.DIVIDEND)
         ]
 
     def generate_from_df(self, trades: pd.DataFrame) -> list[JournalEvent]:

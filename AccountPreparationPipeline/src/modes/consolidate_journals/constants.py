@@ -20,11 +20,25 @@ HL_HEADER_COL1: str = "Settle date"
 
 HL_DEPOSIT_REFERENCES: frozenset[str] = frozenset({"Deposit", "BACS"})
 HL_DEPOSIT_REFERENCE_ALIASES: frozenset[str] = frozenset({"CARD WEB", "FPC"})
-HL_INCOME_REFERENCES: frozenset[str] = frozenset({"INTEREST", "RDP CR", "COMMISSION"})
+HL_INCOME_REFERENCES: frozenset[str] = frozenset({"INTEREST", "RDP CR", "COMMISSION", "CORRECTION"})
+
+HL_DIVIDEND_REFERENCES: frozenset[str] = frozenset(
+    {"ST DIV", "OVR CR", "UTC CR", "UTO CR", "LOYALTYU", "LOYALTYC"}
+)
+
+HL_DIVIDEND_SUFFIX_MAP: dict[str, tuple[str, ...]] = {
+    "ST DIV": (" Dividend Payment",),
+    "OVR CR": (" Overseas Dividend Payment",),
+    "UTC CR": (" Eql - UT Cash Payment", " UT Cash Payment"),
+    "UTO CR": (" Eql - UT Offshore Dividend", " UT Offshore Dividend"),
+}
+
+# RE_LOYALTYU_SUFFIX is also used for LOYALTYC (same suffix pattern, different reference)
+
+RE_LOYALTYU_SUFFIX: re.Pattern[str] = re.compile(r" \d{2} (?:\d{2}|\d{4}) Gross Loyalty$")
 
 RE_BUY: re.Pattern[str] = re.compile(r"^B\d+$")
 RE_SELL: re.Pattern[str] = re.compile(r"^S\d+$")
-RE_OFFSET: re.Pattern[str] = re.compile(r"^[BS]\d+-offset$")
 
 OFFSET_SUFFIX: str = "-offset"
 RE_BACS: re.Pattern[str] = re.compile(r"^BACS", re.IGNORECASE)

@@ -13,7 +13,6 @@ from src.modes.consolidate_journals.constants import (
     NUMBER_FORMAT_VALUE,
     OFFSET_SUFFIX,
     RE_BUY,
-    RE_OFFSET,
     RE_SELL,
 )
 from src.modes.consolidate_journals.schema import ActionType, JournalEvent
@@ -24,7 +23,9 @@ _NUMERIC_COLUMNS = ("value", "quantity")
 
 
 def _is_transaction_reference(reference: str) -> bool:
-    return bool(RE_BUY.match(reference) or RE_SELL.match(reference) or RE_OFFSET.match(reference))
+    return bool(
+        RE_BUY.match(reference) or RE_SELL.match(reference) or reference.endswith(OFFSET_SUFFIX)
+    )
 
 
 class JournalStore:
@@ -52,10 +53,12 @@ class JournalStore:
         return len(self._df)
 
     def missing_offset_trades(self) -> pd.DataFrame:
-        """Return buy/sell rows that have no corresponding offset row in the journal."""
+        """Return buy, sell, and dividend rows that have no corresponding offset row."""
         if self._df.empty:
             return self._df.iloc[0:0]
-        trade_mask = self._df["action"].isin({ActionType.BUY.value, ActionType.SELL.value})
+        trade_mask = self._df["action"].isin(
+            {ActionType.BUY.value, ActionType.SELL.value, ActionType.DIVIDEND.value}
+        )
         existing_offset_refs: set[str] = set(
             self._df.loc[self._df["action"] == ActionType.TRADING.value, "reference"]
         )
@@ -65,14 +68,17 @@ class JournalStore:
         return self._df[needs_offset].copy()
 
     def rectify_offsets(self) -> int:
-        """Update any offset rows whose value or quantity differs from the originating trade.
+        """Update any offset rows whose value or quantity differs from the originating buy, sell,
+        or dividend event.
 
         Returns the count of offset rows corrected in place.
         """
         if self._df.empty:
             return 0
 
-        trade_mask = self._df["action"].isin({ActionType.BUY.value, ActionType.SELL.value})
+        trade_mask = self._df["action"].isin(
+            {ActionType.BUY.value, ActionType.SELL.value, ActionType.DIVIDEND.value}
+        )
         trades = self._df[trade_mask]
         corrected = 0
 

@@ -47,7 +47,31 @@
       "Bash(powershell -Command \".specify/scripts/powershell/setup-plan.ps1 -Json\")",
       "PowerShell(.specify/scripts/powershell/check-prerequisites.ps1 -Json -PathsOnly)",
       "PowerShell(.specify/scripts/powershell/setup-tasks.ps1 -Json)",
-      "PowerShell(.specify/scripts/powershell/check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks)"
+      "PowerShell(.specify/scripts/powershell/check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks)",
+      "Bash(git checkout *)",
+      "Bash(Get-Content \"C:\\\\Users\\\\jhoxl\\\\OneDrive\\\\Investments\\\\Journals\\\\HL Stocks and Shares ISA - Income Account\\\\2025-07-06 to 2026-05-31 - ISA - Income.csv\")",
+      "Bash(Select-Object -First 30)",
+      "PowerShell(& \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\.specify\\\\scripts\\\\powershell\\\\setup-plan.ps1\" -Json)",
+      "PowerShell(& \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\.specify\\\\scripts\\\\powershell\\\\check-prerequisites.ps1\" -Json -PathsOnly)",
+      "PowerShell(& \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\.specify\\\\scripts\\\\powershell\\\\setup-tasks.ps1\" -Json)",
+      "PowerShell(& \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\.specify\\\\scripts\\\\powershell\\\\check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -x -q)",
+      "Bash(.venv/Scripts/python pipeline.py consolidate_journals \"C:\\\\Temp\\\\test_income_journal.xlsx\" \"C:\\\\Users\\\\jhoxl\\\\OneDrive\\\\Investments\\\\Journals\\\\HL Stocks and Shares ISA - Income Account\" HL \"HL ISA Income\")",
+      "Bash(Select-String -Pattern \"=== Consolidation|ERRORS|Events|Files\")",
+      "Bash(.venv/Scripts/python -m mypy src/modes/consolidate_journals/schema.py src/modes/consolidate_journals/constants.py src/modes/consolidate_journals/parsers/hl.py --strict)",
+      "Bash(.venv/Scripts/python -m ruff check src/modes/consolidate_journals/)",
+      "Bash(.venv/Scripts/python -m ruff format --check src/modes/consolidate_journals/)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -q --tb=no)",
+      "Bash(.venv/Scripts/python -m ruff check src/modes/consolidate_journals/journal_store.py src/modes/consolidate_journals/constants.py)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_offset_generator.py::TestOffsetGeneratorDividend tests/unit/consolidate_journals/test_journal_store.py::TestMissingOffsetTradesDividend -v --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_offset_generator.py tests/unit/consolidate_journals/test_journal_store.py tests/features/ -v --tb=short)",
+      "Bash(python -m pytest tests/unit/consolidate_journals/test_journal_store.py::TestRectifyOffsetsDividend -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_journal_store.py::TestRectifyOffsetsDividend -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_journal_store.py::TestRectifyOffsetsDividend tests/features/ -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_journal_store.py::TestDividendOffsetIdempotency -v)",
+      "Bash(.venv/Scripts/python -m mypy --strict src/)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -v)"
     ]
   }
 }

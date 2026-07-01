@@ -15,6 +15,7 @@ class ActionType(StrEnum):
     FEE = "fee"
     WITHDRAWAL = "withdrawal"
     TRADING = "trading"  # Synthetic cash offset for buy/sell trades
+    DIVIDEND = "dividend"
 
 
 class ConsolidationMethod(StrEnum):
