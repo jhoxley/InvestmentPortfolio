@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from src.modes.consolidate_journals.parsers.hl import HLFragmentParser, _map_action, _strip_dividend_suffix
+from src.modes.consolidate_journals.parsers.hl import (
+    HLFragmentParser,
+    _map_action,
+    _strip_dividend_suffix,
+)
 from src.modes.consolidate_journals.schema import ActionType
 
 DATA_DIR = Path(__file__).parent.parent.parent.parent / "data" / "consolidate_journals"
@@ -203,11 +207,17 @@ class TestActionMapping:
         assert all(e.action == ActionType.DIVIDEND for e in result.events)
 
     def test_uto_cr_reference_maps_to_dividend(self) -> None:
-        result = _map_action("UTO CR", "Lindsell Train Global Equity Class D - Income (GBP) UT Offshore Dividend")
+        result = _map_action(
+            "UTO CR",
+            "Lindsell Train Global Equity Class D - Income (GBP) UT Offshore Dividend",
+        )
         assert result == ActionType.DIVIDEND
 
     def test_loyaltyc_reference_maps_to_dividend(self) -> None:
-        result = _map_action("LOYALTYC", "LF Equity Income Class Z - Accumulation (GBP) 12 22 Gross Loyalty")
+        result = _map_action(
+            "LOYALTYC",
+            "LF Equity Income Class Z - Accumulation (GBP) 12 22 Gross Loyalty",
+        )
         assert result == ActionType.DIVIDEND
 
 
@@ -217,15 +227,21 @@ class TestDividendSubAccount:
         assert result == "Barclays plc Ordinary 25p"
 
     def test_ovr_cr_sub_account_strips_overseas_dividend_payment_suffix(self) -> None:
-        result = _strip_dividend_suffix("OVR CR", "Man Group plc ORD USD0.0342857142 Overseas Dividend Payment")
+        result = _strip_dividend_suffix(
+            "OVR CR", "Man Group plc ORD USD0.0342857142 Overseas Dividend Payment"
+        )
         assert result == "Man Group plc ORD USD0.0342857142"
 
     def test_utc_cr_eql_suffix_stripped(self) -> None:
-        result = _strip_dividend_suffix("UTC CR", "HSBC FTSE 250 Index Class S - Income (GBP) Eql - UT Cash Payment")
+        result = _strip_dividend_suffix(
+            "UTC CR", "HSBC FTSE 250 Index Class S - Income (GBP) Eql - UT Cash Payment"
+        )
         assert result == "HSBC FTSE 250 Index Class S - Income (GBP)"
 
     def test_utc_cr_plain_suffix_stripped(self) -> None:
-        result = _strip_dividend_suffix("UTC CR", "HSBC FTSE 250 Index Class S - Income (GBP) UT Cash Payment")
+        result = _strip_dividend_suffix(
+            "UTC CR", "HSBC FTSE 250 Index Class S - Income (GBP) UT Cash Payment"
+        )
         assert result == "HSBC FTSE 250 Index Class S - Income (GBP)"
 
     def test_loyaltyu_sub_account_strips_04_26_suffix(self) -> None:
@@ -260,7 +276,8 @@ class TestDividendSubAccount:
     def test_uto_cr_eql_suffix_stripped(self) -> None:
         result = _strip_dividend_suffix(
             "UTO CR",
-            "GS Global High Yield Portfolio Class R - Income (Hedged GBP) Eql - UT Offshore Dividend",
+            "GS Global High Yield Portfolio Class R - Income (Hedged GBP)"
+            " Eql - UT Offshore Dividend",
         )
         assert result == "GS Global High Yield Portfolio Class R - Income (Hedged GBP)"
 

@@ -124,6 +124,63 @@ class TestMerge:
         assert merged == 1
 
 
+class TestMissingOffsetTradesDividend:
+    def _row(self, action: str, reference: str, value: float = 68.38) -> dict[str, object]:
+        return {
+            "date": "2026-03-31",
+            "account": "ISA Income",
+            "sub_account": "Barclays plc Ordinary 25p" if action == "dividend" else "Cash",
+            "action": action,
+            "reference": reference,
+            "value": value,
+            "quantity": value,
+        }
+
+    def test_missing_offset_trades_returns_dividend_rows_without_offset(self) -> None:
+        store = JournalStore(pd.DataFrame([self._row("dividend", "ST DIV")]))
+        missing = store.missing_offset_trades()
+        assert len(missing) == 1
+        assert missing.iloc[0]["reference"] == "ST DIV"
+
+    def test_missing_offset_trades_excludes_dividend_with_existing_offset(self) -> None:
+        store = JournalStore(
+            pd.DataFrame(
+                [
+                    self._row("dividend", "ST DIV"),
+                    self._row("trading", "ST DIV-offset"),
+                ]
+            )
+        )
+        missing = store.missing_offset_trades()
+        assert len(missing) == 0
+
+    def test_missing_offset_trades_returns_mix_of_buy_sell_dividend(self) -> None:
+        rows = [
+            {
+                "date": "2024-01-15",
+                "account": "ISA",
+                "sub_account": "Vanguard Fund",
+                "action": "buy",
+                "reference": "B12345",
+                "value": -1000.0,
+                "quantity": 10.0,
+            },
+            {
+                "date": "2024-02-20",
+                "account": "ISA",
+                "sub_account": "Barclays PLC",
+                "action": "sell",
+                "reference": "S67890",
+                "value": 500.0,
+                "quantity": 50.0,
+            },
+            self._row("dividend", "ST DIV"),
+        ]
+        store = JournalStore(pd.DataFrame(rows))
+        missing = store.missing_offset_trades()
+        assert len(missing) == 3
+
+
 class TestRectifyOffsets:
     def _store_with_buy_and_wrong_offset(self) -> JournalStore:
         buy = make_event(reference="B12345", action=ActionType.BUY, value=Decimal("-1000.00"))
@@ -264,3 +321,131 @@ class TestRectifyOffsets:
         assert float(store._df[store._df["reference"] == "B12345"].iloc[0]["value"]) == float(
             original_buy_value
         )
+
+
+class TestDividendOffsetIdempotency:
+    def test_merge_does_not_duplicate_dividend_offset_on_rerun(self) -> None:
+        existing_offset = make_event(
+            reference="ST DIV-offset",
+            date=datetime.date(2026, 3, 31),
+            action=ActionType.TRADING,
+            sub_account="Cash",
+            value=Decimal("64.71"),
+            quantity=Decimal("64.71"),
+        )
+        store = JournalStore(
+            pd.DataFrame(
+                [
+                    {
+                        "date": "2026-03-31",
+                        "account": "Test ISA",
+                        "sub_account": "Cash",
+                        "action": "trading",
+                        "reference": "ST DIV-offset",
+                        "value": 64.71,
+                        "quantity": 64.71,
+                    }
+                ]
+            )
+        )
+        inserted, merged = store.merge([existing_offset])
+        assert inserted == 0
+        assert merged == 1
+        assert store.row_count == 1
+
+    def test_is_transaction_reference_returns_true_for_dividend_offset_refs(self) -> None:
+        from src.modes.consolidate_journals.journal_store import _is_transaction_reference
+
+        assert _is_transaction_reference("ST DIV-offset") is True
+        assert _is_transaction_reference("OVR CR-offset") is True
+        assert _is_transaction_reference("LOYALTYU-offset") is True
+
+
+class TestRectifyOffsetsDividend:
+    def _row(self, action: str, reference: str, value: float) -> dict[str, object]:
+        return {
+            "date": "2026-03-31",
+            "account": "ISA Income",
+            "sub_account": "Barclays plc Ordinary 25p" if action == "dividend" else "Cash",
+            "action": action,
+            "reference": reference,
+            "value": value,
+            "quantity": value,
+        }
+
+    def test_rectify_offsets_corrects_stale_dividend_offset(self) -> None:
+        store = JournalStore(
+            pd.DataFrame(
+                [
+                    self._row("dividend", "ST DIV", 64.71),
+                    self._row("trading", "ST DIV-offset", 50.00),
+                ]
+            )
+        )
+        corrected = store.rectify_offsets()
+        assert corrected == 1
+        offset_row = store._df[store._df["reference"] == "ST DIV-offset"].iloc[0]
+        assert float(offset_row["value"]) == 64.71
+
+    def test_rectify_offsets_skips_correct_dividend_offset(self) -> None:
+        store = JournalStore(
+            pd.DataFrame(
+                [
+                    self._row("dividend", "ST DIV", 64.71),
+                    self._row("trading", "ST DIV-offset", 64.71),
+                ]
+            )
+        )
+        corrected = store.rectify_offsets()
+        assert corrected == 0
+
+    def test_rectify_offsets_handles_dividend_alongside_buy_sell(self) -> None:
+        rows = [
+            {
+                "date": "2024-01-15",
+                "account": "ISA",
+                "sub_account": "Vanguard Fund",
+                "action": "buy",
+                "reference": "B12345",
+                "value": -1000.0,
+                "quantity": 10.0,
+            },
+            {
+                "date": "2024-01-15",
+                "account": "ISA",
+                "sub_account": "Cash",
+                "action": "trading",
+                "reference": "B12345-offset",
+                "value": 999.0,  # stale
+                "quantity": 999.0,
+            },
+            {
+                "date": "2024-02-20",
+                "account": "ISA",
+                "sub_account": "Barclays PLC",
+                "action": "sell",
+                "reference": "S67890",
+                "value": 500.0,
+                "quantity": 50.0,
+            },
+            {
+                "date": "2024-02-20",
+                "account": "ISA",
+                "sub_account": "Cash",
+                "action": "trading",
+                "reference": "S67890-offset",
+                "value": 499.0,  # stale
+                "quantity": 499.0,
+            },
+            self._row("dividend", "ST DIV", 64.71),
+            self._row("trading", "ST DIV-offset", 50.00),  # stale
+        ]
+        store = JournalStore(pd.DataFrame(rows))
+        corrected = store.rectify_offsets()
+        assert corrected == 3
+        buy_offset = store._df[store._df["reference"] == "B12345-offset"].iloc[0]
+        sell_offset = store._df[store._df["reference"] == "S67890-offset"].iloc[0]
+        div_offset = store._df[store._df["reference"] == "ST DIV-offset"].iloc[0]
+        assert float(buy_offset["value"]) == -1000.0
+        assert float(sell_offset["value"]) == 500.0
+        assert float(div_offset["value"]) == 64.71

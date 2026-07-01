@@ -44,6 +44,22 @@ def _sell(
     )
 
 
+def _dividend(
+    reference: str = "ST DIV",
+    value: str = "64.71",
+    date: str = "2026-03-31",
+) -> JournalEvent:
+    return JournalEvent(
+        date=datetime.date.fromisoformat(date),
+        account="ISA Income",
+        sub_account="Barclays plc Ordinary 25p",
+        action=ActionType.DIVIDEND,
+        reference=reference,
+        value=Decimal(value),
+        quantity=Decimal(value),
+    )
+
+
 def _deposit(reference: str = "Deposit") -> JournalEvent:
     return JournalEvent(
         date=datetime.date(2024, 1, 5),
@@ -137,6 +153,57 @@ class TestGenerateFromList:
     def test_output_contains_no_none_quantity(self) -> None:
         offset = OffsetGenerator().generate([_buy()])[0]
         assert offset.quantity is not None
+
+
+class TestOffsetGeneratorDividend:
+    def test_generate_returns_offset_for_dividend_event(self) -> None:
+        offsets = OffsetGenerator().generate([_dividend()])
+        assert len(offsets) == 1
+        offset = offsets[0]
+        assert offset.sub_account == "Cash"
+        assert offset.action == ActionType.TRADING
+        assert offset.reference == "ST DIV-offset"
+        assert offset.value == Decimal("64.71")
+        assert offset.quantity == Decimal("64.71")
+        assert offset.value > 0  # SC-002: dividend offset value must be positive
+        assert offset.quantity > 0  # SC-002: dividend offset quantity must be positive
+
+    def test_generate_skips_non_offset_actions(self) -> None:
+        def _make(action: ActionType) -> JournalEvent:
+            return JournalEvent(
+                date=datetime.date(2026, 3, 31),
+                account="ISA",
+                sub_account="Cash",
+                action=action,
+                reference="REF",
+                value=Decimal("100.00"),
+                quantity=None,
+            )
+
+        for action in (ActionType.DEPOSIT, ActionType.INCOME, ActionType.FEE, ActionType.TRADING):
+            result = OffsetGenerator().generate([_make(action)])
+            assert result == [], f"Expected no offset for action {action}"
+
+    def test_generate_returns_offset_for_all_dividend_reference_types(self) -> None:
+        events = [
+            _dividend(reference="ST DIV"),
+            _dividend(reference="OVR CR"),
+            _dividend(reference="UTC CR"),
+            _dividend(reference="UTO CR"),
+            _dividend(reference="LOYALTYU"),
+            _dividend(reference="LOYALTYC"),
+        ]
+        offsets = OffsetGenerator().generate(events)
+        assert len(offsets) == 6
+        refs = {o.reference for o in offsets}
+        assert refs == {
+            "ST DIV-offset",
+            "OVR CR-offset",
+            "UTC CR-offset",
+            "UTO CR-offset",
+            "LOYALTYU-offset",
+            "LOYALTYC-offset",
+        }
 
 
 class TestGenerateFromDf:
