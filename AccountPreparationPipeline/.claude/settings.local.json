@@ -96,7 +96,11 @@
       "Bash(.venv/Scripts/python -m pytest --tb=short -q)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/unit/create_capital_ledger/test_engine.py -v)",
       "Bash(.venv/Scripts/python.exe -m pytest --tb=short -q)",
-      "PowerShell(& \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\run_pipeline.ps1\" 2>&1)"
+      "PowerShell(& \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\run_pipeline.ps1\" 2>&1)",
+      "Bash(.venv/Scripts/python.exe tests/data/create_capital_ledger/create_fixtures.py)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/unit/create_capital_ledger/test_engine.py -k \"lodgement\" -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest \"tests/features/steps/create_capital_ledger_steps.py::test_lodgement_rows_contribute_to_book_value\" -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/unit/create_capital_ledger/test_engine.py tests/features/steps/create_capital_ledger_steps.py -v)"
     ]
   }
 }

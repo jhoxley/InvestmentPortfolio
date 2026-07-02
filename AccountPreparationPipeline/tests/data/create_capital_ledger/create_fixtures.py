@@ -84,6 +84,47 @@ _SIMPLE_ROWS = [
     ),
 ]
 
+_LODGEMENT_ROWS = [
+    # Two lodgements on the same early date (TV negative — not sign-adjusted by ledger engine)
+    (
+        "00001-001",
+        "2018-07-12",
+        "Test ISA",
+        "Barclays plc",
+        "lodgement",
+        "L001",
+        -2288.89,
+        1221.0,
+        -2288.89,
+        1221.0,
+    ),
+    (
+        "00002-001",
+        "2018-07-12",
+        "Test ISA",
+        "Man Group plc",
+        "lodgement",
+        "L002",
+        -5301.56,
+        300.0,
+        -5301.56,
+        300.0,
+    ),
+    # Buy at a later date (TV positive — ledger engine negated the journal value)
+    (
+        "00003-001",
+        "2019-05-24",
+        "Test ISA",
+        "HSBC Fund",
+        "buy",
+        "B001",
+        -200.0,
+        10.0,
+        200.0,
+        10.0,
+    ),
+]
+
 _EXTRA_ROWS = [
     (
         "00006-001",
@@ -124,6 +165,10 @@ def main() -> None:
     mixed = _make_df(_SIMPLE_ROWS + _EXTRA_ROWS)
     mixed.to_excel(HERE / "mixed_actions_ledger.xlsx", index=False, engine="openpyxl")
     print("Written: mixed_actions_ledger.xlsx")
+
+    lodgement = _make_df(_LODGEMENT_ROWS)
+    lodgement.to_excel(HERE / "lodgement_ledger.xlsx", index=False, engine="openpyxl")
+    print("Written: lodgement_ledger.xlsx")
 
 
 if __name__ == "__main__":
