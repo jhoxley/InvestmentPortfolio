@@ -17,45 +17,53 @@ $JournalsDir    = Join-Path $InvestmentsDir "Journals"
 
 # Each hashtable defines one account's inputs, intermediaries, and outputs.
 # Keys:
-#   Name         — display label used in console output
-#   AccountLabel — string written into every journal row's 'account' column
-#   Method       — consolidation parser (currently only "HL" is supported)
-#   FragmentsDir — directory containing the raw HL CSV export files
-#   JournalPath  — consolidated journal XLSX (created or updated by Step 1)
-#   LedgerPath   — ledger XLSX produced by Step 2
+#   Name               — display label used in console output
+#   AccountLabel       — string written into every journal row's 'account' column
+#   Method             — consolidation parser (currently only "HL" is supported)
+#   FragmentsDir       — directory containing the raw HL CSV export files
+#   JournalPath        — consolidated journal XLSX (created or updated by Step 1)
+#   LedgerPath         — ledger XLSX produced by Step 2
+#   IsCapitalAccount   — $true to run Step 3 (create_capital_ledger); omit/false for income accounts
+#   CapitalLedgerPath  — capital summary XLSX produced by Step 3 (required when IsCapitalAccount=$true)
 
 $Accounts = @(
     @{
-        Name         = "HL SIPP"
-        AccountLabel = "HL Group SIPP"
-        Method       = "HL"
-        FragmentsDir = Join-Path $JournalsDir "HL Group Sipp - Capital Account"
-        JournalPath  = Join-Path $JournalsDir "HL_SIPP_Journal.xlsx"
-        LedgerPath   = Join-Path $InvestmentsDir "HL_SIPP_Ledger.xlsx"
+        Name               = "HL SIPP"
+        AccountLabel       = "HL Group SIPP"
+        Method             = "HL"
+        FragmentsDir       = Join-Path $JournalsDir "HL Group Sipp - Capital Account"
+        JournalPath        = Join-Path $JournalsDir "HL_SIPP_Journal.xlsx"
+        LedgerPath         = Join-Path $InvestmentsDir "HL_SIPP_Ledger.xlsx"
+        IsCapitalAccount   = $true
+        CapitalLedgerPath  = Join-Path $InvestmentsDir "HL_SIPP_Capital_Ledger.xlsx"
     }
     @{
-        Name         = "HL SIPP Income"
-        AccountLabel = "HL Group SIPP Income"
-        Method       = "HL"
-        FragmentsDir = Join-Path $JournalsDir "HL Group Sipp - Income Account"
-        JournalPath  = Join-Path $JournalsDir "HL_SIPP_Income_Journal.xlsx"
-        LedgerPath   = Join-Path $InvestmentsDir "HL_SIPP_Income_Ledger.xlsx"
+        Name               = "HL SIPP Income"
+        AccountLabel       = "HL Group SIPP Income"
+        Method             = "HL"
+        FragmentsDir       = Join-Path $JournalsDir "HL Group Sipp - Income Account"
+        JournalPath        = Join-Path $JournalsDir "HL_SIPP_Income_Journal.xlsx"
+        LedgerPath         = Join-Path $InvestmentsDir "HL_SIPP_Income_Ledger.xlsx"
+        IsCapitalAccount   = $false
     }
     @{
-        Name         = "HL ISA"
-        AccountLabel = "HL Stocks and Shares ISA"
-        Method       = "HL"
-        FragmentsDir = Join-Path $JournalsDir "HL Stocks and Shares ISA - Capital Account"
-        JournalPath  = Join-Path $JournalsDir "HL_ISA_Journal.xlsx"
-        LedgerPath   = Join-Path $InvestmentsDir "HL_ISA_Ledger.xlsx"
+        Name               = "HL ISA"
+        AccountLabel       = "HL Stocks and Shares ISA"
+        Method             = "HL"
+        FragmentsDir       = Join-Path $JournalsDir "HL Stocks and Shares ISA - Capital Account"
+        JournalPath        = Join-Path $JournalsDir "HL_ISA_Journal.xlsx"
+        LedgerPath         = Join-Path $InvestmentsDir "HL_ISA_Ledger.xlsx"
+        IsCapitalAccount   = $true
+        CapitalLedgerPath  = Join-Path $InvestmentsDir "HL_ISA_Capital_Ledger.xlsx"
     }
     @{
-        Name         = "HL ISA Income"
-        AccountLabel = "HL Stocks and Shares ISA Income"
-        Method       = "HL"
-        FragmentsDir = Join-Path $JournalsDir "HL Stocks and Shares ISA - Income Account"
-        JournalPath  = Join-Path $JournalsDir "HL_ISA_Income_Journal.xlsx"
-        LedgerPath   = Join-Path $InvestmentsDir "HL_ISA_Income_Ledger.xlsx"
+        Name               = "HL ISA Income"
+        AccountLabel       = "HL Stocks and Shares ISA Income"
+        Method             = "HL"
+        FragmentsDir       = Join-Path $JournalsDir "HL Stocks and Shares ISA - Income Account"
+        JournalPath        = Join-Path $JournalsDir "HL_ISA_Income_Journal.xlsx"
+        LedgerPath         = Join-Path $InvestmentsDir "HL_ISA_Income_Ledger.xlsx"
+        IsCapitalAccount   = $false
     }
 )
 
@@ -108,18 +116,20 @@ foreach ($account in $Accounts) {
         }
     }
 
-    # ── Future steps: add below, following the same pattern ───────────────────
-    # if (-not $failed) {
-    #     Write-Host ""
-    #     Write-Host "  [3/N] next_mode" -ForegroundColor Yellow
-    #     & $PythonExe $PipelinePy next_mode `
-    #         $account.SomeInput `
-    #         $account.SomeOutput
-    #     if ($LASTEXITCODE -ne 0) {
-    #         Write-Host "  FAILED: next_mode exited with code $LASTEXITCODE" -ForegroundColor Red
-    #         $failed = $true
-    #     }
-    # }
+    # ── Step 3: Build capital summary from ledger ──────────────────────────────
+    if (-not $failed -and $account.IsCapitalAccount -eq $true) {
+        Write-Host ""
+        Write-Host "  [3/3] create_capital_ledger" -ForegroundColor Yellow
+        Write-Host "        $($account.LedgerPath)"
+        Write-Host "     -> $($account.CapitalLedgerPath)"
+        & $PythonExe $PipelinePy create_capital_ledger `
+            $account.LedgerPath `
+            $account.CapitalLedgerPath
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  FAILED: create_capital_ledger exited with code $LASTEXITCODE" -ForegroundColor Red
+            $failed = $true
+        }
+    }
 
     Write-Host ""
     if ($failed) {

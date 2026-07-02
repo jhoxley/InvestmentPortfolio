@@ -71,7 +71,15 @@
       "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_journal_store.py::TestRectifyOffsetsDividend tests/features/ -v)",
       "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_journal_store.py::TestDividendOffsetIdempotency -v)",
       "Bash(.venv/Scripts/python -m mypy --strict src/)",
-      "Bash(.venv/Scripts/python -m pytest tests/ -v)"
+      "Bash(.venv/Scripts/python -m pytest tests/ -v)",
+      "Bash(.venv/Scripts/python pipeline.py --help)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/create_capital_ledger/ tests/features/create_capital_ledger.feature -v --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/create_capital_ledger/ tests/features/ -v --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/create_capital_ledger/ -v --tb=short)",
+      "Bash(.venv/Scripts/python -m mypy --strict src/modes/create_capital_ledger/)",
+      "Bash(.venv/Scripts/python -m ruff format src/modes/create_capital_ledger/constants.py tests/data/create_capital_ledger/create_fixtures.py tests/unit/create_capital_ledger/test_engine.py)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -q --tb=short)",
+      "Bash(powershell -Command \"Get-Content .specify/extensions.yml\")"
     ]
   }
 }
