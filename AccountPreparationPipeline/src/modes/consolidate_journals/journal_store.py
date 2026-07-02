@@ -8,11 +8,13 @@ from pathlib import Path
 import pandas as pd
 
 from src.modes.consolidate_journals.constants import (
+    DEPOSIT_SUFFIX,
     JOURNAL_COLUMNS,
     NUMBER_FORMAT_QUANTITY,
     NUMBER_FORMAT_VALUE,
     OFFSET_SUFFIX,
     RE_BUY,
+    RE_LODGEMENT,
     RE_SELL,
 )
 from src.modes.consolidate_journals.schema import ActionType, JournalEvent
@@ -24,7 +26,11 @@ _NUMERIC_COLUMNS = ("value", "quantity")
 
 def _is_transaction_reference(reference: str) -> bool:
     return bool(
-        RE_BUY.match(reference) or RE_SELL.match(reference) or reference.endswith(OFFSET_SUFFIX)
+        RE_BUY.match(reference)
+        or RE_SELL.match(reference)
+        or RE_LODGEMENT.match(reference)
+        or reference.endswith(OFFSET_SUFFIX)
+        or reference.endswith(DEPOSIT_SUFFIX)
     )
 
 
@@ -53,19 +59,36 @@ class JournalStore:
         return len(self._df)
 
     def missing_offset_trades(self) -> pd.DataFrame:
-        """Return buy, sell, and dividend rows that have no corresponding offset row."""
+        """Return buy/sell/dividend rows missing a trading offset, and lodgement rows missing
+        either companion (deposit or trading)."""
         if self._df.empty:
             return self._df.iloc[0:0]
+
+        existing_trading_refs: set[str] = set(
+            self._df.loc[self._df["action"] == ActionType.TRADING.value, "reference"]
+        )
+
         trade_mask = self._df["action"].isin(
             {ActionType.BUY.value, ActionType.SELL.value, ActionType.DIVIDEND.value}
         )
-        existing_offset_refs: set[str] = set(
-            self._df.loc[self._df["action"] == ActionType.TRADING.value, "reference"]
+        needs_trading_offset = trade_mask & ~self._df["reference"].apply(
+            lambda ref: (str(ref) + OFFSET_SUFFIX) in existing_trading_refs
         )
-        needs_offset = trade_mask & ~self._df["reference"].apply(
-            lambda ref: (str(ref) + OFFSET_SUFFIX) in existing_offset_refs
+
+        lodgement_mask = self._df["action"] == ActionType.LODGEMENT.value
+        existing_deposit_refs: set[str] = set(
+            self._df.loc[self._df["action"] == ActionType.DEPOSIT.value, "reference"]
         )
-        return self._df[needs_offset].copy()
+        needs_lodgement_companion = lodgement_mask & (
+            ~self._df["reference"].apply(
+                lambda ref: (str(ref) + OFFSET_SUFFIX) in existing_trading_refs
+            )
+            | ~self._df["reference"].apply(
+                lambda ref: (str(ref) + DEPOSIT_SUFFIX) in existing_deposit_refs
+            )
+        )
+
+        return self._df[needs_trading_offset | needs_lodgement_companion].copy()
 
     def rectify_offsets(self) -> int:
         """Update any offset rows whose value or quantity differs from the originating buy, sell,

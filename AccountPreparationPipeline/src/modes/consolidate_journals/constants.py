@@ -43,6 +43,7 @@ RE_LODGEMENT: re.Pattern[str] = re.compile(r"^L\d+$")
 LODGEMENT_DESCRIPTION_PREFIX: str = "Lodgement "
 
 OFFSET_SUFFIX: str = "-offset"
+DEPOSIT_SUFFIX: str = "-deposit"
 RE_BACS: re.Pattern[str] = re.compile(r"^BACS", re.IGNORECASE)
 
 RE_DESCRIPTION_SUFFIX: re.Pattern[str] = re.compile(r"\s+[\d.,]+\s*@.*$")

@@ -83,7 +83,17 @@
       "Bash(.venv/Scripts/python -m pytest tests/ -q --tb=no --co -q)",
       "Bash(.venv/Scripts/python -m pytest \"tests/unit/consolidate_journals/parsers/test_hl_parser.py::TestLodgementActionMapping\" \"tests/features/\" -v --tb=short)",
       "Bash(.venv/Scripts/python -m pytest \"tests/unit/consolidate_journals/\" -v --tb=short -q)",
-      "Bash(.venv/Scripts/python -m pytest \"tests/unit/consolidate_journals/parsers/test_hl_parser.py::TestLodgementActionMapping\" -v --tb=short)"
+      "Bash(.venv/Scripts/python -m pytest \"tests/unit/consolidate_journals/parsers/test_hl_parser.py::TestLodgementActionMapping\" -v --tb=short)",
+      "Bash(powershell.exe -NonInteractive -File \".specify/scripts/powershell/setup-plan.ps1\" -Json)",
+      "Bash(powershell.exe -NonInteractive -Command \"Get-ChildItem -Recurse tests/unit/consolidate_journals/ -File | Select-Object FullName\")",
+      "Bash(powershell.exe -NonInteractive -File \".specify/scripts/powershell/setup-tasks.ps1\" -Json)",
+      "Bash(powershell.exe -NonInteractive -File \".specify/scripts/powershell/check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_offset_generator.py -k \"lodgement\" -v --tb=no -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_journal_store.py -k \"lodgement\" -v --tb=no -q)",
+      "Bash(.venv/Scripts/python -m pytest \"tests/features/steps/consolidate_journals_steps.py\" -k \"lodgement_deposit_companion or lodgement_trading_companion or lodgement_idempotent\" -v --tb=short -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_offset_generator.py tests/unit/consolidate_journals/test_journal_store.py tests/features/ -v --tb=short -q)",
+      "Bash(.venv/Scripts/python -m ruff format tests/features/steps/consolidate_journals_steps.py tests/unit/consolidate_journals/test_journal_store.py)",
+      "Bash(.venv/Scripts/python -m pytest --tb=short -q)"
     ]
   }
 }

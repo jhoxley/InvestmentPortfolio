@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.modes.consolidate_journals.constants import JOURNAL_COLUMNS
-from src.modes.consolidate_journals.journal_store import JournalStore
+from src.modes.consolidate_journals.constants import DEPOSIT_SUFFIX, JOURNAL_COLUMNS, OFFSET_SUFFIX
+from src.modes.consolidate_journals.journal_store import JournalStore, _is_transaction_reference
 from src.modes.consolidate_journals.schema import ActionType, JournalEvent
 
 
@@ -449,3 +449,109 @@ class TestRectifyOffsetsDividend:
         assert float(buy_offset["value"]) == -1000.0
         assert float(sell_offset["value"]) == 500.0
         assert float(div_offset["value"]) == 64.71
+
+
+def _lodgement_event(
+    reference: str = "L003538235",
+    date: datetime.date = datetime.date(2018, 7, 12),
+    value: Decimal = Decimal("-2288.89"),
+) -> JournalEvent:
+    return JournalEvent(
+        date=date,
+        account="ISA",
+        sub_account="Barclays plc Ordinary 25p",
+        action=ActionType.LODGEMENT,
+        reference=reference,
+        value=value,
+        quantity=Decimal("1221"),
+    )
+
+
+def _companion_event(
+    action: ActionType,
+    reference: str,
+    value: Decimal = Decimal("2288.89"),
+    date: datetime.date = datetime.date(2018, 7, 12),
+) -> JournalEvent:
+    return JournalEvent(
+        date=date,
+        account="ISA",
+        sub_account="Cash",
+        action=action,
+        reference=reference,
+        value=value,
+        quantity=None,
+    )
+
+
+class TestLodgementDedup:
+    def test_lodgement_reference_is_transaction_reference(self) -> None:
+        assert _is_transaction_reference("L003538235") is True
+
+    def test_deposit_suffix_reference_is_transaction_reference(self) -> None:
+        assert _is_transaction_reference("L003538235" + DEPOSIT_SUFFIX) is True
+
+    def test_lodgement_dedup_uses_primary_key(self) -> None:
+        store = JournalStore(pd.DataFrame(columns=JOURNAL_COLUMNS))
+        inserted, merged = store.merge([_lodgement_event()])
+        assert inserted == 1 and merged == 0
+        inserted2, merged2 = store.merge([_lodgement_event()])
+        assert inserted2 == 0 and merged2 == 1
+
+    def test_two_same_date_same_value_lodgements_both_kept(self) -> None:
+        store = JournalStore(pd.DataFrame(columns=JOURNAL_COLUMNS))
+        e1 = _lodgement_event(reference="L001", value=Decimal("-500.00"))
+        e2 = _lodgement_event(reference="L002", value=Decimal("-500.00"))
+        store.merge([e1, e2])
+        assert store.row_count == 2
+
+    def test_lodgement_missing_both_companions_returned(self) -> None:
+        store = JournalStore(pd.DataFrame(columns=JOURNAL_COLUMNS))
+        store.merge([_lodgement_event()])
+        missing = store.missing_offset_trades()
+        assert len(missing) == 1
+        assert missing.iloc[0]["reference"] == "L003538235"
+
+    def test_lodgement_missing_deposit_companion_only(self) -> None:
+        store = JournalStore(pd.DataFrame(columns=JOURNAL_COLUMNS))
+        store.merge(
+            [
+                _lodgement_event(),
+                _companion_event(
+                    ActionType.TRADING, "L003538235" + OFFSET_SUFFIX, Decimal("-2288.89")
+                ),
+            ]
+        )
+        missing = store.missing_offset_trades()
+        assert len(missing) == 1
+        assert missing.iloc[0]["reference"] == "L003538235"
+
+    def test_lodgement_missing_trading_companion_only(self) -> None:
+        store = JournalStore(pd.DataFrame(columns=JOURNAL_COLUMNS))
+        store.merge(
+            [
+                _lodgement_event(),
+                _companion_event(
+                    ActionType.DEPOSIT, "L003538235" + DEPOSIT_SUFFIX, Decimal("2288.89")
+                ),
+            ]
+        )
+        missing = store.missing_offset_trades()
+        assert len(missing) == 1
+        assert missing.iloc[0]["reference"] == "L003538235"
+
+    def test_lodgement_with_both_companions_not_returned(self) -> None:
+        store = JournalStore(pd.DataFrame(columns=JOURNAL_COLUMNS))
+        store.merge(
+            [
+                _lodgement_event(),
+                _companion_event(
+                    ActionType.DEPOSIT, "L003538235" + DEPOSIT_SUFFIX, Decimal("2288.89")
+                ),
+                _companion_event(
+                    ActionType.TRADING, "L003538235" + OFFSET_SUFFIX, Decimal("-2288.89")
+                ),
+            ]
+        )
+        missing = store.missing_offset_trades()
+        assert len(missing) == 0

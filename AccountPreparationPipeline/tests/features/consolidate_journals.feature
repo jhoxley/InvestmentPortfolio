@@ -244,3 +244,28 @@ Feature: Journal Fragment Consolidation
     And the journal contains a row with action "lodgement"
     And the journal contains a row with action "buy"
     And the journal contains a row with action "deposit"
+
+
+  # ─── Feature 013: Lodgement Deposit and Trading Companions ───
+
+  Scenario: Lodgement generates a deposit companion row
+    Given a valid HL CSV file with lodgement rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains a row with action "deposit" and reference "L003538235-deposit"
+
+  Scenario: Lodgement generates a trading companion row
+    Given a valid HL CSV file with lodgement rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    Then the exit code is 0
+    And the journal contains a row with action "trading" and reference "L003538235-offset"
+
+  Scenario: Re-running consolidation does not duplicate lodgement companions
+    Given a valid HL CSV file with lodgement rows
+    And no existing consolidated journal
+    When I run consolidate_journals with method HL and account "Test ISA"
+    And I run consolidate_journals with method HL and account "Test ISA" again
+    Then the exit code is 0
+    And the journal contains exactly 6 rows
