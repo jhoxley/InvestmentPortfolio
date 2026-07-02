@@ -93,7 +93,10 @@
       "Bash(.venv/Scripts/python -m pytest \"tests/features/steps/consolidate_journals_steps.py\" -k \"lodgement_deposit_companion or lodgement_trading_companion or lodgement_idempotent\" -v --tb=short -q)",
       "Bash(.venv/Scripts/python -m pytest tests/unit/consolidate_journals/test_offset_generator.py tests/unit/consolidate_journals/test_journal_store.py tests/features/ -v --tb=short -q)",
       "Bash(.venv/Scripts/python -m ruff format tests/features/steps/consolidate_journals_steps.py tests/unit/consolidate_journals/test_journal_store.py)",
-      "Bash(.venv/Scripts/python -m pytest --tb=short -q)"
+      "Bash(.venv/Scripts/python -m pytest --tb=short -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/unit/create_capital_ledger/test_engine.py -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest --tb=short -q)",
+      "PowerShell(& \"C:\\\\GitHub\\\\JHoxley\\\\InvestmentPortfolio\\\\AccountPreparationPipeline\\\\run_pipeline.ps1\" 2>&1)"
     ]
   }
 }

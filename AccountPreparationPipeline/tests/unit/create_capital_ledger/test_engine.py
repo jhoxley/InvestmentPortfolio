@@ -142,3 +142,24 @@ class TestCapitalLedgerEngine:
         result = CapitalLedgerEngine().run(df)
         assert len(result) == 1
         assert float(result.iloc[0]["book_value"]) == pytest.approx(-3000.0)
+
+    def test_cumsum_uses_date_order_not_transaction_id_order(self) -> None:
+        # Regression: lodgement companion rows inserted via Feature 013 receive high
+        # Transaction IDs (e.g. 00212-xxx) even though their dates are the earliest in
+        # the account. Previously, sort=False in groupby caused cumsum to process these
+        # early-date rows LAST, producing inflated capital/income values for early dates
+        # that dropped back when the output was sorted by date.
+        df = _df(
+            # Early date but HIGH Transaction ID (mirrors lodgement companion scenario)
+            _row("00100-001", "2018-07-12", "deposit", 7852.19),
+            # Late date but LOW Transaction ID (existing rows)
+            _row("00001-001", "2024-01-10", "deposit", 1000.0),
+            _row("00002-001", "2024-06-01", "deposit", 500.0),
+        )
+        result = CapitalLedgerEngine().run(df)
+        capitals = result.set_index("date")["capital"]
+        # With correct date-ordered cumsum, 2018-07-12 is processed first
+        assert float(capitals["2018-07-12"]) == pytest.approx(7852.19)
+        # Subsequent dates accumulate on top
+        assert float(capitals["2024-01-10"]) == pytest.approx(8852.19)
+        assert float(capitals["2024-06-01"]) == pytest.approx(9352.19)

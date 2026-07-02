@@ -56,7 +56,7 @@ class CapitalLedgerEngine:
         df[_BV_CONTRIB] = tv.where(bv_mask, other=0.0)
 
         contrib_cols = [_CAPITAL_CONTRIB, _INCOME_CONTRIB, _BV_CONTRIB]
-        grouped = df.groupby(CAPITAL_COL_DATE, sort=False)[contrib_cols].sum()
+        grouped = df.groupby(CAPITAL_COL_DATE, sort=True)[contrib_cols].sum()
 
         grouped[CAPITAL_COL_CAPITAL] = grouped[_CAPITAL_CONTRIB].cumsum().fillna(0.0)
         grouped[CAPITAL_COL_INCOME] = grouped[_INCOME_CONTRIB].cumsum().fillna(0.0)
