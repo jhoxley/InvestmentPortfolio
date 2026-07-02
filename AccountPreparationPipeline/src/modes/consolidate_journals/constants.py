@@ -39,6 +39,8 @@ RE_LOYALTYU_SUFFIX: re.Pattern[str] = re.compile(r" \d{2} (?:\d{2}|\d{4}) Gross 
 
 RE_BUY: re.Pattern[str] = re.compile(r"^B\d+$")
 RE_SELL: re.Pattern[str] = re.compile(r"^S\d+$")
+RE_LODGEMENT: re.Pattern[str] = re.compile(r"^L\d+$")
+LODGEMENT_DESCRIPTION_PREFIX: str = "Lodgement "
 
 OFFSET_SUFFIX: str = "-offset"
 RE_BACS: re.Pattern[str] = re.compile(r"^BACS", re.IGNORECASE)

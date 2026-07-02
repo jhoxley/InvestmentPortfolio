@@ -1,0 +1,10 @@
+Portfolio Summary,,,,,,
+Client Name:,Test Client,,,,,,
+Client Number:,0000000,,,,,,
+Valuation as at,01/01/2024 00:00,,,,,,
+,,,,,,
+Trade date,Settle date,Reference,Description,Unit cost (p),Quantity,Value (£)
+12/07/2018,12/07/2018,B000001,Test Buy Fund,100.00,10,-1000.00
+12/07/2018,12/07/2018,S000001,Test Sell Fund,100.00,10,1000.00
+12/07/2018,12/07/2018,Deposit,Cash Deposit,,,500.00
+12/07/2018,12/07/2018,L003538235,Lodgement Barclays plc Ordinary 25p,188.38,1221,-2288.89

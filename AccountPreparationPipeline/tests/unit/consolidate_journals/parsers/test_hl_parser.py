@@ -392,6 +392,96 @@ class TestValueAndQuantity:
         assert deposit_event.quantity is None
 
 
+class TestLodgementActionMapping:
+    def test_l_digits_reference_maps_to_lodgement(self) -> None:
+        result = _map_action("L003538235", "Lodgement Barclays plc Ordinary 25p")
+        assert result == ActionType.LODGEMENT
+
+    def test_l_digits_short_reference_maps_to_lodgement(self) -> None:
+        result = _map_action("L1", "Lodgement Fund A")
+        assert result == ActionType.LODGEMENT
+
+    def test_l_non_digit_suffix_not_lodgement(self) -> None:
+        result = _map_action("LOYALTYU", "Barclays 01 2024 Gross Loyalty")
+        assert result == ActionType.DIVIDEND
+
+    def test_l_with_dash_not_lodgement(self) -> None:
+        with pytest.raises(ValueError, match="Unknown action"):
+            _map_action("L-001", "something")
+
+    def test_lodgement_sub_account_strips_prefix(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_lodgement.csv", ACCOUNT)
+        barclays_event = next(e for e in result.events if e.reference == "L003538235")
+        assert barclays_event.sub_account == "Barclays plc Ordinary 25p"
+
+    def test_lodgement_sub_account_strips_prefix_second_row(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_lodgement.csv", ACCOUNT)
+        ishares_event = next(e for e in result.events if e.reference == "L003538236")
+        assert ishares_event.sub_account == "iShares II plc USD TIPS UCITS ETF USD (Acc)"
+
+    def test_lodgement_event_count(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_lodgement.csv", ACCOUNT)
+        assert len(result.events) == 2
+        assert len(result.errors) == 0
+
+    def test_lodgement_action_type(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_lodgement.csv", ACCOUNT)
+        assert all(e.action == ActionType.LODGEMENT for e in result.events)
+
+    def test_lodgement_value_stored_as_is(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_lodgement.csv", ACCOUNT)
+        barclays_event = next(e for e in result.events if e.reference == "L003538235")
+        assert barclays_event.value == Decimal("-2288.89")
+
+    def test_lodgement_quantity(self) -> None:
+        parser = HLFragmentParser()
+        result = parser.parse(DATA_DIR / "valid_hl_lodgement.csv", ACCOUNT)
+        barclays_event = next(e for e in result.events if e.reference == "L003538235")
+        assert barclays_event.quantity == Decimal("1221")
+
+    def test_lodgement_empty_description_falls_back_to_reference(self, tmp_path: Path) -> None:
+        # _get_cell strips whitespace, so the only way to trigger FR-004 (empty stripped result
+        # falls back to reference) is an empty description field. "Lodgement " in CSV becomes
+        # "Lodgement" after strip, which doesn't match the prefix — empty description does.
+        csv_content = (
+            "Trade date,Settle date,Reference,Description,Unit cost (p),Quantity,Value (£)\n"
+            "12/07/2018,12/07/2018,L999999,,0.00,1,-100.00\n"
+        )
+        csv_path = tmp_path / "lodgement_empty.csv"
+        csv_path.write_text(csv_content, encoding="utf-8")
+        parser = HLFragmentParser()
+        result = parser.parse(csv_path, ACCOUNT)
+        assert len(result.errors) == 0
+        assert len(result.events) == 1
+        assert result.events[0].sub_account == "L999999"
+
+    def test_lodgement_mixed_total_event_count(self, tmp_path: Path) -> None:
+        csv_content = (
+            "Trade date,Settle date,Reference,Description,Unit cost (p),Quantity,Value (£)\n"
+            "12/07/2018,12/07/2018,B000001,Test Buy Fund,100.00,10,-1000.00\n"
+            "12/07/2018,12/07/2018,S000001,Test Sell Fund,100.00,10,1000.00\n"
+            "12/07/2018,12/07/2018,Deposit,Cash Deposit,,,500.00\n"
+            "12/07/2018,12/07/2018,L003538235,"
+            "Lodgement Barclays plc Ordinary 25p,188.38,1221,-2288.89\n"
+        )
+        csv_path = tmp_path / "mixed.csv"
+        csv_path.write_text(csv_content, encoding="utf-8")
+        parser = HLFragmentParser()
+        result = parser.parse(csv_path, ACCOUNT)
+        assert len(result.errors) == 0
+        assert len(result.events) == 4
+        actions = {e.action for e in result.events}
+        assert ActionType.BUY in actions
+        assert ActionType.SELL in actions
+        assert ActionType.DEPOSIT in actions
+        assert ActionType.LODGEMENT in actions
+
+
 class TestErrorHandling:
     def test_bad_value_row_produces_error_with_line_number(self) -> None:
         parser = HLFragmentParser()

@@ -79,7 +79,11 @@
       "Bash(.venv/Scripts/python -m mypy --strict src/modes/create_capital_ledger/)",
       "Bash(.venv/Scripts/python -m ruff format src/modes/create_capital_ledger/constants.py tests/data/create_capital_ledger/create_fixtures.py tests/unit/create_capital_ledger/test_engine.py)",
       "Bash(.venv/Scripts/python -m pytest tests/ -q --tb=short)",
-      "Bash(powershell -Command \"Get-Content .specify/extensions.yml\")"
+      "Bash(powershell -Command \"Get-Content .specify/extensions.yml\")",
+      "Bash(.venv/Scripts/python -m pytest tests/ -q --tb=no --co -q)",
+      "Bash(.venv/Scripts/python -m pytest \"tests/unit/consolidate_journals/parsers/test_hl_parser.py::TestLodgementActionMapping\" \"tests/features/\" -v --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest \"tests/unit/consolidate_journals/\" -v --tb=short -q)",
+      "Bash(.venv/Scripts/python -m pytest \"tests/unit/consolidate_journals/parsers/test_hl_parser.py::TestLodgementActionMapping\" -v --tb=short)"
     ]
   }
 }

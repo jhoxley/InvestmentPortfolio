@@ -17,8 +17,10 @@ from src.modes.consolidate_journals.constants import (
     HL_HEADER_COL0,
     HL_HEADER_COL1,
     HL_INCOME_REFERENCES,
+    LODGEMENT_DESCRIPTION_PREFIX,
     RE_BUY,
     RE_DESCRIPTION_SUFFIX,
+    RE_LODGEMENT,
     RE_LOYALTYU_SUFFIX,
     RE_SELL,
     SUB_ACCOUNT_STRIP_SUFFIXES,
@@ -96,6 +98,8 @@ def _map_action(reference: str, description: str) -> ActionType:
         return ActionType.BUY
     if RE_SELL.match(ref):
         return ActionType.SELL
+    if RE_LODGEMENT.match(ref):
+        return ActionType.LODGEMENT
     if (
         ref in HL_DEPOSIT_REFERENCES
         or ref.upper().startswith("BACS")
@@ -250,6 +254,9 @@ def _parse_row(
             sub_account = _strip_dividend_suffix(reference, description)
         except ValueError as exc:
             raise _RowParseError(file_path, line, str(exc)) from exc
+    elif action is ActionType.LODGEMENT:
+        stripped = description.removeprefix(LODGEMENT_DESCRIPTION_PREFIX).strip()
+        sub_account = stripped if stripped else reference
     else:
         sub_account = _strip_description_suffix(description) if description else ""
         if not sub_account:
