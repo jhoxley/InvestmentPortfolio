@@ -100,7 +100,19 @@
       "Bash(.venv/Scripts/python.exe tests/data/create_capital_ledger/create_fixtures.py)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/unit/create_capital_ledger/test_engine.py -k \"lodgement\" -v)",
       "Bash(.venv/Scripts/python.exe -m pytest \"tests/features/steps/create_capital_ledger_steps.py::test_lodgement_rows_contribute_to_book_value\" -v)",
-      "Bash(.venv/Scripts/python.exe -m pytest tests/unit/create_capital_ledger/test_engine.py tests/features/steps/create_capital_ledger_steps.py -v)"
+      "Bash(.venv/Scripts/python.exe -m pytest tests/unit/create_capital_ledger/test_engine.py tests/features/steps/create_capital_ledger_steps.py -v)",
+      "Bash(powershell.exe -NonInteractive -Command \".specify/scripts/powershell/check-prerequisites.ps1 -Json -PathsOnly\")",
+      "Bash(powershell.exe -NonInteractive -Command \".specify/scripts/powershell/setup-tasks.ps1 -Json\")",
+      "Bash(powershell.exe -NonInteractive -Command \".specify/scripts/powershell/check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks\")",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/create_subaccount_ledger/test_engine.py::TestEquityPositions -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/create_subaccount_ledger/test_engine.py::TestEquityPositions tests/features/steps/create_subaccount_ledger_steps.py::test_equity_accumulate_single_capital tests/features/steps/create_subaccount_ledger_steps.py::test_two_capital_ledgers_merge -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/create_subaccount_ledger/test_engine.py::TestDividendIncome -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/create_subaccount_ledger/ tests/features/steps/create_subaccount_ledger_steps.py -v)",
+      "Bash(.venv/Scripts/python -m pytest -v)",
+      "Bash(.venv/Scripts/ruff check *)",
+      "Bash(.venv/Scripts/ruff format *)",
+      "Bash(.venv/Scripts/python -m pytest tests/unit/create_subaccount_ledger/ tests/features/steps/create_subaccount_ledger_steps.py -v --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest)"
     ]
   }
 }

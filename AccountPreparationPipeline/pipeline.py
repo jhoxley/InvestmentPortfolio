@@ -19,6 +19,7 @@ from src.metrics import MetricsRecord, emit_metrics
 from src.modes.consolidate_journals.mode import ConsolidateJournalsMode
 from src.modes.create_capital_ledger.mode import CreateCapitalLedgerMode
 from src.modes.create_ledger.mode import CreateLedgerMode
+from src.modes.create_subaccount_ledger.mode import CreateSubAccountLedgerMode
 from src.modes.example.mode import ExampleMode
 from src.registry import ModeRegistry
 
@@ -29,6 +30,7 @@ def _build_registry() -> ModeRegistry:
     registry.register(ConsolidateJournalsMode())
     registry.register(CreateLedgerMode())
     registry.register(CreateCapitalLedgerMode())
+    registry.register(CreateSubAccountLedgerMode())
     return registry
 
 
