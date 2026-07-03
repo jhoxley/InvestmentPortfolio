@@ -5,20 +5,27 @@ from decimal import Decimal
 
 import pandas as pd
 
-from src.modes.consolidate_journals.constants import CASH_SUB_ACCOUNT, OFFSET_SUFFIX
+from src.modes.consolidate_journals.constants import CASH_SUB_ACCOUNT, DEPOSIT_SUFFIX, OFFSET_SUFFIX
 from src.modes.consolidate_journals.schema import ActionType, JournalEvent
 
 
 class OffsetGenerator:
-    """Generate synthetic Cash offset entries for buy, sell, and dividend events."""
+    """Generate synthetic Cash offset entries for buy, sell, dividend, and lodgement events."""
 
     def generate(self, events: list[JournalEvent]) -> list[JournalEvent]:
-        """Return one Cash offset JournalEvent for each buy/sell/dividend event in `events`."""
-        return [
-            self._make_offset(e)
-            for e in events
-            if e.action in (ActionType.BUY, ActionType.SELL, ActionType.DIVIDEND)
-        ]
+        """Return Cash offset JournalEvent(s) for each trade event in `events`.
+
+        Buy/sell/dividend: one TRADING companion each.
+        Lodgement: two companions — one DEPOSIT (negated value) and one TRADING (mirrored value).
+        """
+        result: list[JournalEvent] = []
+        for e in events:
+            if e.action in (ActionType.BUY, ActionType.SELL, ActionType.DIVIDEND):
+                result.append(self._make_offset(e))
+            elif e.action is ActionType.LODGEMENT:
+                result.append(self._make_lodgement_deposit(e))
+                result.append(self._make_lodgement_trading(e))
+        return result
 
     def generate_from_df(self, trades: pd.DataFrame) -> list[JournalEvent]:
         """Return offset events for all rows in `trades` (a buy/sell DataFrame slice)."""
@@ -50,4 +57,26 @@ class OffsetGenerator:
             reference=event.reference + OFFSET_SUFFIX,
             value=event.value,
             quantity=event.value,  # Cash quantity always mirrors value
+        )
+
+    def _make_lodgement_deposit(self, event: JournalEvent) -> JournalEvent:
+        return JournalEvent(
+            date=event.date,
+            account=event.account,
+            sub_account=CASH_SUB_ACCOUNT,
+            action=ActionType.DEPOSIT,
+            reference=event.reference + DEPOSIT_SUFFIX,
+            value=-event.value,
+            quantity=None,
+        )
+
+    def _make_lodgement_trading(self, event: JournalEvent) -> JournalEvent:
+        return JournalEvent(
+            date=event.date,
+            account=event.account,
+            sub_account=CASH_SUB_ACCOUNT,
+            action=ActionType.TRADING,
+            reference=event.reference + OFFSET_SUFFIX,
+            value=event.value,
+            quantity=None,
         )

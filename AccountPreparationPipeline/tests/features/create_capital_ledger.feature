@@ -38,3 +38,14 @@ Feature: Create Capital Ledger
     When I run create_capital_ledger
     Then the exit code is 0
     And the output XLSX is created with the correct columns
+
+  # ─── Lodgement book_value ───────────────────────────────────────────────────
+
+  Scenario: Lodgement rows contribute to book_value column
+    Given a ledger fixture with lodgement and buy rows
+    When I run create_capital_ledger
+    Then the exit code is 0
+    And the book_value on "2018-07-12" is 7590.45
+    And the book_value on "2019-05-24" is 7790.45
+    And the capital column is 0.00 on all rows
+    And the income column is 0.00 on all rows

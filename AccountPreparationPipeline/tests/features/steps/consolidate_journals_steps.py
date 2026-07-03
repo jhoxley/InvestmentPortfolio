@@ -164,6 +164,36 @@ def test_dividend_offset_generated() -> None:
     pass
 
 
+@scenario(FEATURE_FILE, "Maps L-reference to lodgement action")
+def test_maps_lodgement() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Lodgement sub-account strips Lodgement prefix from description")
+def test_lodgement_subaccount() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Mixed buy sell deposit and lodgement rows all correctly classified")
+def test_lodgement_mixed_types() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Lodgement generates a deposit companion row")
+def test_lodgement_deposit_companion() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Lodgement generates a trading companion row")
+def test_lodgement_trading_companion() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Re-running consolidation does not duplicate lodgement companions")
+def test_lodgement_idempotent() -> None:
+    pass
+
+
 @scenario(FEATURE_FILE, "Income account Cash balance is non-negative after dividend processing")
 def test_dividend_cash_balance_nonnegative() -> None:
     pass
@@ -270,6 +300,22 @@ def state_loyaltyu_dir(tmp_path: Path) -> dict:
     frags_dir = tmp_path / "frags"
     frags_dir.mkdir()
     shutil.copy(DATA_DIR / "valid_hl_loyaltyu.csv", frags_dir / "valid_hl_loyaltyu.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with lodgement rows", target_fixture="state")
+def state_lodgement_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_lodgement.csv", frags_dir / "valid_hl_lodgement.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with mixed buy sell deposit and lodgement rows", target_fixture="state")
+def state_lodgement_mixed_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_mixed.csv", frags_dir / "valid_hl_mixed.csv")
     return {"tmp_path": tmp_path, "frags_dir": frags_dir}
 
 
@@ -455,6 +501,14 @@ def check_one_valid_event(state: dict, count: int) -> None:
     assert len(df) == count, f"Expected {count} event(s), got {len(df)}"
 
 
+@then(parsers.parse('the journal contains a row with sub_account "{sub_account}"'))
+def check_sub_account_present(state: dict, sub_account: str) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert sub_account in df["sub_account"].values, (
+        f"sub_account '{sub_account}' not found. Values: {df['sub_account'].tolist()}"
+    )
+
+
 @then(parsers.parse('the journal contains a row with reference "{reference}"'))
 def check_reference_present(state: dict, reference: str) -> None:
     df = pd.read_excel(state["journal_path"], engine="openpyxl")
@@ -544,3 +598,34 @@ def state_journal_with_trade_no_offset(tmp_path: Path) -> dict:
     frags_dir = tmp_path / "frags"
     frags_dir.mkdir()
     return {"tmp_path": tmp_path, "journal_path": journal_path, "frags_dir": frags_dir}
+
+
+# ── Feature 013: Lodgement Deposit and Trading Companions ────────────────────
+
+
+@when(
+    parsers.parse('I run consolidate_journals with method {method} and account "{account}" again'),
+    target_fixture="result",
+)
+def run_mode_again(state: dict, method: str, account: str) -> subprocess.CompletedProcess[str]:
+    return _run(state["journal_path"], state["frags_dir"], method, account)
+
+
+@then(
+    parsers.parse('the journal contains a row with action "{action}" and reference "{reference}"')
+)
+def check_action_and_reference_present(state: dict, action: str, reference: str) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    match = df[(df["action"] == action) & (df["reference"] == reference)]
+    assert len(match) >= 1, (
+        f"No row with action='{action}' and reference='{reference}' found in journal.\n"
+        f"Journal rows:\n{df[['action', 'reference']].to_string()}"
+    )
+
+
+@then(parsers.parse("the journal contains exactly {count:d} rows"))
+def check_exact_row_count(state: dict, count: int) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert len(df) == count, (
+        f"Expected exactly {count} rows, got {len(df)}.\nActions: {df['action'].tolist()}"
+    )

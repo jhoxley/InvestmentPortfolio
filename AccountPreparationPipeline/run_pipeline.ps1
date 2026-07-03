@@ -67,6 +67,28 @@ $Accounts = @(
     }
 )
 
+# Each hashtable defines one sub-account ledger to generate after all per-account steps complete.
+# Keys:
+#   Name                  — display label used in console output
+#   CapitalLedgerPaths    — array of capital ledger XLSX paths (passed as --capital)
+#   IncomeLedgerPaths     — array of income ledger XLSX paths (passed as --income)
+#   SubAccountLedgerPath  — output XLSX produced by create_subaccount_ledger
+
+$SubAccountGroups = @(
+    @{
+        Name                 = "HL SIPP"
+        CapitalLedgerPaths   = @(Join-Path $InvestmentsDir "HL_SIPP_Ledger.xlsx")
+        IncomeLedgerPaths    = @(Join-Path $InvestmentsDir "HL_SIPP_Income_Ledger.xlsx")
+        SubAccountLedgerPath = Join-Path $InvestmentsDir "HL_SIPP_SubAccount_Ledger.xlsx"
+    }
+    @{
+        Name                 = "HL ISA"
+        CapitalLedgerPaths   = @(Join-Path $InvestmentsDir "HL_ISA_Ledger.xlsx")
+        IncomeLedgerPaths    = @(Join-Path $InvestmentsDir "HL_ISA_Income_Ledger.xlsx")
+        SubAccountLedgerPath = Join-Path $InvestmentsDir "HL_ISA_SubAccount_Ledger.xlsx"
+    }
+)
+
 # ── Runtime paths ─────────────────────────────────────────────────────────────
 
 $PythonExe  = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
@@ -137,6 +159,53 @@ foreach ($account in $Accounts) {
         $OverallSuccess = $false
     } else {
         Write-Host "  $($account.Name): OK" -ForegroundColor Green
+    }
+}
+
+Write-Host ""
+Write-Host ("=" * 60) -ForegroundColor DarkCyan
+Write-Host "  Phase 2: Sub-Account Ledgers" -ForegroundColor Cyan
+Write-Host ("=" * 60) -ForegroundColor DarkCyan
+
+foreach ($group in $SubAccountGroups) {
+    Write-Host ""
+    Write-Host ("-" * 60) -ForegroundColor DarkCyan
+    Write-Host "  $($group.Name)" -ForegroundColor Cyan
+    Write-Host ("-" * 60) -ForegroundColor DarkCyan
+
+    $failed = $false
+
+    # ── Step 4: Build sub-account ledger from capital + income ledgers ─────────
+    Write-Host ""
+    Write-Host "  [1/1] create_subaccount_ledger" -ForegroundColor Yellow
+    foreach ($p in $group.CapitalLedgerPaths) { Write-Host "        --capital $p" }
+    foreach ($p in $group.IncomeLedgerPaths)  { Write-Host "        --income  $p" }
+    Write-Host "     -> $($group.SubAccountLedgerPath)"
+
+    $cmd = @(
+        $PipelinePy,
+        "create_subaccount_ledger",
+        $group.SubAccountLedgerPath,
+        "--capital"
+    ) + $group.CapitalLedgerPaths
+
+    if ($group.IncomeLedgerPaths.Count -gt 0) {
+        $cmd += "--income"
+        $cmd += $group.IncomeLedgerPaths
+    }
+
+    & $PythonExe @cmd
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  FAILED: create_subaccount_ledger exited with code $LASTEXITCODE" -ForegroundColor Red
+        $failed = $true
+    }
+
+    Write-Host ""
+    if ($failed) {
+        Write-Host "  $($group.Name): FAILED" -ForegroundColor Red
+        $OverallSuccess = $false
+    } else {
+        Write-Host "  $($group.Name): OK" -ForegroundColor Green
     }
 }
 

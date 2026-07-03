@@ -8,6 +8,7 @@ from src.modes.create_capital_ledger.constants import (
     CAPITAL_ACTION_BUY,
     CAPITAL_ACTION_DEPOSIT,
     CAPITAL_ACTION_INCOME,
+    CAPITAL_ACTION_LODGEMENT,
     CAPITAL_ACTION_SELL,
     CAPITAL_COL_BOOK_VALUE,
     CAPITAL_COL_CAPITAL,
@@ -52,11 +53,14 @@ class CapitalLedgerEngine:
 
         df[_CAPITAL_CONTRIB] = tv.where(action == CAPITAL_ACTION_DEPOSIT, other=0.0)
         df[_INCOME_CONTRIB] = tv.where(action == CAPITAL_ACTION_INCOME, other=0.0)
-        bv_mask = action.isin({CAPITAL_ACTION_BUY, CAPITAL_ACTION_SELL})
-        df[_BV_CONTRIB] = tv.where(bv_mask, other=0.0)
+        bv_trade_mask = action.isin({CAPITAL_ACTION_BUY, CAPITAL_ACTION_SELL})
+        bv_lodge_mask = action == CAPITAL_ACTION_LODGEMENT
+        # Lodgement TV is negative (not sign-adjusted by ledger engine), so negate it
+        # to give a positive book_value contribution matching the buy convention.
+        df[_BV_CONTRIB] = tv.where(bv_trade_mask, other=0.0) - tv.where(bv_lodge_mask, other=0.0)
 
         contrib_cols = [_CAPITAL_CONTRIB, _INCOME_CONTRIB, _BV_CONTRIB]
-        grouped = df.groupby(CAPITAL_COL_DATE, sort=False)[contrib_cols].sum()
+        grouped = df.groupby(CAPITAL_COL_DATE, sort=True)[contrib_cols].sum()
 
         grouped[CAPITAL_COL_CAPITAL] = grouped[_CAPITAL_CONTRIB].cumsum().fillna(0.0)
         grouped[CAPITAL_COL_INCOME] = grouped[_INCOME_CONTRIB].cumsum().fillna(0.0)

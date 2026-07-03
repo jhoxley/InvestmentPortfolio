@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pandas as pd
 
-from src.modes.consolidate_journals.constants import JOURNAL_COLUMNS, OFFSET_SUFFIX
+from src.modes.consolidate_journals.constants import DEPOSIT_SUFFIX, JOURNAL_COLUMNS, OFFSET_SUFFIX
 from src.modes.consolidate_journals.offset_generator import OffsetGenerator
 from src.modes.consolidate_journals.schema import ActionType, JournalEvent
 
@@ -264,3 +264,119 @@ class TestGenerateFromDf:
         assert from_df[0].reference == from_list[0].reference
         assert from_df[0].value == from_list[0].value
         assert from_df[0].quantity == from_list[0].quantity
+
+
+def _lodgement(
+    reference: str = "L003538235",
+    value: str = "-2288.89",
+    date: str = "2018-07-12",
+) -> JournalEvent:
+    return JournalEvent(
+        date=datetime.date.fromisoformat(date),
+        account="ISA",
+        sub_account="Barclays plc Ordinary 25p",
+        action=ActionType.LODGEMENT,
+        reference=reference,
+        value=Decimal(value),
+        quantity=Decimal("1221"),
+    )
+
+
+class TestLodgementCompanions:
+    def _companions(self, ref: str = "L003538235", value: str = "-2288.89") -> list[JournalEvent]:
+        return OffsetGenerator().generate([_lodgement(reference=ref, value=value)])
+
+    def test_lodgement_produces_two_companions(self) -> None:
+        assert len(self._companions()) == 2
+
+    def test_lodgement_deposit_action(self) -> None:
+        companions = self._companions()
+        assert any(c.action == ActionType.DEPOSIT for c in companions)
+
+    def test_lodgement_deposit_sub_account_is_cash(self) -> None:
+        companions = self._companions()
+        deposit = next(c for c in companions if c.action == ActionType.DEPOSIT)
+        assert deposit.sub_account == "Cash"
+
+    def test_lodgement_deposit_reference_has_deposit_suffix(self) -> None:
+        companions = self._companions(ref="L003538235")
+        deposit = next(c for c in companions if c.action == ActionType.DEPOSIT)
+        assert deposit.reference == "L003538235" + DEPOSIT_SUFFIX
+
+    def test_lodgement_deposit_value_is_negated(self) -> None:
+        companions = self._companions(value="-2288.89")
+        deposit = next(c for c in companions if c.action == ActionType.DEPOSIT)
+        assert deposit.value == Decimal("2288.89")
+
+    def test_lodgement_deposit_sum_with_lodgement_is_zero(self) -> None:
+        lodgement = _lodgement(value="-2288.89")
+        companions = OffsetGenerator().generate([lodgement])
+        deposit = next(c for c in companions if c.action == ActionType.DEPOSIT)
+        assert lodgement.value + deposit.value == Decimal("0")
+
+    def test_lodgement_deposit_quantity_is_none(self) -> None:
+        companions = self._companions()
+        deposit = next(c for c in companions if c.action == ActionType.DEPOSIT)
+        assert deposit.quantity is None
+
+    def test_lodgement_trading_action(self) -> None:
+        companions = self._companions()
+        assert any(c.action == ActionType.TRADING for c in companions)
+
+    def test_lodgement_trading_sub_account_is_cash(self) -> None:
+        companions = self._companions()
+        trading = next(c for c in companions if c.action == ActionType.TRADING)
+        assert trading.sub_account == "Cash"
+
+    def test_lodgement_trading_reference_has_offset_suffix(self) -> None:
+        companions = self._companions(ref="L003538235")
+        trading = next(c for c in companions if c.action == ActionType.TRADING)
+        assert trading.reference == "L003538235" + OFFSET_SUFFIX
+
+    def test_lodgement_trading_value_mirrors_lodgement(self) -> None:
+        companions = self._companions(value="-2288.89")
+        trading = next(c for c in companions if c.action == ActionType.TRADING)
+        assert trading.value == Decimal("-2288.89")
+
+    def test_lodgement_trading_quantity_is_none(self) -> None:
+        companions = self._companions()
+        trading = next(c for c in companions if c.action == ActionType.TRADING)
+        assert trading.quantity is None
+
+    def test_lodgement_date_account_inherited(self) -> None:
+        lodgement = _lodgement(date="2018-07-12")
+        companions = OffsetGenerator().generate([lodgement])
+        assert len(companions) == 2
+        for c in companions:
+            assert c.date == datetime.date(2018, 7, 12)
+            assert c.account == "ISA"
+
+    def test_two_lodgements_produce_four_companions(self) -> None:
+        companions = OffsetGenerator().generate(
+            [_lodgement(reference="L001"), _lodgement(reference="L002")]
+        )
+        assert len(companions) == 4
+
+    def test_mixed_events_lodgement_and_buy(self) -> None:
+        companions = OffsetGenerator().generate([_buy(), _lodgement()])
+        assert len(companions) == 3
+
+    def test_generate_from_df_lodgement(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "date": "2018-07-12",
+                    "account": "ISA",
+                    "sub_account": "Barclays plc Ordinary 25p",
+                    "action": "lodgement",
+                    "reference": "L003538235",
+                    "value": -2288.89,
+                    "quantity": 1221.0,
+                }
+            ],
+            columns=JOURNAL_COLUMNS,
+        )
+        companions = OffsetGenerator().generate_from_df(df)
+        assert len(companions) == 2
+        assert any(c.action == ActionType.DEPOSIT for c in companions)
+        assert any(c.action == ActionType.TRADING for c in companions)

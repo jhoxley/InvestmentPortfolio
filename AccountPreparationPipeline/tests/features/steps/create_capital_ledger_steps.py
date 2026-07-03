@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from pytest_bdd import given, scenario, then, when
+from pytest_bdd import given, parsers, scenario, then, when
 
 FEATURE_FILE = str(Path(__file__).parent.parent / "create_capital_ledger.feature")
 PIPELINE_PATH = Path(__file__).parent.parent.parent.parent / "pipeline.py"
@@ -60,6 +60,11 @@ def test_pipeline_mode_accepts_arguments() -> None:
     pass
 
 
+@scenario(FEATURE_FILE, "Lodgement rows contribute to book_value column")
+def test_lodgement_rows_contribute_to_book_value() -> None:
+    pass
+
+
 # ── Given steps ──────────────────────────────────────────────────────────────
 
 
@@ -85,6 +90,12 @@ def state_nonexistent_file(tmp_path: Path) -> dict:
 def state_valid_input(tmp_path: Path) -> dict:
     output_path = tmp_path / "capital_ledger.xlsx"
     return {"input_path": DATA_DIR / "simple_ledger.xlsx", "output_path": output_path}
+
+
+@given("a ledger fixture with lodgement and buy rows", target_fixture="state")
+def state_lodgement_ledger(tmp_path: Path) -> dict:
+    output_path = tmp_path / "capital_ledger.xlsx"
+    return {"input_path": DATA_DIR / "lodgement_ledger.xlsx", "output_path": output_path}
 
 
 # ── When steps ───────────────────────────────────────────────────────────────
@@ -192,3 +203,32 @@ def check_output_xlsx_columns(state: dict) -> None:
     assert state["output_path"].exists(), "Output XLSX was not created"
     df = pd.read_excel(state["output_path"], engine="openpyxl")
     assert list(df.columns) == ["date", "capital", "income", "book_value"]
+
+
+@then(parsers.parse('the book_value on "{date}" is {expected:f}'))
+def check_book_value_on_date(state: dict, date: str, expected: float) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    df["date"] = df["date"].astype(str)
+    row = df[df["date"] == date]
+    assert len(row) == 1, f"Expected exactly one row for date {date}, found {len(row)}"
+    assert float(row.iloc[0]["book_value"]) == pytest.approx(expected), (
+        f"Expected book_value={expected} on {date}, got {row.iloc[0]['book_value']}"
+    )
+
+
+@then("the capital column is 0.00 on all rows")
+def check_capital_zero_all_rows(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    for _, row in df.iterrows():
+        assert float(row["capital"]) == pytest.approx(0.0), (
+            f"Expected capital=0.0 on {row['date']}, got {row['capital']}"
+        )
+
+
+@then("the income column is 0.00 on all rows")
+def check_income_zero_all_rows(state: dict) -> None:
+    df = pd.read_excel(state["output_path"], engine="openpyxl")
+    for _, row in df.iterrows():
+        assert float(row["income"]) == pytest.approx(0.0), (
+            f"Expected income=0.0 on {row['date']}, got {row['income']}"
+        )

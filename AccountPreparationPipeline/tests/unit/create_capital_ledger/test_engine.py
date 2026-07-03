@@ -142,3 +142,67 @@ class TestCapitalLedgerEngine:
         result = CapitalLedgerEngine().run(df)
         assert len(result) == 1
         assert float(result.iloc[0]["book_value"]) == pytest.approx(-3000.0)
+
+    def test_lodgement_contributes_positive_book_value(self) -> None:
+        # Lodgement TV is negative (not sign-adjusted by ledger engine), so engine
+        # must negate it — same way a buy with positive TV adds to book_value.
+        df = _df(_row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"))
+        result = CapitalLedgerEngine().run(df)
+        assert len(result) == 1
+        assert float(result.iloc[0]["book_value"]) == pytest.approx(2288.89)
+
+    def test_lodgement_does_not_affect_capital(self) -> None:
+        df = _df(_row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"))
+        result = CapitalLedgerEngine().run(df)
+        assert float(result.iloc[0]["capital"]) == pytest.approx(0.0)
+
+    def test_lodgement_does_not_affect_income(self) -> None:
+        df = _df(_row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"))
+        result = CapitalLedgerEngine().run(df)
+        assert float(result.iloc[0]["income"]) == pytest.approx(0.0)
+
+    def test_two_lodgements_same_date_book_value_sums(self) -> None:
+        df = _df(
+            _row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"),
+            _row("00002-001", "2018-07-12", "lodgement", -5301.56, sub_account="Man Group plc"),
+        )
+        result = CapitalLedgerEngine().run(df)
+        assert len(result) == 1
+        assert float(result.iloc[0]["book_value"]) == pytest.approx(2288.89 + 5301.56)
+
+    def test_lodgement_book_value_cumulates_with_buy(self) -> None:
+        df = _df(
+            _row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"),
+            _row("00002-001", "2019-05-24", "buy", 200.0, sub_account="HSBC Fund"),
+        )
+        result = CapitalLedgerEngine().run(df)
+        bvs = result.set_index("date")["book_value"]
+        assert float(bvs["2018-07-12"]) == pytest.approx(2288.89)
+        assert float(bvs["2019-05-24"]) == pytest.approx(2288.89 + 200.0)
+
+    def test_lodgement_included_in_output_rows(self) -> None:
+        df = _df(_row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"))
+        result = CapitalLedgerEngine().run(df)
+        assert len(result) == 1
+        assert str(result.iloc[0]["date"]) == "2018-07-12"
+
+    def test_cumsum_uses_date_order_not_transaction_id_order(self) -> None:
+        # Regression: lodgement companion rows inserted via Feature 013 receive high
+        # Transaction IDs (e.g. 00212-xxx) even though their dates are the earliest in
+        # the account. Previously, sort=False in groupby caused cumsum to process these
+        # early-date rows LAST, producing inflated capital/income values for early dates
+        # that dropped back when the output was sorted by date.
+        df = _df(
+            # Early date but HIGH Transaction ID (mirrors lodgement companion scenario)
+            _row("00100-001", "2018-07-12", "deposit", 7852.19),
+            # Late date but LOW Transaction ID (existing rows)
+            _row("00001-001", "2024-01-10", "deposit", 1000.0),
+            _row("00002-001", "2024-06-01", "deposit", 500.0),
+        )
+        result = CapitalLedgerEngine().run(df)
+        capitals = result.set_index("date")["capital"]
+        # With correct date-ordered cumsum, 2018-07-12 is processed first
+        assert float(capitals["2018-07-12"]) == pytest.approx(7852.19)
+        # Subsequent dates accumulate on top
+        assert float(capitals["2024-01-10"]) == pytest.approx(8852.19)
+        assert float(capitals["2024-06-01"]) == pytest.approx(9352.19)
