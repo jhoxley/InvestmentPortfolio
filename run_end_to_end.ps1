@@ -34,19 +34,20 @@
 [CmdletBinding()]
 param(
     [switch] $SkipPipeline,
-    [int]    $HealthTimeoutSeconds = 60
+    [int]    $HealthTimeoutSeconds = 60,
+    [switch] $NonInteractive          # Skip the ReadKey prompt; services remain running after exit.
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# -- Configuration -------------------------------------------------------------
 #
-# Ports — each service must use a distinct port so both can run concurrently.
+# Ports  - each service must use a distinct port so both can run concurrently.
 $MarketDataPort = 8001
 $AnalysisPort   = 8000
 
-# Hosts — both services bind to loopback only (no external exposure).
+# Hosts  - both services bind to loopback only (no external exposure).
 $MarketDataHost = "127.0.0.1"
 $AnalysisHost   = "127.0.0.1"
 
@@ -63,7 +64,7 @@ $AnalysisUvicorn       = Join-Path $AnalysisDir  ".venv\Scripts\uvicorn.exe"
 
 # Health / readiness URLs.
 # NOTE: market-data-web-service has no dedicated /health endpoint; /openapi.json
-# is a reliable proxy — FastAPI always serves it once the app is started.
+# is a reliable proxy  - FastAPI always serves it once the app is started.
 $MarketDataHealthUrl   = "http://${MarketDataHost}:${MarketDataPort}/openapi.json"
 $AnalysisHealthUrl     = "http://${AnalysisHost}:${AnalysisPort}/health"
 
@@ -88,11 +89,11 @@ $SubAccountLedgers = @(
     }
 )
 
-# Log file — written to a logs/ directory in the repo root, timestamped.
+# Log file  - written to a logs/ directory in the repo root, timestamped.
 $LogDir  = Join-Path $RepoRoot "logs"
 $LogFile = Join-Path $LogDir ("end_to_end_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+# -- Logging -------------------------------------------------------------------
 
 function Initialize-Log {
     if (-not (Test-Path $LogDir)) {
@@ -100,7 +101,7 @@ function Initialize-Log {
     }
     $header = @(
         ("=" * 72),
-        "  Investment Portfolio — End-to-End Run",
+        "  Investment Portfolio  - End-to-End Run",
         "  Started : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
         "  Log     : $LogFile",
         ("=" * 72)
@@ -146,7 +147,7 @@ function Write-PhaseHeader {
     Write-Log $bar -Level Phase
 }
 
-# ── Cleanup ───────────────────────────────────────────────────────────────────
+# -- Cleanup -------------------------------------------------------------------
 #
 # Service process handles are stored here so they can be stopped on exit.
 $script:ServiceProcesses = @()
@@ -167,11 +168,13 @@ function Stop-Services {
     $script:ServiceProcesses = @()
 }
 
-# Register a cleanup handler so services are always stopped when the script exits,
-# whether by completion, Ctrl+C, or error.
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Stop-Services }
+# Register a cleanup handler so services are always stopped when the script exits.
+# Skipped in -NonInteractive mode so services outlive the script process.
+if (-not $NonInteractive) {
+    $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Stop-Services }
+}
 
-# ── Health polling ─────────────────────────────────────────────────────────────
+# -- Health polling -------------------------------------------------------------
 
 function Wait-ForHealth {
     <#
@@ -198,7 +201,7 @@ function Wait-ForHealth {
                 return $true
             }
         } catch {
-            # Not yet up — keep polling.
+            # Not yet up  - keep polling.
         }
         Start-Sleep -Seconds $PollIntervalSeconds
     }
@@ -206,7 +209,7 @@ function Wait-ForHealth {
     return $false
 }
 
-# ── HTTP multipart file upload ─────────────────────────────────────────────────
+# -- HTTP multipart file upload -------------------------------------------------
 
 function Invoke-LedgerIngestion {
     <#
@@ -229,6 +232,8 @@ function Invoke-LedgerIngestion {
     $url = "$AnalysisBaseUrl/v1/accounts/$AccountName/ladder"
     Write-Log "  POST $url" -Level Detail
     Write-Log "       File: $LedgerPath" -Level Detail
+
+    Add-Type -AssemblyName 'System.Net.Http' -ErrorAction SilentlyContinue
 
     $client  = $null
     $stream  = $null
@@ -254,26 +259,26 @@ function Invoke-LedgerIngestion {
 
         if ($statusCode -eq 200) {
             $parsed = $responseBody | ConvertFrom-Json
-            Write-Log "  $DisplayName: unchanged (checksum matched, no reprocessing)." -Level OK
+            Write-Log "  ${DisplayName}: unchanged (checksum matched, no reprocessing)." -Level OK
             Write-Log "  Row count: $($parsed.row_count)  From: $($parsed.from_date)  To: $($parsed.to_date)" -Level Detail
             $success = $true
         } elseif ($statusCode -eq 201) {
             $parsed = $responseBody | ConvertFrom-Json
-            Write-Log "  $DisplayName: created successfully." -Level OK
+            Write-Log "  ${DisplayName}: created successfully." -Level OK
             Write-Log "  Row count: $($parsed.row_count)  From: $($parsed.from_date)  To: $($parsed.to_date)" -Level Detail
             Write-Log "  Sub-accounts: $($parsed.sub_accounts -join ', ')" -Level Detail
             $success = $true
         } elseif ($statusCode -eq 409) {
-            Write-Log "  $DisplayName: conflict (HTTP 409). A different ledger already exists for this account." -Level Warn
+            Write-Log "  ${DisplayName}: conflict (HTTP 409). A different ledger already exists for this account." -Level Warn
             Write-Log "  Detail: $responseBody" -Level Detail
             $success = $false
         } else {
-            Write-Log "  $DisplayName: unexpected HTTP $statusCode." -Level Error
+            Write-Log "  ${DisplayName}: unexpected HTTP $statusCode." -Level Error
             Write-Log "  Response: $responseBody" -Level Detail
             $success = $false
         }
     } catch {
-        Write-Log "  $DisplayName: ingestion request failed: $_" -Level Error
+        Write-Log "  ${DisplayName}: ingestion request failed: $_" -Level Error
         $success = $false
     } finally {
         if ($stream)  { $stream.Dispose() }
@@ -284,7 +289,7 @@ function Invoke-LedgerIngestion {
     return $success
 }
 
-# ── Config helpers ─────────────────────────────────────────────────────────────
+# -- Config helpers -------------------------------------------------------------
 
 function Assert-ConfigYaml {
     <#
@@ -300,7 +305,7 @@ function Assert-ConfigYaml {
     )
     $configPath = Join-Path $ServiceDir "config.yaml"
     if (-not (Test-Path $configPath)) {
-        Write-Log "  $ServiceName config.yaml not found — writing defaults." -Level Warn
+        Write-Log "  $ServiceName config.yaml not found  - writing defaults." -Level Warn
         $DefaultContent | Out-File -FilePath $configPath -Encoding utf8 -NoNewline
         Write-Log "  Wrote: $configPath" -Level Detail
         return
@@ -308,28 +313,28 @@ function Assert-ConfigYaml {
     $text = Get-Content $configPath -Raw
     foreach ($key in $ExpectedKeys) {
         if ($text -notmatch [regex]::Escape($key)) {
-            Write-Log "  $ServiceName config.yaml is missing expected key '$key' — file may need manual review." -Level Warn
+            Write-Log "  $ServiceName config.yaml is missing expected key '$key'  - file may need manual review." -Level Warn
         }
     }
     Write-Log "  $ServiceName config.yaml OK: $configPath" -Level OK
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 #  MAIN
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 Initialize-Log
 
 $OverallSuccess = $true
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Phase 1 — Account Preparation Pipeline
-# ═════════════════════════════════════════════════════════════════════════════
+# =============================================================================
+#  Phase 1  - Account Preparation Pipeline
+# =============================================================================
 
 Write-PhaseHeader 1 "Account Preparation Pipeline"
 
 if ($SkipPipeline) {
-    Write-Log "  -SkipPipeline flag set — skipping Phase 1." -Level Warn
+    Write-Log "  -SkipPipeline flag set  - skipping Phase 1." -Level Warn
 } else {
     $pipelineScript = Join-Path $PipelineDir "run_pipeline.ps1"
 
@@ -349,7 +354,7 @@ if ($SkipPipeline) {
     Write-Log "  (All pipeline output is written to console and captured below)" -Level Detail
     Write-Log "" -Level Detail
 
-    # Run inline — output flows directly to console and is already visible.
+    # Run inline  - output flows directly to console and is already visible.
     & $pipelineScript
     $pipelineExit = $LASTEXITCODE
 
@@ -374,9 +379,9 @@ foreach ($ledger in $SubAccountLedgers) {
     }
 }
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Phase 2 — Service Configuration
-# ═════════════════════════════════════════════════════════════════════════════
+# =============================================================================
+#  Phase 2  - Service Configuration
+# =============================================================================
 
 Write-PhaseHeader 2 "Service Configuration"
 
@@ -384,11 +389,11 @@ Write-Log "  Port assignments:" -Level Info
 Write-Log "    market-data-web-service  -> http://${MarketDataHost}:${MarketDataPort}" -Level Detail
 Write-Log "    portfolio-analysis-service -> http://${AnalysisHost}:${AnalysisPort}" -Level Detail
 Write-Log "" -Level Detail
-Write-Log "  Note: port is passed directly to uvicorn at startup — it is NOT" -Level Detail
-Write-Log "  read from config.yaml. Change \$MarketDataPort / \$AnalysisPort at the" -Level Detail
+Write-Log "  Note: port is passed directly to uvicorn at startup  - it is NOT" -Level Detail
+Write-Log "  read from config.yaml. Change MarketDataPort / AnalysisPort at the" -Level Detail
 Write-Log "  top of this script if a different port is required." -Level Detail
 
-# ── market-data-web-service ───────────────────────────────────────────────────
+# -- market-data-web-service ---------------------------------------------------
 Write-Log "" -Level Detail
 Write-Log "  Checking market-data-web-service config..." -Level Info
 
@@ -408,7 +413,7 @@ Assert-ConfigYaml `
 Write-Log "  Cache directory : $(Join-Path $MarketDataDir 'cache')  (relative: ./cache)" -Level Detail
 Write-Log "  This is distinct from portfolio-analysis-service's data/ directory." -Level Detail
 
-# ── portfolio-analysis-service ────────────────────────────────────────────────
+# -- portfolio-analysis-service ------------------------------------------------
 Write-Log "" -Level Detail
 Write-Log "  Checking portfolio-analysis-service config..." -Level Info
 
@@ -435,9 +440,9 @@ Assert-ConfigYaml `
 Write-Log "  Data directory  : $(Join-Path $AnalysisDir 'data')  (relative: ./data)" -Level Detail
 Write-Log "  Market-data URL placeholder: http://${MarketDataHost}:${MarketDataPort}  (not yet wired)" -Level Detail
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Phase 3 — Start market-data-web-service
-# ═════════════════════════════════════════════════════════════════════════════
+# =============================================================================
+#  Phase 3  - Start market-data-web-service
+# =============================================================================
 
 Write-PhaseHeader 3 "Start market-data-web-service"
 
@@ -480,9 +485,9 @@ if (-not $mdwsHealthy) {
     exit 1
 }
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Phase 4 — Start portfolio-analysis-service
-# ═════════════════════════════════════════════════════════════════════════════
+# =============================================================================
+#  Phase 4  - Start portfolio-analysis-service
+# =============================================================================
 
 Write-PhaseHeader 4 "Start portfolio-analysis-service"
 
@@ -523,9 +528,9 @@ if (-not $analysisHealthy) {
     exit 1
 }
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Phase 5 — Ingest sub-account ledgers
-# ═════════════════════════════════════════════════════════════════════════════
+# =============================================================================
+#  Phase 5  - Ingest sub-account ledgers
+# =============================================================================
 
 Write-PhaseHeader 5 "Ingest Sub-Account Ledgers"
 
@@ -536,12 +541,12 @@ $ingestFailCount    = 0
 
 foreach ($ledger in $SubAccountLedgers) {
     Write-Log "" -Level Detail
-    Write-Log "  ── $($ledger.DisplayName) ─────────────────────────────" -Level Info
+    Write-Log "  -- $($ledger.DisplayName) -----------------------------" -Level Info
     Write-Log "     Account : $($ledger.AccountName)" -Level Detail
     Write-Log "     File    : $($ledger.LedgerPath)" -Level Detail
 
     if (-not (Test-Path $ledger.LedgerPath)) {
-        Write-Log "  Ledger file does not exist — skipping." -Level Warn
+        Write-Log "  Ledger file does not exist  - skipping." -Level Warn
         $ingestFailCount++
         continue
     }
@@ -563,9 +568,9 @@ foreach ($ledger in $SubAccountLedgers) {
 Write-Log "" -Level Detail
 Write-Log "  Ingestion summary: $ingestSuccessCount succeeded, $ingestFailCount failed." -Level Info
 
-# ═════════════════════════════════════════════════════════════════════════════
+# =============================================================================
 #  Final Summary
-# ═════════════════════════════════════════════════════════════════════════════
+# =============================================================================
 
 Write-Log "" -Level Detail
 Write-Log ("=" * 72) -Level Phase
@@ -586,17 +591,17 @@ Write-Log "  To stop services, press Ctrl+C or kill the PIDs above." -Level Deta
 Write-Log "  Log file: $LogFile" -Level Detail
 Write-Log ("=" * 72) -Level Phase
 
-# ── Keep the script alive so the user can interact with the services.
-# Press any key (or Ctrl+C) to trigger the Exit handler and stop both processes.
-Write-Log "" -Level Detail
-Write-Host ""
-Write-Host "  Press any key to stop both services and exit..." -ForegroundColor DarkCyan
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-
-Stop-Services
-
-if ($OverallSuccess) {
-    exit 0
+if ($NonInteractive) {
+    Write-Log "  Running non-interactively  - services continue in background (PIDs above)." -Level Info
+    Write-Log "  Stop them with: Stop-Process -Id <PID> -Force" -Level Detail
+    if ($OverallSuccess) { exit 0 } else { exit 1 }
 } else {
-    exit 1
+    # Keep the script alive so the user can interact with the running services.
+    # Press any key (or Ctrl+C) to trigger the Exit handler and stop both processes.
+    Write-Log "" -Level Detail
+    Write-Host ""
+    Write-Host "  Press any key to stop both services and exit..." -ForegroundColor DarkCyan
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    Stop-Services
+    if ($OverallSuccess) { exit 0 } else { exit 1 }
 }
