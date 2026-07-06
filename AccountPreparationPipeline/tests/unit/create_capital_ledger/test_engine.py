@@ -1,0 +1,208 @@
+from __future__ import annotations
+
+import pandas as pd
+import pytest
+
+from src.modes.create_capital_ledger.engine import CapitalLedgerEngine
+from src.modes.create_ledger.constants import (
+    LEDGER_COL_TRANSACTION_ID,
+    LEDGER_COL_TRANSACTION_VALUE,
+)
+
+_COLS = [
+    LEDGER_COL_TRANSACTION_ID,
+    "date",
+    "account",
+    "sub_account",
+    "action",
+    "reference",
+    "Account Value",
+    "Account Quantity",
+    LEDGER_COL_TRANSACTION_VALUE,
+    "Transaction Quantity",
+]
+
+
+def _row(
+    tid: str,
+    date: str,
+    action: str,
+    value: float,
+    sub_account: str = "Cash",
+) -> dict:
+    return {
+        LEDGER_COL_TRANSACTION_ID: tid,
+        "date": date,
+        "account": "Test ISA",
+        "sub_account": sub_account,
+        "action": action,
+        "reference": "REF",
+        "Account Value": value,
+        "Account Quantity": value,
+        LEDGER_COL_TRANSACTION_VALUE: value,
+        "Transaction Quantity": value,
+    }
+
+
+def _df(*rows: dict) -> pd.DataFrame:
+    return pd.DataFrame(list(rows), columns=_COLS)
+
+
+class TestCapitalLedgerEngine:
+    def test_deposit_rows_accumulate_capital(self) -> None:
+        df = _df(
+            _row("00001-001", "2024-01-10", "deposit", 5000.0),
+            _row("00002-001", "2024-02-15", "deposit", 3000.0),
+        )
+        result = CapitalLedgerEngine().run(df)
+        capitals = result.set_index("date")["capital"]
+        assert float(capitals["2024-01-10"]) == pytest.approx(5000.0)
+        assert float(capitals["2024-02-15"]) == pytest.approx(8000.0)
+
+    def test_income_rows_accumulate_income(self) -> None:
+        df = _df(
+            _row("00001-001", "2024-01-10", "income", 100.0),
+            _row("00002-001", "2024-02-15", "income", 50.0),
+        )
+        result = CapitalLedgerEngine().run(df)
+        incomes = result.set_index("date")["income"]
+        assert float(incomes["2024-01-10"]) == pytest.approx(100.0)
+        assert float(incomes["2024-02-15"]) == pytest.approx(150.0)
+
+    def test_buy_sell_rows_accumulate_book_value(self) -> None:
+        df = _df(
+            _row("00001-001", "2024-03-20", "buy", -1000.0, sub_account="Fund A"),
+            _row("00002-001", "2024-03-20", "buy", -2000.0, sub_account="Fund B"),
+            _row("00003-001", "2024-04-10", "sell", 800.0, sub_account="Fund A"),
+        )
+        result = CapitalLedgerEngine().run(df)
+        bvs = result.set_index("date")["book_value"]
+        assert float(bvs["2024-03-20"]) == pytest.approx(-3000.0)
+        assert float(bvs["2024-04-10"]) == pytest.approx(-2200.0)
+
+    def test_forward_fill_capital_on_dates_with_no_deposit(self) -> None:
+        df = _df(
+            _row("00001-001", "2024-01-10", "deposit", 5000.0),
+            _row("00002-001", "2024-03-20", "buy", -1000.0, sub_account="Fund A"),
+        )
+        result = CapitalLedgerEngine().run(df)
+        capitals = result.set_index("date")["capital"]
+        assert float(capitals["2024-01-10"]) == pytest.approx(5000.0)
+        assert float(capitals["2024-03-20"]) == pytest.approx(5000.0)
+
+    def test_forward_fill_all_columns_start_at_zero(self) -> None:
+        df = _df(
+            _row("00001-001", "2024-03-20", "buy", -1000.0, sub_account="Fund A"),
+        )
+        result = CapitalLedgerEngine().run(df)
+        row = result.iloc[0]
+        assert float(row["capital"]) == pytest.approx(0.0)
+        assert float(row["income"]) == pytest.approx(0.0)
+        assert float(row["book_value"]) == pytest.approx(-1000.0)
+
+    def test_non_qualifying_actions_excluded(self) -> None:
+        df = _df(
+            _row("00001-001", "2024-01-10", "deposit", 5000.0),
+            _row("00002-001", "2024-01-10", "trading", 999.0),
+            _row("00003-001", "2024-02-15", "dividend", 50.0),
+        )
+        result = CapitalLedgerEngine().run(df)
+        assert len(result) == 1
+        assert float(result.iloc[0]["capital"]) == pytest.approx(5000.0)
+        assert float(result.iloc[0]["income"]) == pytest.approx(0.0)
+
+    def test_one_row_per_date_in_output(self) -> None:
+        df = _df(
+            _row("00001-001", "2024-03-20", "buy", -1000.0, sub_account="Fund A"),
+            _row("00002-001", "2024-03-20", "buy", -2000.0, sub_account="Fund B"),
+        )
+        result = CapitalLedgerEngine().run(df)
+        assert len(result) == 1
+        assert float(result.iloc[0]["book_value"]) == pytest.approx(-3000.0)
+
+    def test_empty_result_when_no_qualifying_rows(self) -> None:
+        df = _df(
+            _row("00001-001", "2024-01-10", "trading", 999.0),
+            _row("00002-001", "2024-02-15", "dividend", 50.0),
+        )
+        result = CapitalLedgerEngine().run(df)
+        assert len(result) == 0
+        assert list(result.columns) == ["date", "capital", "income", "book_value"]
+
+    def test_output_columns(self) -> None:
+        df = _df(_row("00001-001", "2024-01-10", "deposit", 5000.0))
+        result = CapitalLedgerEngine().run(df)
+        assert list(result.columns) == ["date", "capital", "income", "book_value"]
+
+    def test_transaction_id_order_used_for_accumulation(self) -> None:
+        df = _df(
+            _row("00004-001", "2024-03-20", "buy", -2000.0, sub_account="Fund B"),
+            _row("00003-001", "2024-03-20", "buy", -1000.0, sub_account="Fund A"),
+        )
+        result = CapitalLedgerEngine().run(df)
+        assert len(result) == 1
+        assert float(result.iloc[0]["book_value"]) == pytest.approx(-3000.0)
+
+    def test_lodgement_contributes_positive_book_value(self) -> None:
+        # Lodgement TV is negative (not sign-adjusted by ledger engine), so engine
+        # must negate it — same way a buy with positive TV adds to book_value.
+        df = _df(_row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"))
+        result = CapitalLedgerEngine().run(df)
+        assert len(result) == 1
+        assert float(result.iloc[0]["book_value"]) == pytest.approx(2288.89)
+
+    def test_lodgement_does_not_affect_capital(self) -> None:
+        df = _df(_row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"))
+        result = CapitalLedgerEngine().run(df)
+        assert float(result.iloc[0]["capital"]) == pytest.approx(0.0)
+
+    def test_lodgement_does_not_affect_income(self) -> None:
+        df = _df(_row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"))
+        result = CapitalLedgerEngine().run(df)
+        assert float(result.iloc[0]["income"]) == pytest.approx(0.0)
+
+    def test_two_lodgements_same_date_book_value_sums(self) -> None:
+        df = _df(
+            _row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"),
+            _row("00002-001", "2018-07-12", "lodgement", -5301.56, sub_account="Man Group plc"),
+        )
+        result = CapitalLedgerEngine().run(df)
+        assert len(result) == 1
+        assert float(result.iloc[0]["book_value"]) == pytest.approx(2288.89 + 5301.56)
+
+    def test_lodgement_book_value_cumulates_with_buy(self) -> None:
+        df = _df(
+            _row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"),
+            _row("00002-001", "2019-05-24", "buy", 200.0, sub_account="HSBC Fund"),
+        )
+        result = CapitalLedgerEngine().run(df)
+        bvs = result.set_index("date")["book_value"]
+        assert float(bvs["2018-07-12"]) == pytest.approx(2288.89)
+        assert float(bvs["2019-05-24"]) == pytest.approx(2288.89 + 200.0)
+
+    def test_lodgement_included_in_output_rows(self) -> None:
+        df = _df(_row("00001-001", "2018-07-12", "lodgement", -2288.89, sub_account="Barclays plc"))
+        result = CapitalLedgerEngine().run(df)
+        assert len(result) == 1
+        assert str(result.iloc[0]["date"]) == "2018-07-12"
+
+    def test_cumsum_uses_date_order_not_transaction_id_order(self) -> None:
+        # Regression: lodgement companion rows inserted via Feature 013 receive high
+        # Transaction IDs (e.g. 00212-xxx) even though their dates are the earliest in
+        # the account. Previously, sort=False in groupby caused cumsum to process these
+        # early-date rows LAST, producing inflated capital/income values for early dates
+        # that dropped back when the output was sorted by date.
+        df = _df(
+            # Early date but HIGH Transaction ID (mirrors lodgement companion scenario)
+            _row("00100-001", "2018-07-12", "deposit", 7852.19),
+            # Late date but LOW Transaction ID (existing rows)
+            _row("00001-001", "2024-01-10", "deposit", 1000.0),
+            _row("00002-001", "2024-06-01", "deposit", 500.0),
+        )
+        result = CapitalLedgerEngine().run(df)
+        capitals = result.set_index("date")["capital"]
+        # With correct date-ordered cumsum, 2018-07-12 is processed first
+        assert float(capitals["2018-07-12"]) == pytest.approx(7852.19)
+        # Subsequent dates accumulate on top
+        assert float(capitals["2024-01-10"]) == pytest.approx(8852.19)
+        assert float(capitals["2024-06-01"]) == pytest.approx(9352.19)

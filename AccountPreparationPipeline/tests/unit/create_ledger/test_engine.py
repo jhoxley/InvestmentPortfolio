@@ -1,0 +1,423 @@
+from __future__ import annotations
+
+import pandas as pd
+import pytest
+
+from src.modes.consolidate_journals.constants import JOURNAL_COLUMNS
+from src.modes.create_ledger.constants import LEDGER_COLUMNS
+from src.modes.create_ledger.engine import LedgerEngine
+
+
+def _make_df(rows: list[dict]) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=JOURNAL_COLUMNS)
+
+
+def _row(
+    date: str = "2024-01-01",
+    account: str = "ISA",
+    sub_account: str = "Vanguard Fund",
+    action: str = "buy",
+    reference: str = "B001",
+    value: float = 1000.0,
+    quantity: float | None = 10.0,
+) -> dict:
+    return {
+        "date": date,
+        "account": account,
+        "sub_account": sub_account,
+        "action": action,
+        "reference": reference,
+        "value": value,
+        "quantity": quantity,
+    }
+
+
+class TestBuyEvents:
+    def test_single_buy_negates_value(self) -> None:
+        df = _make_df([_row(value=1000.0, quantity=10.0)])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Account Value"] == pytest.approx(-1000.0)
+
+    def test_single_buy_quantity_unchanged(self) -> None:
+        df = _make_df([_row(value=1000.0, quantity=10.0)])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Account Quantity"] == pytest.approx(10.0)
+
+    def test_two_buys_cumulate_value(self) -> None:
+        df = _make_df(
+            [
+                _row(date="2024-01-01", value=1000.0, quantity=10.0, reference="B001"),
+                _row(date="2024-01-02", value=500.0, quantity=5.0, reference="B002"),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Account Value"] == pytest.approx(-1000.0)
+        assert result.iloc[1]["Account Value"] == pytest.approx(-1500.0)
+
+    def test_two_buys_cumulate_quantity(self) -> None:
+        df = _make_df(
+            [
+                _row(date="2024-01-01", value=1000.0, quantity=10.0, reference="B001"),
+                _row(date="2024-01-02", value=500.0, quantity=5.0, reference="B002"),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[1]["Account Quantity"] == pytest.approx(15.0)
+
+
+class TestSellEvents:
+    def test_sell_negates_value(self) -> None:
+        df = _make_df([_row(action="sell", value=500.0, quantity=5.0, reference="S001")])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Account Value"] == pytest.approx(-500.0)
+
+    def test_sell_negates_quantity(self) -> None:
+        df = _make_df([_row(action="sell", value=500.0, quantity=5.0, reference="S001")])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Account Quantity"] == pytest.approx(-5.0)
+
+    def test_buy_then_sell_reduces_quantity(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01", action="buy", value=1000.0, quantity=10.0, reference="B001"
+                ),
+                _row(date="2024-01-02", action="sell", value=300.0, quantity=3.0, reference="S001"),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[1]["Account Quantity"] == pytest.approx(7.0)
+
+    def test_buy_then_sell_cumulates_value(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01", action="buy", value=1000.0, quantity=10.0, reference="B001"
+                ),
+                _row(date="2024-01-02", action="sell", value=300.0, quantity=3.0, reference="S001"),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[1]["Account Value"] == pytest.approx(-1300.0)
+
+
+class TestCashRows:
+    def test_blank_quantity_filled_from_value(self) -> None:
+        df = _make_df([_row(sub_account="Cash", action="deposit", value=1000.0, quantity=None)])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Account Quantity"] == pytest.approx(1000.0)
+
+    def test_cash_value_not_negated(self) -> None:
+        df = _make_df([_row(sub_account="Cash", action="deposit", value=1000.0, quantity=None)])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Account Value"] == pytest.approx(1000.0)
+
+    def test_two_cash_deposits_cumulate_both_columns(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01",
+                    sub_account="Cash",
+                    action="deposit",
+                    value=1000.0,
+                    quantity=None,
+                    reference="Deposit",
+                ),
+                _row(
+                    date="2024-01-02",
+                    sub_account="Cash",
+                    action="deposit",
+                    value=500.0,
+                    quantity=None,
+                    reference="Deposit",
+                ),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[1]["Account Value"] == pytest.approx(1500.0)
+        assert result.iloc[1]["Account Quantity"] == pytest.approx(1500.0)
+
+
+class TestPositionIsolation:
+    def test_two_positions_accumulate_independently(self) -> None:
+        df = _make_df(
+            [
+                _row(sub_account="Fund A", value=1000.0, quantity=10.0, reference="B001"),
+                _row(sub_account="Fund B", value=2000.0, quantity=20.0, reference="B002"),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        fund_a = result[result["sub_account"] == "Fund A"].iloc[0]
+        fund_b = result[result["sub_account"] == "Fund B"].iloc[0]
+        assert fund_a["Account Value"] == pytest.approx(-1000.0)
+        assert fund_b["Account Value"] == pytest.approx(-2000.0)
+
+
+class TestTransactionColumns:
+    def test_single_buy_transaction_value_equals_account_value(self) -> None:
+        df = _make_df([_row(value=1000.0, quantity=10.0)])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction Value"] == pytest.approx(result.iloc[0]["Account Value"])
+
+    def test_first_row_transaction_value_equals_account_value(self) -> None:
+        df = _make_df([_row(value=1000.0, quantity=10.0)])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction Value"] == pytest.approx(-1000.0)
+        assert result.iloc[0]["Account Value"] == pytest.approx(-1000.0)
+
+    def test_second_buy_transaction_value_is_row_delta(self) -> None:
+        df = _make_df(
+            [
+                _row(date="2024-01-01", value=1000.0, quantity=10.0, reference="B001"),
+                _row(date="2024-01-02", value=500.0, quantity=5.0, reference="B002"),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[1]["Transaction Value"] == pytest.approx(-500.0)
+        assert result.iloc[1]["Account Value"] == pytest.approx(-1500.0)
+
+    def test_sell_transaction_value_is_negated_sell(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01", action="buy", value=1000.0, quantity=10.0, reference="B001"
+                ),
+                _row(date="2024-01-02", action="sell", value=300.0, quantity=3.0, reference="S001"),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[1]["Transaction Value"] == pytest.approx(-300.0)
+
+    def test_transaction_quantity_first_row_equals_account_quantity(self) -> None:
+        df = _make_df([_row(value=1000.0, quantity=10.0)])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction Quantity"] == pytest.approx(
+            result.iloc[0]["Account Quantity"]
+        )
+
+    def test_sell_transaction_quantity_negated(self) -> None:
+        df = _make_df([_row(action="sell", value=300.0, quantity=3.0, reference="S001")])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction Quantity"] == pytest.approx(-3.0)
+
+    def test_cash_transaction_value_equals_deposit_value(self) -> None:
+        df = _make_df([_row(sub_account="Cash", action="deposit", value=500.0, quantity=None)])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction Value"] == pytest.approx(500.0)
+        assert result.iloc[0]["Transaction Quantity"] == pytest.approx(500.0)
+
+    def test_two_positions_transaction_values_independent(self) -> None:
+        df = _make_df(
+            [
+                _row(sub_account="Fund A", value=1000.0, quantity=10.0, reference="B001"),
+                _row(sub_account="Fund B", value=2000.0, quantity=20.0, reference="B002"),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        fund_a = result[result["sub_account"] == "Fund A"].iloc[0]
+        fund_b = result[result["sub_account"] == "Fund B"].iloc[0]
+        assert fund_a["Transaction Value"] == pytest.approx(fund_a["Account Value"])
+        assert fund_b["Transaction Value"] == pytest.approx(fund_b["Account Value"])
+
+
+class TestInvariant:
+    def _assert_invariant(self, result: pd.DataFrame) -> None:
+        for (_, _), group in result.groupby(["account", "sub_account"], sort=False):
+            prev_account_value = 0.0
+            prev_account_quantity = 0.0
+            for _, row in group.iterrows():
+                assert row["Account Value"] == pytest.approx(
+                    prev_account_value + row["Transaction Value"]
+                ), f"Value invariant failed at row {row.name}"
+                assert row["Account Quantity"] == pytest.approx(
+                    prev_account_quantity + row["Transaction Quantity"]
+                ), f"Quantity invariant failed at row {row.name}"
+                prev_account_value = float(row["Account Value"])
+                prev_account_quantity = float(row["Account Quantity"])
+
+    def test_invariant_holds_for_two_buys(self) -> None:
+        df = _make_df(
+            [
+                _row(date="2024-01-01", value=1000.0, quantity=10.0, reference="B001"),
+                _row(date="2024-01-02", value=500.0, quantity=5.0, reference="B002"),
+            ]
+        )
+        self._assert_invariant(LedgerEngine().run(df))
+
+    def test_invariant_holds_for_buy_then_sell(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01", action="buy", value=1000.0, quantity=10.0, reference="B001"
+                ),
+                _row(date="2024-01-02", action="sell", value=300.0, quantity=3.0, reference="S001"),
+            ]
+        )
+        self._assert_invariant(LedgerEngine().run(df))
+
+    def test_invariant_holds_for_cash_deposits(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01",
+                    sub_account="Cash",
+                    action="deposit",
+                    value=1000.0,
+                    quantity=None,
+                    reference="D001",
+                ),
+                _row(
+                    date="2024-01-02",
+                    sub_account="Cash",
+                    action="deposit",
+                    value=500.0,
+                    quantity=None,
+                    reference="D002",
+                ),
+            ]
+        )
+        self._assert_invariant(LedgerEngine().run(df))
+
+    def test_invariant_holds_across_multiple_positions(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01",
+                    sub_account="Fund A",
+                    value=1000.0,
+                    quantity=10.0,
+                    reference="B001",
+                ),
+                _row(
+                    date="2024-01-02",
+                    sub_account="Fund A",
+                    value=500.0,
+                    quantity=5.0,
+                    reference="B002",
+                ),
+                _row(
+                    date="2024-01-01",
+                    sub_account="Fund B",
+                    value=2000.0,
+                    quantity=20.0,
+                    reference="B003",
+                ),
+            ]
+        )
+        self._assert_invariant(LedgerEngine().run(df))
+
+    def test_invariant_holds_for_trading_offset(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01", action="buy", value=1000.0, quantity=10.0, reference="B001"
+                ),
+                _row(
+                    date="2024-01-01",
+                    sub_account="Cash",
+                    action="trading",
+                    value=-1000.0,
+                    quantity=None,
+                    reference="B001",
+                ),
+            ]
+        )
+        self._assert_invariant(LedgerEngine().run(df))
+
+
+class TestTransactionIDSort:
+    def test_cash_sorts_before_vanguard_same_date(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01", sub_account="Vanguard Fund", action="buy", reference="B001"
+                ),
+                _row(
+                    date="2024-01-01",
+                    sub_account="Cash",
+                    action="deposit",
+                    value=1000.0,
+                    quantity=None,
+                    reference="B001-offset",
+                ),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction ID"] == "00001-001"
+        assert result.iloc[0]["sub_account"] == "Cash"
+        assert result.iloc[1]["Transaction ID"] == "00002-001"
+        assert result.iloc[1]["sub_account"] == "Vanguard Fund"
+
+    def test_reference_tiebreaker_within_same_sub_account_date(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01", sub_account="Cash", action="deposit", reference="B002-offset"
+                ),
+                _row(
+                    date="2024-01-01", sub_account="Cash", action="deposit", reference="B001-offset"
+                ),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction ID"] == "00001-001"
+        assert result.iloc[0]["reference"] == "B001-offset"
+        assert result.iloc[1]["Transaction ID"] == "00002-001"
+        assert result.iloc[1]["reference"] == "B002-offset"
+
+    def test_account_included_in_sort_key(self) -> None:
+        df = _make_df(
+            [
+                _row(
+                    date="2024-01-01",
+                    account="SIPP",
+                    sub_account="Cash",
+                    action="deposit",
+                    reference="B001",
+                ),
+                _row(
+                    date="2024-01-01",
+                    account="ISA",
+                    sub_account="Cash",
+                    action="deposit",
+                    reference="B001",
+                ),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["Transaction ID"] == "00001-001"
+        assert result.iloc[0]["account"] == "ISA"
+        assert result.iloc[1]["Transaction ID"] == "00002-001"
+        assert result.iloc[1]["account"] == "SIPP"
+
+
+class TestRowCountAndSchema:
+    def test_row_count_preserved(self) -> None:
+        df = _make_df([_row(reference=f"B00{i}") for i in range(5)])
+        result = LedgerEngine().run(df)
+        assert len(result) == 5
+
+    def test_output_columns_match_ledger_columns(self) -> None:
+        df = _make_df([_row()])
+        result = LedgerEngine().run(df)
+        assert list(result.columns) == LEDGER_COLUMNS
+
+    def test_action_column_unchanged(self) -> None:
+        df = _make_df(
+            [
+                _row(action="buy", reference="B001"),
+                _row(action="sell", reference="S001"),
+            ]
+        )
+        result = LedgerEngine().run(df)
+        assert list(result["action"]) == ["buy", "sell"]
+
+    def test_reference_column_unchanged(self) -> None:
+        df = _make_df([_row(reference="B12345")])
+        result = LedgerEngine().run(df)
+        assert result.iloc[0]["reference"] == "B12345"
+
+    def test_missing_column_raises_value_error(self) -> None:
+        df = pd.DataFrame({"date": ["2024-01-01"], "value": [100.0]})
+        with pytest.raises(ValueError, match="missing"):
+            LedgerEngine().run(df)

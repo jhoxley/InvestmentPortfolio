@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import re
+
+JOURNAL_COLUMNS: list[str] = [
+    "date",
+    "account",
+    "sub_account",
+    "action",
+    "reference",
+    "value",
+    "quantity",
+]
+
+DEDUP_KEY_COLUMNS: list[str] = ["date", "reference"]
+DEDUP_FALLBACK_KEY_COLUMNS: list[str] = ["date", "action", "value"]
+
+HL_HEADER_COL0: str = "Trade date"
+HL_HEADER_COL1: str = "Settle date"
+
+HL_DEPOSIT_REFERENCES: frozenset[str] = frozenset({"Deposit", "BACS"})
+HL_DEPOSIT_REFERENCE_ALIASES: frozenset[str] = frozenset({"CARD WEB", "FPC"})
+HL_INCOME_REFERENCES: frozenset[str] = frozenset({"INTEREST", "RDP CR", "COMMISSION", "CORRECTION"})
+
+HL_DIVIDEND_REFERENCES: frozenset[str] = frozenset(
+    {"ST DIV", "OVR CR", "UTC CR", "UTO CR", "LOYALTYU", "LOYALTYC"}
+)
+
+HL_DIVIDEND_SUFFIX_MAP: dict[str, tuple[str, ...]] = {
+    "ST DIV": (" Dividend Payment",),
+    "OVR CR": (" Overseas Dividend Payment",),
+    "UTC CR": (" Eql - UT Cash Payment", " UT Cash Payment"),
+    "UTO CR": (" Eql - UT Offshore Dividend", " UT Offshore Dividend"),
+}
+
+# RE_LOYALTYU_SUFFIX is also used for LOYALTYC (same suffix pattern, different reference)
+
+RE_LOYALTYU_SUFFIX: re.Pattern[str] = re.compile(r" \d{2} (?:\d{2}|\d{4}) Gross Loyalty$")
+
+RE_BUY: re.Pattern[str] = re.compile(r"^B\d+$")
+RE_SELL: re.Pattern[str] = re.compile(r"^S\d+$")
+RE_LODGEMENT: re.Pattern[str] = re.compile(r"^L\d+$")
+LODGEMENT_DESCRIPTION_PREFIX: str = "Lodgement "
+
+OFFSET_SUFFIX: str = "-offset"
+DEPOSIT_SUFFIX: str = "-deposit"
+RE_BACS: re.Pattern[str] = re.compile(r"^BACS", re.IGNORECASE)
+
+RE_DESCRIPTION_SUFFIX: re.Pattern[str] = re.compile(r"\s+[\d.,]+\s*@.*$")
+
+CASH_SUB_ACCOUNT: str = "Cash"
+CASH_ACTION_TYPES: frozenset[str] = frozenset({"deposit", "fee", "income"})
+SUB_ACCOUNT_STRIP_SUFFIXES: tuple[str, ...] = (" Fee Sale -",)
+
+NUMBER_FORMAT_VALUE: str = "#,##0.00"
+NUMBER_FORMAT_QUANTITY: str = "#,##0.######"
+
+LOG_CJ_CORRELATION_ID: str = "correlation_id"
+LOG_CJ_FILE: str = "file"
+
+SUMMARY_HEADER: str = "=== Consolidation Summary ==="
+SUMMARY_SUCCESS_LABEL: str = "SUCCESS"
+SUMMARY_ERRORS_LABEL: str = "ERRORS"
+SUMMARY_NONE: str = "None"

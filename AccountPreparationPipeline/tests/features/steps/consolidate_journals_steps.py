@@ -1,0 +1,631 @@
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pandas as pd
+from pytest_bdd import given, parsers, scenario, then, when
+
+FEATURE_FILE = str(Path(__file__).parent.parent / "consolidate_journals.feature")
+PIPELINE_PATH = Path(__file__).parent.parent.parent.parent / "pipeline.py"
+DATA_DIR = Path(__file__).parent.parent.parent / "data" / "consolidate_journals"
+
+
+def _run(
+    journal_path: Path, frags_dir: Path, method: str, account: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(PIPELINE_PATH),
+            "consolidate_journals",
+            str(journal_path),
+            str(frags_dir),
+            method,
+            account,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+# ── Scenario bindings ────────────────────────────────────────────────────────
+
+
+@scenario(FEATURE_FILE, "Creates a new journal from valid HL CSV exports")
+def test_creates_new_journal() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Skips preamble rows before HL CSV header")
+def test_skips_preamble() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps B-reference to buy action")
+def test_maps_buy() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps S-reference to sell action")
+def test_maps_sell() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps Deposit and BACS references to deposit action")
+def test_maps_contrib() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps Card Web reference to deposit action")
+def test_maps_card_web() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps FPC reference to deposit action")
+def test_maps_fpc() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps Commission reference to income action")
+def test_maps_commission() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Strips unit cost and quantity suffix from description")
+def test_strips_description() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Re-running with same inputs inserts zero events")
+def test_idempotent() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Incremental run adds only new events")
+def test_incremental() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Valid file processes despite co-located invalid file")
+def test_mixed_files() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "No-header file is reported in errors section")
+def test_no_header_error() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Bad-value row reported with line number, surrounding rows still processed")
+def test_bad_value_row() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Offset rows are generated for buy and sell trades")
+def test_offsets_generated() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "No offset rows generated for deposit-only input")
+def test_no_offsets_for_deposits() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Existing journal receives backfilled offsets on first post-deployment run")
+def test_backfill_existing_trade() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Re-running with same inputs does not duplicate offset rows")
+def test_offsets_not_duplicated() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Incremental run adds offsets only for new trades")
+def test_incremental_offsets() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Events inserted count includes offset rows")
+def test_summary_includes_offsets() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Re-running corrects a wrong-sign buy offset from a previous run")
+def test_stale_offset_corrected() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps ST DIV reference to dividend action")
+def test_maps_st_div() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps OVR CR reference to dividend action")
+def test_maps_ovr_cr() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps UTC CR reference to dividend action")
+def test_maps_utc_cr() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps LOYALTYU reference to dividend action")
+def test_maps_loyaltyu() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Dividend event generates same-sign Cash offset")
+def test_dividend_offset_generated() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Maps L-reference to lodgement action")
+def test_maps_lodgement() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Lodgement sub-account strips Lodgement prefix from description")
+def test_lodgement_subaccount() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Mixed buy sell deposit and lodgement rows all correctly classified")
+def test_lodgement_mixed_types() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Lodgement generates a deposit companion row")
+def test_lodgement_deposit_companion() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Lodgement generates a trading companion row")
+def test_lodgement_trading_companion() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Re-running consolidation does not duplicate lodgement companions")
+def test_lodgement_idempotent() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Income account Cash balance is non-negative after dividend processing")
+def test_dividend_cash_balance_nonnegative() -> None:
+    pass
+
+
+@scenario(FEATURE_FILE, "Re-running consolidate_journals does not duplicate dividend offsets")
+def test_dividend_offsets_not_duplicated() -> None:
+    pass
+
+
+# ── Given steps ──────────────────────────────────────────────────────────────
+
+
+@given("a directory of valid HL CSV files", target_fixture="state")
+def state_valid_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_simple.csv", frags_dir / "valid_hl_simple.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("an HL CSV file with metadata preamble rows before the header", target_fixture="state")
+def state_preamble_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_with_preamble.csv", frags_dir / "valid_hl_with_preamble.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with a buy transaction reference", target_fixture="state")
+def state_buy_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_simple.csv", frags_dir / "valid_hl_simple.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with a sell transaction reference", target_fixture="state")
+def state_sell_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_simple.csv", frags_dir / "valid_hl_simple.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with Deposit and BACS rows", target_fixture="state")
+def state_contrib_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_contrib.csv", frags_dir / "valid_hl_contrib.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with Card Web rows", target_fixture="state")
+def state_card_web_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_card_web.csv", frags_dir / "valid_hl_card_web.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with FPC rows", target_fixture="state")
+def state_fpc_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_fpc.csv", frags_dir / "valid_hl_fpc.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with Commission rows", target_fixture="state")
+def state_commission_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_commission.csv", frags_dir / "valid_hl_commission.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with ST DIV rows", target_fixture="state")
+def state_st_div_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_st_div.csv", frags_dir / "valid_hl_st_div.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with OVR CR rows", target_fixture="state")
+def state_ovr_cr_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_ovr_cr.csv", frags_dir / "valid_hl_ovr_cr.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with UTC CR rows", target_fixture="state")
+def state_utc_cr_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_utc_cr.csv", frags_dir / "valid_hl_utc_cr.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with LOYALTYU rows", target_fixture="state")
+def state_loyaltyu_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_loyaltyu.csv", frags_dir / "valid_hl_loyaltyu.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with lodgement rows", target_fixture="state")
+def state_lodgement_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_lodgement.csv", frags_dir / "valid_hl_lodgement.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with mixed buy sell deposit and lodgement rows", target_fixture="state")
+def state_lodgement_mixed_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_mixed.csv", frags_dir / "valid_hl_mixed.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("a valid HL CSV file with mixed income rows", target_fixture="state")
+def state_mixed_income_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_mixed_income.csv", frags_dir / "valid_hl_mixed_income.csv")
+    return {"tmp_path": tmp_path, "frags_dir": frags_dir}
+
+
+@given("no existing consolidated journal")
+def no_existing_journal(state: dict) -> None:
+    state["journal_path"] = state["tmp_path"] / "journal.xlsx"
+
+
+@given("I have already run consolidate_journals once")
+def run_once(state: dict) -> None:
+    result = _run(state["journal_path"], state["frags_dir"], "HL", "Test ISA")
+    assert result.returncode == 0, f"First run failed:\n{result.stderr}"
+    state["first_result"] = result
+
+
+@given("an existing consolidated journal with 3 events", target_fixture="state")
+def state_existing_journal(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags_initial"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_simple.csv", frags_dir / "valid_hl_simple.csv")
+    journal_path = tmp_path / "journal.xlsx"
+    result = _run(journal_path, frags_dir, "HL", "Test ISA")
+    assert result.returncode == 0
+    return {"tmp_path": tmp_path, "journal_path": journal_path}
+
+
+@given("a directory containing a new HL CSV file with 2 different events")
+def new_fragments_dir(state: dict) -> None:
+    new_dir = state["tmp_path"] / "frags_new"
+    new_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_contrib.csv", new_dir / "valid_hl_contrib.csv")
+    state["frags_dir"] = new_dir
+
+
+@given("a directory containing one valid and one invalid HL CSV file", target_fixture="state")
+def state_mixed_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "valid_hl_simple.csv", frags_dir / "valid_hl_simple.csv")
+    shutil.copy(DATA_DIR / "invalid_no_header.csv", frags_dir / "invalid_no_header.csv")
+    return {
+        "tmp_path": tmp_path,
+        "frags_dir": frags_dir,
+        "journal_path": tmp_path / "journal.xlsx",
+    }
+
+
+@given(
+    "a directory containing only an HL CSV file with no recognisable header",
+    target_fixture="state",
+)
+def state_no_header_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "invalid_no_header.csv", frags_dir / "invalid_no_header.csv")
+    return {
+        "tmp_path": tmp_path,
+        "frags_dir": frags_dir,
+        "journal_path": tmp_path / "journal.xlsx",
+    }
+
+
+@given("a directory containing an HL CSV file with one bad-value row", target_fixture="state")
+def state_bad_value_dir(tmp_path: Path) -> dict:
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    shutil.copy(DATA_DIR / "invalid_bad_value.csv", frags_dir / "invalid_bad_value.csv")
+    return {
+        "tmp_path": tmp_path,
+        "frags_dir": frags_dir,
+        "journal_path": tmp_path / "journal.xlsx",
+    }
+
+
+# ── When steps ───────────────────────────────────────────────────────────────
+
+
+@when(
+    parsers.parse('I run consolidate_journals with method {method} and account "{account}"'),
+    target_fixture="result",
+)
+def run_mode(state: dict, method: str, account: str) -> subprocess.CompletedProcess[str]:
+    return _run(state["journal_path"], state["frags_dir"], method, account)
+
+
+@when("I run consolidate_journals again with the same inputs", target_fixture="result")
+def run_again(state: dict) -> subprocess.CompletedProcess[str]:
+    return _run(state["journal_path"], state["frags_dir"], "HL", "Test ISA")
+
+
+# ── Then steps ───────────────────────────────────────────────────────────────
+
+
+@then("the exit code is 0")
+def check_exit_zero(result: subprocess.CompletedProcess[str]) -> None:
+    assert result.returncode == 0, (
+        f"Expected exit 0, got {result.returncode}."
+        f"\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+@then(parsers.parse("the journal contains {count:d} events"))
+def check_event_count(state: dict, count: int) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert len(df) == count, f"Expected {count} events, got {len(df)}"
+
+
+@then(parsers.parse("the journal contains {count:d} events total"))
+def check_event_count_total(state: dict, count: int) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert len(df) == count, f"Expected {count} total events, got {len(df)}"
+
+
+@then("the consolidated journal XLSX is created")
+def check_journal_exists(state: dict) -> None:
+    assert state["journal_path"].exists(), "Journal XLSX was not created"
+
+
+@then("the journal contains the correct columns")
+def check_columns(state: dict) -> None:
+    from src.modes.consolidate_journals.constants import JOURNAL_COLUMNS
+
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert list(df.columns) == JOURNAL_COLUMNS
+
+
+@then(parsers.parse('the journal contains a row with action "{action}"'))
+def check_action_present(state: dict, action: str) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert action in df["action"].values, f"Action '{action}' not found in journal"
+
+
+@then(parsers.parse('the journal contains {count:d} rows with action "{action}"'))
+def check_action_count(state: dict, count: int, action: str) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    actual = (df["action"] == action).sum()
+    assert actual == count, f"Expected {count} rows with action '{action}', got {actual}"
+
+
+@then('the journal sub_account does not contain "@"')
+def check_no_at_in_sub_account(state: dict) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    for val in df["sub_account"].dropna():
+        assert "@" not in str(val), f"sub_account contains '@': {val!r}"
+
+
+@then(parsers.parse("the stdout summary shows {count:d} events inserted"))
+def check_inserted_count(result: subprocess.CompletedProcess[str], count: int) -> None:
+    assert f"Events inserted:  {count}" in result.stdout, (
+        f"Expected 'Events inserted:  {count}' in stdout:\n{result.stdout}"
+    )
+
+
+@then("the stdout summary contains an ERRORS section")
+def check_errors_section(result: subprocess.CompletedProcess[str]) -> None:
+    assert "ERRORS" in result.stdout, f"No ERRORS section in stdout:\n{result.stdout}"
+
+
+@then("the stdout summary mentions the invalid file name")
+def check_invalid_file_mentioned(result: subprocess.CompletedProcess[str]) -> None:
+    assert "invalid_no_header" in result.stdout, (
+        f"Expected invalid file name in stdout:\n{result.stdout}"
+    )
+
+
+@then("the journal contains events from the valid file only")
+def check_only_valid_events(state: dict) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert len(df) == 6, f"Expected 6 events (3 real + 3 offsets from valid file), got {len(df)}"
+
+
+@then(parsers.parse("the journal contains {count:d} event from the valid row"))
+def check_one_valid_event(state: dict, count: int) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert len(df) == count, f"Expected {count} event(s), got {len(df)}"
+
+
+@then(parsers.parse('the journal contains a row with sub_account "{sub_account}"'))
+def check_sub_account_present(state: dict, sub_account: str) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert sub_account in df["sub_account"].values, (
+        f"sub_account '{sub_account}' not found. Values: {df['sub_account'].tolist()}"
+    )
+
+
+@then(parsers.parse('the journal contains a row with reference "{reference}"'))
+def check_reference_present(state: dict, reference: str) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert reference in df["reference"].values, (
+        f"Reference '{reference}' not found in journal. References: {df['reference'].tolist()}"
+    )
+
+
+@then("the journal contains no trading rows with a negative value")
+def check_no_negative_trading_rows(state: dict) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    trading = df[df["action"] == "trading"]
+    negative = trading[trading["value"] < 0]
+    assert len(negative) == 0, (
+        f"Found {len(negative)} trading row(s) with negative value:\n"
+        f"{negative[['reference', 'value']].to_string()}"
+    )
+
+
+# ── Trade Cash Offset steps ──────────────────────────────────────────────────
+
+
+@then("the buy offset row has a negative value")
+def check_buy_offset_negative(state: dict) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    offset_rows = df[df["reference"] == "B99999-offset"]
+    assert len(offset_rows) == 1, "Expected exactly one B99999-offset row"
+    offset_value = float(offset_rows.iloc[0]["value"])
+    assert offset_value < 0, f"Expected buy offset value < 0 (negative), got {offset_value}"
+
+
+@given("a journal with a wrong-sign buy offset row", target_fixture="state")
+def state_journal_with_wrong_sign_offset(tmp_path: Path) -> dict:
+    from src.modes.consolidate_journals.constants import JOURNAL_COLUMNS
+
+    journal_path = tmp_path / "journal.xlsx"
+    pd.DataFrame(
+        [
+            {
+                "date": "2024-01-17",
+                "account": "Test ISA",
+                "sub_account": "Vanguard Fund",
+                "action": "buy",
+                "reference": "B99999",
+                "value": -1000.0,
+                "quantity": 10.0,
+            },
+            {
+                "date": "2024-01-17",
+                "account": "Test ISA",
+                "sub_account": "Cash",
+                "action": "trading",
+                "reference": "B99999-offset",
+                "value": 1000.0,
+                "quantity": 1000.0,
+            },
+        ],
+        columns=JOURNAL_COLUMNS,
+    ).to_excel(journal_path, index=False, engine="openpyxl")
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    return {"tmp_path": tmp_path, "journal_path": journal_path, "frags_dir": frags_dir}
+
+
+@given(
+    "a journal already containing a buy trade but no offset row",
+    target_fixture="state",
+)
+def state_journal_with_trade_no_offset(tmp_path: Path) -> dict:
+    from src.modes.consolidate_journals.constants import JOURNAL_COLUMNS
+
+    journal_path = tmp_path / "journal.xlsx"
+    pd.DataFrame(
+        [
+            {
+                "date": "2024-01-17",
+                "account": "Test ISA",
+                "sub_account": "Vanguard Fund",
+                "action": "buy",
+                "reference": "B12345",
+                "value": 2000.0,
+                "quantity": 10.0,
+            }
+        ],
+        columns=JOURNAL_COLUMNS,
+    ).to_excel(journal_path, index=False, engine="openpyxl")
+    frags_dir = tmp_path / "frags"
+    frags_dir.mkdir()
+    return {"tmp_path": tmp_path, "journal_path": journal_path, "frags_dir": frags_dir}
+
+
+# ── Feature 013: Lodgement Deposit and Trading Companions ────────────────────
+
+
+@when(
+    parsers.parse('I run consolidate_journals with method {method} and account "{account}" again'),
+    target_fixture="result",
+)
+def run_mode_again(state: dict, method: str, account: str) -> subprocess.CompletedProcess[str]:
+    return _run(state["journal_path"], state["frags_dir"], method, account)
+
+
+@then(
+    parsers.parse('the journal contains a row with action "{action}" and reference "{reference}"')
+)
+def check_action_and_reference_present(state: dict, action: str, reference: str) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    match = df[(df["action"] == action) & (df["reference"] == reference)]
+    assert len(match) >= 1, (
+        f"No row with action='{action}' and reference='{reference}' found in journal.\n"
+        f"Journal rows:\n{df[['action', 'reference']].to_string()}"
+    )
+
+
+@then(parsers.parse("the journal contains exactly {count:d} rows"))
+def check_exact_row_count(state: dict, count: int) -> None:
+    df = pd.read_excel(state["journal_path"], engine="openpyxl")
+    assert len(df) == count, (
+        f"Expected exactly {count} rows, got {len(df)}.\nActions: {df['action'].tolist()}"
+    )
