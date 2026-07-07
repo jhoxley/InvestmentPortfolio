@@ -15,8 +15,11 @@ from app.config import get_settings
 from app.exceptions import (
     AccountNotFoundError,
     EmptyDateRangeError,
+    IdentifierMappingError,
     InvalidAccountNameError,
+    MarketDataServiceError,
     MergeNotSupportedError,
+    PriceCoverageError,
     SchemaValidationError,
 )
 from app.logging_config import setup_logging
@@ -203,3 +206,64 @@ async def merge_not_supported_handler(
     """
     logger.warning("merge_not_supported", account_name=exc.account_name, detail=exc.message)
     return _problem(request, 409, "merge-not-supported", "Merge Not Supported", exc.message)
+
+
+@app.exception_handler(IdentifierMappingError)
+async def identifier_mapping_error_handler(
+    request: Request, exc: IdentifierMappingError
+) -> JSONResponse:
+    """Handle IdentifierMappingError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning("identifier_mapping_error", sub_accounts=exc.sub_accounts, detail=exc.message)
+    return _problem(
+        request, 422, "identifier-mapping-failed", "Identifier Mapping Failed", exc.message
+    )
+
+
+@app.exception_handler(PriceCoverageError)
+async def price_coverage_error_handler(request: Request, exc: PriceCoverageError) -> JSONResponse:
+    """Handle PriceCoverageError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning(
+        "price_coverage_error",
+        sub_accounts=list(exc.problems.keys()),
+        detail=exc.message,
+    )
+    return _problem(request, 422, "price-coverage-failed", "Price Coverage Failed", exc.message)
+
+
+@app.exception_handler(MarketDataServiceError)
+async def market_data_service_error_handler(
+    request: Request, exc: MarketDataServiceError
+) -> JSONResponse:
+    """Handle MarketDataServiceError with a 502 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 502 Bad Gateway response.
+    """
+    logger.error("market_data_service_error", sub_account=exc.sub_account, detail=exc.message)
+    return _problem(
+        request,
+        502,
+        "market-data-service-unavailable",
+        "Market Data Service Unavailable",
+        exc.message,
+    )

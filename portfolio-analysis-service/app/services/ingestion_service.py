@@ -11,6 +11,7 @@ from app.exceptions import MergeNotSupportedError, SchemaValidationError
 from app.models.ladder import IngestionSummary, Links
 from app.repositories.ladder_repository import AccountMeta, LadderRepository
 from app.services.ladder_expander import LadderExpander
+from app.services.pricing_enrichment_service import PricingEnrichmentService
 from app.validators.ledger import LedgerValidator
 
 logger = structlog.get_logger(__name__)
@@ -21,21 +22,26 @@ class IngestionService:
 
     Steps for a new account:
     1. Compute SHA-256 checksum of raw file bytes.
-    2. If account exists: compare checksum (idempotent or 409).
+    2. If account exists: compare checksum (refresh pricing, or 409 on mismatch).
     3. Parse bytes to DataFrame.
     4. Validate schema via LedgerValidator.
     5. Expand to daily ladder via LadderExpander.
-    6. Persist via LadderRepository.
-    7. Return IngestionSummary.
+    6. Enrich with price/market_value/portfolio_weight via PricingEnrichmentService.
+    7. Persist via LadderRepository.
+    8. Return IngestionSummary.
     """
 
-    def __init__(self, repository: LadderRepository) -> None:
-        """Initialise with a LadderRepository instance.
+    def __init__(
+        self, repository: LadderRepository, enrichment_service: PricingEnrichmentService
+    ) -> None:
+        """Initialise with a LadderRepository and PricingEnrichmentService instance.
 
         Args:
             repository: Repository for reading and writing ladder files.
+            enrichment_service: Service that adds price/market_value/portfolio_weight.
         """
         self._repository = repository
+        self._enrichment_service = enrichment_service
         self._validator = LedgerValidator()
         self._expander = LadderExpander()
 
@@ -48,12 +54,15 @@ class IngestionService:
             today: Reference date for expansion (T-2 boundary calculation).
 
         Returns:
-            IngestionSummary describing the result (status 'created' or 'unchanged').
+            IngestionSummary describing the result (status 'created' or 'refreshed').
 
         Raises:
             MergeNotSupportedError: If a ladder exists with a different checksum.
             SchemaValidationError: If the uploaded file fails schema validation.
             EmptyDateRangeError: If the expansion date range contains no business days.
+            IdentifierMappingError: If a non-Cash sub-account has no usable mapping entry.
+            PriceCoverageError: If a GBP price cannot be obtained for every business day.
+            MarketDataServiceError: If a market-data-service request fails.
         """
         checksum = hashlib.sha256(file_bytes).hexdigest()
         log = logger.bind(account_name=account_name, checksum=checksum[:8])
@@ -61,8 +70,13 @@ class IngestionService:
         if self._repository.exists(account_name):
             meta = self._repository.read_meta(account_name)
             if meta.checksum == checksum:
-                log.info("ingest_no_op", reason="checksum_match")
-                return self._summary_from_meta(meta, status="unchanged")
+                log.info("ingest_refresh", reason="checksum_match")
+                base_df = self._repository.read_ladder_df(account_name)
+                enriched_df = self._enrichment_service.enrich(base_df)
+                refreshed_meta = meta.model_copy(update={"ingested_at": datetime.now(UTC)})
+                self._repository.write(account_name, enriched_df, refreshed_meta)
+                log.info("ingest_refresh_complete", row_count=refreshed_meta.row_count)
+                return self._summary_from_meta(refreshed_meta, status="refreshed")
             log.warning("ingest_conflict", reason="checksum_mismatch")
             raise MergeNotSupportedError(account_name=account_name)
 
@@ -77,6 +91,7 @@ class IngestionService:
         self._validator.validate(df, account_name, today)
 
         ladder_df = self._expander.expand(df, today)
+        enriched_df = self._enrichment_service.enrich(ladder_df)
 
         sub_accounts: list[str] = sorted(ladder_df["sub_account"].unique().tolist())
         from_date: date = ladder_df["date"].min()
@@ -92,7 +107,7 @@ class IngestionService:
             sub_accounts=sub_accounts,
             ingested_at=datetime.now(UTC),
         )
-        self._repository.write(account_name, ladder_df, meta)
+        self._repository.write(account_name, enriched_df, meta)
         log.info("ingest_complete", row_count=row_count)
 
         return self._summary_from_meta(meta, status="created")
@@ -102,13 +117,13 @@ class IngestionService:
 
         Args:
             meta: The AccountMeta read from or written to the repository.
-            status: Either 'created' or 'unchanged'.
+            status: Either 'created' or 'refreshed'.
 
         Returns:
             Populated IngestionSummary with HATEOAS links.
         """
         links = Links(
-            self_=f"/v1/accounts/{meta.account_name}/ladder",
+            self=f"/v1/accounts/{meta.account_name}/ladder",
             download=f"/v1/accounts/{meta.account_name}/ladder/download",
         )
         return IngestionSummary(
@@ -119,5 +134,5 @@ class IngestionService:
             to_date=meta.to_date,
             sub_accounts=meta.sub_accounts,
             ingested_at=meta.ingested_at,
-            links=links,
+            _links=links,
         )

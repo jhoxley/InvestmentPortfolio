@@ -8,11 +8,14 @@ import structlog
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
+from app.clients.market_data_client import HttpMarketDataClient, MarketDataClient
 from app.config import Settings, get_settings
 from app.exceptions import AccountNotFoundError, InvalidAccountNameError
 from app.models.ladder import IngestionSummary, LadderSummary, Links
+from app.repositories.identifier_mapping_repository import IdentifierMappingRepository
 from app.repositories.ladder_repository import LadderRepository
 from app.services.ingestion_service import IngestionService
+from app.services.pricing_enrichment_service import PricingEnrichmentService
 
 logger = structlog.get_logger(__name__)
 
@@ -49,18 +52,67 @@ def _get_repository(settings: Settings = Depends(get_settings)) -> LadderReposit
     return LadderRepository(data_dir=settings.data.directory)
 
 
+def _get_identifier_mapping_repository(
+    settings: Settings = Depends(get_settings),
+) -> IdentifierMappingRepository:
+    """Dependency that returns an IdentifierMappingRepository bound to the configured path.
+
+    Args:
+        settings: Application settings (injected by FastAPI).
+
+    Returns:
+        IdentifierMappingRepository instance.
+    """
+    return IdentifierMappingRepository(mapping_path=settings.identifier_mapping.path)
+
+
+def _get_market_data_client(settings: Settings = Depends(get_settings)) -> MarketDataClient:
+    """Dependency that returns a MarketDataClient bound to the configured service location.
+
+    Args:
+        settings: Application settings (injected by FastAPI).
+
+    Returns:
+        MarketDataClient instance.
+    """
+    return HttpMarketDataClient(
+        base_url=settings.market_data_service.base_url,
+        timeout_seconds=settings.market_data_service.timeout_seconds,
+    )
+
+
+def _get_pricing_enrichment_service(
+    mapping_repo: IdentifierMappingRepository = Depends(_get_identifier_mapping_repository),
+    market_data_client: MarketDataClient = Depends(_get_market_data_client),
+) -> PricingEnrichmentService:
+    """Dependency that returns a wired PricingEnrichmentService.
+
+    Args:
+        mapping_repo: IdentifierMappingRepository instance (injected by FastAPI).
+        market_data_client: MarketDataClient instance (injected by FastAPI).
+
+    Returns:
+        PricingEnrichmentService instance.
+    """
+    return PricingEnrichmentService(
+        mapping_repo=mapping_repo, market_data_client=market_data_client
+    )
+
+
 def _get_ingestion_service(
     repository: LadderRepository = Depends(_get_repository),
+    enrichment_service: PricingEnrichmentService = Depends(_get_pricing_enrichment_service),
 ) -> IngestionService:
     """Dependency that returns a wired IngestionService.
 
     Args:
         repository: LadderRepository instance (injected by FastAPI).
+        enrichment_service: PricingEnrichmentService instance (injected by FastAPI).
 
     Returns:
         IngestionService instance.
     """
-    return IngestionService(repository=repository)
+    return IngestionService(repository=repository, enrichment_service=enrichment_service)
 
 
 @router.post(
@@ -69,9 +121,18 @@ def _get_ingestion_service(
     status_code=201,
     response_model=IngestionSummary,
     responses={
-        200: {"model": IngestionSummary, "description": "Checksum matched — no reprocessing"},
+        200: {
+            "model": IngestionSummary,
+            "description": "Checksum matched — pricing refreshed, rows not re-expanded",
+        },
         409: {"description": "Different file submitted for existing account"},
-        422: {"description": "Validation failed"},
+        422: {
+            "description": (
+                "Validation failed, a sub-account has no usable identifier mapping, "
+                "or one or more (sub-account, date) pairs could not be priced in GBP"
+            )
+        },
+        502: {"description": "The configured market-data-service could not be reached"},
     },
 )
 async def ingest_ladder(
@@ -135,7 +196,7 @@ async def get_ladder_summary(
         raise AccountNotFoundError(account_name=account_name)
     meta = repository.read_meta(account_name)
     links = Links(
-        self_=f"/v1/accounts/{account_name}/ladder",
+        self=f"/v1/accounts/{account_name}/ladder",
         download=f"/v1/accounts/{account_name}/ladder/download",
     )
     summary = LadderSummary(
@@ -145,7 +206,7 @@ async def get_ladder_summary(
         to_date=meta.to_date,
         sub_accounts=meta.sub_accounts,
         ingested_at=meta.ingested_at,
-        links=links,
+        _links=links,
     )
     return JSONResponse(
         status_code=200,

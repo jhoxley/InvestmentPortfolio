@@ -345,7 +345,12 @@ def check_cash_zero_balance_preserved(account_name: str, app_client: TestClient)
 
 
 # ---------------------------------------------------------------------------
-# US3: Re-submitting the same file is a no-op
+# US3: Re-submitting the same file refreshes pricing rather than being a no-op
+#
+# Note: feature 002's FR-013 supersedes this story's original "no reprocessing" /
+# "stored file is unchanged" guarantee from feature 001 — a checksum match now always
+# triggers fresh market-data calls and rewrites the ladder with refreshed pricing. See
+# specs/002-ladder-market-data/spec.md Assumptions for the supersession note.
 # ---------------------------------------------------------------------------
 
 
@@ -382,18 +387,20 @@ def check_status_field(post_response: object, expected_status: str) -> None:
     )
 
 
-@then("the stored XLSX file is unchanged")
+@then("the stored ladder's row count is unchanged")
 def check_stored_file_unchanged(stored_ledger_bytes: bytes, app_client: TestClient) -> None:
-    """Verify the stored ladder is byte-identical (same row count)."""
+    """Verify the refresh path did not re-expand rows (row count stable across refresh)."""
     meta_resp = app_client.get("/v1/accounts/idempotent-portfolio/ladder")
     assert meta_resp.status_code == 200
     body = meta_resp.json()
     expected_checksum = hashlib.sha256(stored_ledger_bytes).hexdigest()
-    # Verify via re-download and row count consistency
     dl = app_client.get("/v1/accounts/idempotent-portfolio/ladder/download")
     df = pd.read_excel(io.BytesIO(dl.content), engine="openpyxl")
     assert len(df) == body["row_count"], "Row count changed after re-submission"
-    _ = expected_checksum  # confirmed idempotent via checksum match in service
+    assert (
+        "price" in df.columns and "market_value" in df.columns and "portfolio_weight" in df.columns
+    ), "Refreshed ladder is missing enriched price/market_value/portfolio_weight columns"
+    _ = expected_checksum  # confirmed refresh via checksum match in service
 
 
 @then('the response body includes a "_links.download" URL to the existing stored XLSX')

@@ -12,10 +12,25 @@ class DataSettings(BaseModel):
     directory: Path = Path("./data")
 
 
+class MarketDataServiceSettings(BaseModel):
+    """Settings for locating the market-data-web-service instance."""
+
+    base_url: str = "http://127.0.0.1:8001"
+    timeout_seconds: float = 30.0
+
+
+class IdentifierMappingSettings(BaseModel):
+    """Settings for locating the sub-account-to-identifier mapping file."""
+
+    path: Path | None = None
+
+
 class Settings(BaseModel):
     """Top-level application settings."""
 
     data: DataSettings = DataSettings()
+    market_data_service: MarketDataServiceSettings = MarketDataServiceSettings()
+    identifier_mapping: IdentifierMappingSettings = IdentifierMappingSettings()
 
 
 def load_settings(config_path: Path = Path("config.yaml")) -> Settings:

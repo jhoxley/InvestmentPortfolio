@@ -38,12 +38,12 @@ Feature: Position Ladder Ingestion
     And the Cash row on and after the zero-balance date shows a balance of zero
 
   @us3
-  Scenario: Re-submitting the same file is a no-op
+  Scenario: Re-submitting the same file refreshes pricing rather than being a no-op
     Given a position ladder has already been stored for account "idempotent-portfolio"
     When the same file is submitted again for "idempotent-portfolio"
     Then the response status is 200
-    And the response body contains status "unchanged"
-    And the stored XLSX file is unchanged
+    And the response body contains status "refreshed"
+    And the stored ladder's row count is unchanged
     And the response body includes a "_links.download" URL to the existing stored XLSX
 
   @us4

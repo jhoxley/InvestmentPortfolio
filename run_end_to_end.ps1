@@ -417,28 +417,30 @@ Write-Log "  This is distinct from portfolio-analysis-service's data/ directory.
 Write-Log "" -Level Detail
 Write-Log "  Checking portfolio-analysis-service config..." -Level Info
 
-# The market_data_service section is a placeholder for future integration;
-# the current implementation does not yet call the market-data-web-service.
+# The market_data_service and identifier_mapping sections wire portfolio-analysis-service
+# to the market-data-web-service instance this same script starts (Phase 3 below) and to
+# the sub-account-to-identifier mapping file used to resolve prices.
 $analysisDefaultConfig = @"
 data:
   directory: ./data
 
-# TODO: wire market-data-web-service integration when implemented.
-# When the portfolio-analysis-service begins querying market data, uncomment
-# and populate the block below so it targets the correct host and port.
-#
-# market_data_service:
-#   base_url: http://${MarketDataHost}:${MarketDataPort}
+market_data_service:
+  base_url: http://${MarketDataHost}:${MarketDataPort}
+  timeout_seconds: 30
+
+identifier_mapping:
+  path: $(Join-Path $InvestmentsDir "InvestmentDataStatic.json")
 "@
 
 Assert-ConfigYaml `
     -ServiceDir   $AnalysisDir `
     -ServiceName  "portfolio-analysis-service" `
-    -ExpectedKeys @("data:", "directory:") `
+    -ExpectedKeys @("data:", "directory:", "market_data_service:", "identifier_mapping:") `
     -DefaultContent $analysisDefaultConfig
 
 Write-Log "  Data directory  : $(Join-Path $AnalysisDir 'data')  (relative: ./data)" -Level Detail
-Write-Log "  Market-data URL placeholder: http://${MarketDataHost}:${MarketDataPort}  (not yet wired)" -Level Detail
+Write-Log "  Market-data URL : http://${MarketDataHost}:${MarketDataPort}" -Level Detail
+Write-Log "  Identifier mapping file: $(Join-Path $InvestmentsDir 'InvestmentDataStatic.json')" -Level Detail
 
 # =============================================================================
 #  Phase 3  - Start market-data-web-service

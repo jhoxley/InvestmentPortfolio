@@ -7,6 +7,8 @@ from datetime import date, timedelta
 import pandas as pd
 from fastapi.testclient import TestClient
 
+from tests.conftest import FakeMarketDataService
+
 
 def _generate_large_ledger(rows: int = 5000) -> bytes:
     """Generate a synthetic sub-account ledger with approximately `rows` data rows.
@@ -130,3 +132,33 @@ class TestSC003ValidationPerformance:
         assert elapsed <= 1.0, (
             f"SC-003 violated: validation rejection took {elapsed:.2f}s (limit 1s)"
         )
+
+
+class TestLadderMarketDataSC003CallVolume:
+    """Ladder Market Data Enrichment SC-003.
+
+    At most one market-data-service call per distinct non-Cash sub-account per
+    ingestion, regardless of how many business days that sub-account spans.
+    """
+
+    def test_call_count_equals_distinct_non_cash_sub_accounts(
+        self, app_client: TestClient, fake_market_data_service: FakeMarketDataService
+    ) -> None:
+        """Assert call count equals distinct non-Cash sub-accounts, not rows or days.
+
+        Ingests a ladder spanning many business days across several sub-accounts.
+        """
+        sub_account_count = 5
+        file_bytes = _generate_large_ledger(rows=2000)
+        # _generate_large_ledger produces 9 Equity-N sub-accounts plus Cash; only
+        # inspect the first `sub_account_count` of them for a clear, bounded assertion.
+        resp = app_client.post(
+            "/v1/accounts/perf-test-callvolume/ladder",
+            files=_multipart(file_bytes),
+        )
+        assert resp.status_code == 201, f"Ingestion failed: {resp.text}"
+
+        for i in range(sub_account_count):
+            calls = fake_market_data_service.calls_for(f"Equity-{i}")
+            assert len(calls) == 1, f"Expected exactly 1 call for 'Equity-{i}', got {len(calls)}"
+        assert fake_market_data_service.calls_for("Cash") == []

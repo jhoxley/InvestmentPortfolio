@@ -132,6 +132,25 @@ class LadderRepository:
         with meta_path.open("w", encoding="utf-8") as f:
             json.dump(meta_json, f, indent=2, default=str)
 
+    def read_ladder_df(self, account_name: str) -> pd.DataFrame:
+        """Read back the stored ladder's base columns for re-enrichment on the refresh path.
+
+        Args:
+            account_name: The account identifier.
+
+        Returns:
+            DataFrame with columns [date, sub_account, book_cost, quantity, total_income],
+            dropping price/market_value/portfolio_weight if already present.
+
+        Raises:
+            FileNotFoundError: If no ladder file exists for the account.
+        """
+        path = self._ladder_path(account_name)
+        if not path.exists():
+            raise FileNotFoundError(f"No ladder file found for account '{account_name}'")
+        df = pd.read_excel(path, engine="openpyxl")
+        return df[["date", "sub_account", "book_cost", "quantity", "total_income"]]
+
     def read_xlsx(self, account_name: str) -> Path:
         """Return the path to the stored ladder.xlsx for an account.
 

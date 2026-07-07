@@ -19,8 +19,12 @@ class IngestionSummary(BaseModel):
     """Response body for POST /v1/accounts/{name}/ladder (201 Created or 200 OK)."""
 
     account_name: str = Field(description="Case-sensitive account identifier")
-    status: Literal["created", "unchanged"] = Field(
-        description="'created' for a new ladder, 'unchanged' if the checksum matched"
+    status: Literal["created", "refreshed"] = Field(
+        description=(
+            "'created' for a brand-new ladder; 'refreshed' when the checksum matched an "
+            "existing ladder but price/market_value/portfolio_weight were recomputed via "
+            "fresh market-data-service calls (rows and date range are not re-expanded)"
+        )
     )
     row_count: int = Field(ge=0, description="Total rows in the stored position ladder")
     from_date: date = Field(description="Earliest date in the ladder")
