@@ -6,13 +6,13 @@ from pydantic import BaseModel, Field
 
 class PricePoint(BaseModel):
     date: date
-    close: float = Field(gt=0.0)
+    close: float = Field(ge=0.0)
     fx_rate: float | None = None
 
 
 class PriceResponse(BaseModel):
     ticker: str
-    price: float = Field(gt=0.0)
+    price: float = Field(ge=0.0)
     currency: str
     timestamp: datetime
     market_status: Literal["open", "closed"]
