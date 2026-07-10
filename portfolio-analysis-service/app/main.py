@@ -10,10 +10,11 @@ import structlog.contextvars
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.api import health, ladder
+from app.api import capital, health, ladder
 from app.config import get_settings
 from app.exceptions import (
     AccountNotFoundError,
+    EmptyCapitalDateRangeError,
     EmptyDateRangeError,
     IdentifierMappingError,
     InvalidAccountNameError,
@@ -54,6 +55,7 @@ app = FastAPI(
 )
 
 app.include_router(ladder.router)
+app.include_router(capital.router)
 app.include_router(health.router)
 
 
@@ -174,6 +176,31 @@ async def empty_date_range_handler(request: Request, exc: EmptyDateRangeError) -
         detail=exc.message,
     )
     return _problem(request, 422, "empty-date-range", "Empty Date Range", exc.message)
+
+
+@app.exception_handler(EmptyCapitalDateRangeError)
+async def empty_capital_date_range_handler(
+    request: Request, exc: EmptyCapitalDateRangeError
+) -> JSONResponse:
+    """Handle EmptyCapitalDateRangeError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning(
+        "empty_capital_date_range",
+        account_name=exc.account_name,
+        earliest_date=str(exc.earliest_date),
+        latest_date=str(exc.latest_date),
+        detail=exc.message,
+    )
+    return _problem(
+        request, 422, "empty-capital-date-range", "Empty Capital Date Range", exc.message
+    )
 
 
 @app.exception_handler(AccountNotFoundError)

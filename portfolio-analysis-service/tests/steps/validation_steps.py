@@ -182,3 +182,106 @@ def upload_today_date(account_name: str, app_client: TestClient) -> object:
         f"/v1/accounts/{account_name}/ladder",
         files=_multipart(_xlsx_bytes(df)),
     )
+
+
+# ---------------------------------------------------------------------------
+# Capital ledger endpoint validation
+# ---------------------------------------------------------------------------
+
+
+def _valid_capital_df() -> pd.DataFrame:
+    """Return a minimal valid capital ledger DataFrame.
+
+    Returns:
+        DataFrame with all required columns and valid data, spanning two weekdays.
+    """
+    return pd.DataFrame(
+        {
+            "date": [date(2020, 1, 2), date(2020, 1, 10)],
+            "capital": [1000.0, 1200.0],
+            "income": [0.0, 5.0],
+            "book_value": [0.0, 900.0],
+        }
+    )
+
+
+@when(
+    parsers.parse('a capital POST is made with account name "{account_name}"'),
+    target_fixture="val_response",
+)
+def post_bad_capital_account_name(account_name: str, app_client: TestClient) -> object:
+    """POST to the capital endpoint with an invalid account name."""
+    file_bytes = _xlsx_bytes(_valid_capital_df())
+    return app_client.post(
+        f"/v1/accounts/{account_name}/capital",
+        files=_multipart(file_bytes),
+    )
+
+
+@when(
+    parsers.parse(
+        'a non-XLSX file is uploaded for the capital endpoint for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def upload_non_xlsx_capital(account_name: str, app_client: TestClient) -> object:
+    """Upload a CSV-disguised-as-xlsx file to the capital endpoint."""
+    csv_bytes = b"date,capital,income,book_value\n2020-01-02,1000,0,0"
+    return app_client.post(
+        f"/v1/accounts/{account_name}/capital",
+        files={"file": ("capital.csv", csv_bytes, "text/csv")},
+    )
+
+
+@when(
+    parsers.parse(
+        'a capital XLSX missing the "{column}" column is uploaded for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def upload_missing_capital_column(column: str, account_name: str, app_client: TestClient) -> object:
+    """Upload a capital XLSX that is missing the specified column."""
+    df = _valid_capital_df().drop(columns=[column])
+    return app_client.post(
+        f"/v1/accounts/{account_name}/capital",
+        files=_multipart(_xlsx_bytes(df)),
+    )
+
+
+@when(
+    parsers.parse(
+        'a capital XLSX with a non-numeric "{column}" value is uploaded for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def upload_non_numeric_capital(column: str, account_name: str, app_client: TestClient) -> object:
+    """Upload a capital XLSX with a non-numeric value in the specified column."""
+    df = _valid_capital_df()
+    df[column] = "not-a-number"
+    return app_client.post(
+        f"/v1/accounts/{account_name}/capital",
+        files=_multipart(_xlsx_bytes(df)),
+    )
+
+
+@when(
+    parsers.parse(
+        "a capital XLSX whose only recorded date is a Saturday is uploaded for account "
+        '"{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def upload_capital_saturday_only(account_name: str, app_client: TestClient) -> object:
+    """Upload a capital XLSX whose only recorded date falls on a weekend."""
+    df = pd.DataFrame(
+        {
+            "date": [date(2024, 1, 6)],  # Saturday
+            "capital": [1000.0],
+            "income": [0.0],
+            "book_value": [0.0],
+        }
+    )
+    return app_client.post(
+        f"/v1/accounts/{account_name}/capital",
+        files=_multipart(_xlsx_bytes(df)),
+    )

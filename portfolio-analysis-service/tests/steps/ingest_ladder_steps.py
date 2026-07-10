@@ -221,6 +221,8 @@ def ledger_with_closure() -> bytes:
     """Provide a ledger where Equity B closes 20 days before today."""
     today = date.today()
     close_date = today - timedelta(days=20)
+    if close_date.weekday() >= 5:  # Snap to the prior business day so the recorded closure
+        close_date -= timedelta(days=close_date.weekday() - 4)  # event lands on a weekday.
     start_date = today - timedelta(days=40)
     rows = [
         {
@@ -277,6 +279,8 @@ def check_equity_b_absent_after_closure(account_name: str, app_client: TestClien
         max_equity_date = pd.to_datetime(equity_rows["date"]).max().date()
         today = date.today()
         closure_date = today - timedelta(days=20)
+        if closure_date.weekday() >= 5:
+            closure_date -= timedelta(days=closure_date.weekday() - 4)
         assert max_equity_date <= closure_date, (
             f"Equity B appears after closure: max date {max_equity_date}, closure {closure_date}"
         )

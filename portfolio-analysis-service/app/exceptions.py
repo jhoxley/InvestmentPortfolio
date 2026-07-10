@@ -91,6 +91,34 @@ class EmptyDateRangeError(Exception):
         super().__init__(self.message)
 
 
+class EmptyCapitalDateRangeError(Exception):
+    """Raised when a capital ledger's recorded date range contains no business days."""
+
+    def __init__(
+        self,
+        account_name: str,
+        earliest_date: date,
+        latest_date: date,
+        message: str | None = None,
+    ) -> None:
+        """Initialise with the account name and the problematic recorded date range.
+
+        Args:
+            account_name: The account being ingested.
+            earliest_date: The earliest recorded date in the capital ledger.
+            latest_date: The latest recorded date in the capital ledger.
+            message: Optional override message.
+        """
+        self.account_name = account_name
+        self.earliest_date = earliest_date
+        self.latest_date = latest_date
+        self.message = message or (
+            f"The recorded date range {earliest_date} to {latest_date} for account "
+            f"'{account_name}' contains no business days. The file cannot be processed."
+        )
+        super().__init__(self.message)
+
+
 class IdentifierMappingError(Exception):
     """Raised when one or more non-Cash sub-accounts have no usable identifier mapping entry."""
 

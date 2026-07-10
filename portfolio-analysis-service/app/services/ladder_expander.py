@@ -5,6 +5,8 @@ from typing import ClassVar
 
 import pandas as pd
 
+from app.services.business_day_expansion import expand_business_days
+
 
 class LadderExpander:
     """Expands a sparse sub-account ledger into a full daily business-day ladder.
@@ -40,29 +42,16 @@ class LadderExpander:
         end_ts = pd.bdate_range(end=today, periods=3)[-3]
         end_date = end_ts.date()
 
-        business_days = pd.bdate_range(start=min_date, end=end_date)
-        calendar_days = pd.date_range(start=min_date, end=end_date)
-
         expanded_parts: list[pd.DataFrame] = []
 
         for sub_account, group in df.groupby("sub_account", sort=False):
-            group = group.sort_values("date").set_index(
-                pd.DatetimeIndex(pd.to_datetime(group["date"]))
-            )
-            group = group[self._VALUE_COLUMNS]
-
-            # Reindex over calendar days (including weekends) so weekend activity
-            # dates are captured, then ffill across the full range.
-            reindexed = group.reindex(calendar_days).ffill()
-            # Keep only business days.
-            reindexed = reindexed.loc[reindexed.index.isin(business_days)]
-            reindexed["date"] = reindexed.index.date
+            reindexed = expand_business_days(group, self._VALUE_COLUMNS, min_date, end_date)
             reindexed["sub_account"] = sub_account
 
             if sub_account != "Cash":
                 reindexed = self._apply_closure_rule(reindexed)
 
-            expanded_parts.append(reindexed.reset_index(drop=True))
+            expanded_parts.append(reindexed)
 
         if not expanded_parts:
             return pd.DataFrame(columns=["date", "sub_account", *self._VALUE_COLUMNS])

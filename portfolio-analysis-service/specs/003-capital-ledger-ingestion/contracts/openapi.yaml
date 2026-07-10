@@ -1,0 +1,270 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Locally hosted API for portfolio analysis features. Accepts sub-account
+    ledger files (position ladder) and capital ledger files, expands each into
+    a full daily business-day series, and makes them available for retrieval.
+  version: "0.3.0"
+
+servers:
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+paths:
+  /accounts/{account_name}/capital:
+
+    post:
+      operationId: ingest_capital_ledger
+      summary: >
+        Ingest a capital ledger and expand it into a daily business-day
+        capital ledger
+      tags: [Capital]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+          description: >
+            Case-sensitive account identifier. Restricted to alphanumeric
+            characters, hyphens, and underscores; 1–64 characters.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: >
+                    XLSX file produced by the create_capital_ledger pipeline
+                    mode. Must contain columns: date, capital, income,
+                    book_value.
+      responses:
+        "201":
+          description: New capital ledger created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapitalIngestionSummary"
+              example:
+                account_name: my-portfolio
+                status: created
+                row_count: 2612
+                from_date: "2016-04-20"
+                to_date: "2026-06-01"
+                ingested_at: "2026-07-10T10:00:00Z"
+                _links:
+                  self: "/v1/accounts/my-portfolio/capital"
+                  download: "/v1/accounts/my-portfolio/capital/download"
+        "200":
+          description: >
+            File checksum matches an existing capital ledger — nothing is
+            recomputed (there is no enrichment step for this resource); the
+            response confirms the ledger is current (status "refreshed")
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapitalIngestionSummary"
+              example:
+                account_name: my-portfolio
+                status: refreshed
+                row_count: 2612
+                from_date: "2016-04-20"
+                to_date: "2026-06-01"
+                ingested_at: "2026-07-10T11:00:00Z"
+                _links:
+                  self: "/v1/accounts/my-portfolio/capital"
+                  download: "/v1/accounts/my-portfolio/capital/download"
+        "409":
+          description: >
+            A capital ledger already exists for this account with a different
+            checksum. Merging updated capital ledgers is not currently
+            supported.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: >
+            Validation failed — invalid account name, non-XLSX file, missing
+            columns, non-numeric values, or a recorded date range containing
+            no business days.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+    get:
+      operationId: get_capital_ledger_summary
+      summary: Retrieve summary of a stored capital ledger
+      tags: [Capital]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+      responses:
+        "200":
+          description: Capital ledger summary returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapitalSummary"
+        "404":
+          description: No capital ledger found for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: Invalid account name format
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+  /accounts/{account_name}/capital/download:
+
+    get:
+      operationId: download_capital_ledger
+      summary: Download the full daily capital ledger as an XLSX binary
+      tags: [Capital]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+      responses:
+        "200":
+          description: XLSX file download
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              example: attachment; filename="my-portfolio-capital.xlsx"
+        "404":
+          description: No capital ledger found for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: Invalid account name format
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+components:
+  schemas:
+
+    Links:
+      type: object
+      required: [self, download]
+      properties:
+        self:
+          type: string
+          description: URL of the summary resource
+        download:
+          type: string
+          description: URL to download the full XLSX capital ledger
+
+    CapitalIngestionSummary:
+      type: object
+      required:
+        - account_name
+        - status
+        - row_count
+        - from_date
+        - to_date
+        - ingested_at
+        - _links
+      properties:
+        account_name:
+          type: string
+        status:
+          type: string
+          enum: [created, refreshed]
+          description: >
+            'created' for a brand-new capital ledger; 'refreshed' when the
+            checksum matched an existing ledger (no recomputation occurs —
+            this resource has no enrichment step to refresh; only the
+            ingested_at timestamp is updated).
+        row_count:
+          type: integer
+          minimum: 0
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+        ingested_at:
+          type: string
+          format: date-time
+        _links:
+          $ref: "#/components/schemas/Links"
+
+    CapitalSummary:
+      type: object
+      required:
+        - account_name
+        - row_count
+        - from_date
+        - to_date
+        - ingested_at
+        - _links
+      properties:
+        account_name:
+          type: string
+        row_count:
+          type: integer
+          minimum: 0
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+        ingested_at:
+          type: string
+          format: date-time
+        _links:
+          $ref: "#/components/schemas/Links"
+
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI identifying the error type
+        title:
+          type: string
+          description: Short human-readable summary
+        status:
+          type: integer
+          description: HTTP status code
+        detail:
+          type: string
+          description: Full human-readable explanation
+        instance:
+          type: string
+          description: Request path that triggered the error

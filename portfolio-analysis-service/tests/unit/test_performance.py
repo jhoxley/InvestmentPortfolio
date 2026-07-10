@@ -134,6 +134,119 @@ class TestSC003ValidationPerformance:
         )
 
 
+def _generate_large_capital_ledger(rows: int = 5000) -> bytes:
+    """Generate a synthetic capital ledger with `rows` recorded observations.
+
+    Each row is a distinct recorded business day, matching the capital ledger's
+    "one row per date on which capital, income, or book value changed" shape.
+
+    Args:
+        rows: Number of recorded rows to generate.
+
+    Returns:
+        XLSX file contents as bytes.
+    """
+    dates = pd.bdate_range(end=date.today() - timedelta(days=200), periods=rows)
+    df = pd.DataFrame(
+        {
+            "date": dates.date,
+            "capital": [1000.0 + i for i in range(rows)],
+            "income": [float(i % 10) for i in range(rows)],
+            "book_value": [900.0 + i for i in range(rows)],
+        }
+    )
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    return buf.getvalue()
+
+
+def _capital_multipart(file_bytes: bytes) -> dict[str, tuple[str, bytes, str]]:
+    """Wrap bytes as a multipart upload dict for the capital endpoint.
+
+    Args:
+        file_bytes: XLSX content.
+
+    Returns:
+        Dict for TestClient files= parameter.
+    """
+    return {
+        "file": (
+            "capital.xlsx",
+            file_bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    }
+
+
+class TestCapitalSC001IngestionPerformance:
+    """Capital Ledger Ingestion SC-001: a 5,000-row file completes within 10 seconds."""
+
+    def test_ingestion_within_10_seconds(self, app_client: TestClient) -> None:
+        """POST a 5,000-row capital ledger; assert the round-trip completes in ≤10 s."""
+        file_bytes = _generate_large_capital_ledger(rows=5000)
+        start = time.perf_counter()
+        resp = app_client.post(
+            "/v1/accounts/capital-perf-test-sc001/capital",
+            files=_capital_multipart(file_bytes),
+        )
+        elapsed = time.perf_counter() - start
+        assert resp.status_code == 201, f"Ingestion failed: {resp.text}"
+        assert elapsed <= 10.0, f"SC-001 violated: ingestion took {elapsed:.2f}s (limit 10s)"
+
+
+class TestCapitalSC002IdempotentPerformance:
+    """Capital Ledger Ingestion SC-002: idempotent re-submit completes within 1 second."""
+
+    def test_idempotent_resubmit_within_1_second(self, app_client: TestClient) -> None:
+        """Ingest a file, then re-submit it; assert re-submit completes in ≤1 s."""
+        file_bytes = _generate_large_capital_ledger(rows=5000)
+        first = app_client.post(
+            "/v1/accounts/capital-perf-test-sc002/capital",
+            files=_capital_multipart(file_bytes),
+        )
+        assert first.status_code == 201, f"Initial ingestion failed: {first.text}"
+
+        start = time.perf_counter()
+        second = app_client.post(
+            "/v1/accounts/capital-perf-test-sc002/capital",
+            files=_capital_multipart(file_bytes),
+        )
+        elapsed = time.perf_counter() - start
+        assert second.status_code == 200, f"Re-submit failed: {second.text}"
+        assert elapsed <= 1.0, (
+            f"SC-002 violated: idempotent re-submit took {elapsed:.2f}s (limit 1s)"
+        )
+
+
+class TestCapitalSC003ValidationPerformance:
+    """Capital Ledger Ingestion SC-003: validation rejection completes within 1 second."""
+
+    def test_validation_rejection_within_1_second(self, app_client: TestClient) -> None:
+        """POST a schema-invalid capital ledger; assert rejection completes in ≤1 s."""
+        invalid_df = pd.DataFrame(
+            {
+                "date": ["not-a-date"],
+                "capital": ["x"],
+                "income": [0.0],
+                "book_value": [0.0],
+            }
+        )
+        buf = io.BytesIO()
+        invalid_df.to_excel(buf, index=False, engine="openpyxl")
+        file_bytes = buf.getvalue()
+
+        start = time.perf_counter()
+        resp = app_client.post(
+            "/v1/accounts/capital-perf-test-sc003/capital",
+            files=_capital_multipart(file_bytes),
+        )
+        elapsed = time.perf_counter() - start
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}"
+        assert elapsed <= 1.0, (
+            f"SC-003 violated: validation rejection took {elapsed:.2f}s (limit 1s)"
+        )
+
+
 class TestLadderMarketDataSC003CallVolume:
     """Ladder Market Data Enrichment SC-003.
 

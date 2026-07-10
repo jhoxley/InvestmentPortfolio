@@ -74,6 +74,8 @@ class TestEquityExcludedAfterQuantityZero:
     ) -> None:
         """An equity sub-account with quantity=0 must not appear in subsequent dates."""
         closure = today - timedelta(days=20)
+        if closure.weekday() >= 5:  # Snap to the prior business day so the recorded
+            closure -= timedelta(days=closure.weekday() - 4)  # closure event lands on a weekday.
         d1 = today - timedelta(days=40)
         df = pd.DataFrame(
             {
