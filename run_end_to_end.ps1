@@ -20,6 +20,10 @@
       Phase 5  POST each sub-account ledger XLSX to the portfolio-analysis-service
                ingestion endpoint.
 
+      Phase 6  POST each capital ledger XLSX (also produced by run_pipeline.ps1's
+               create_capital_ledger step) to the portfolio-analysis-service
+               capital ingestion endpoint.
+
     All steps are written to both the console and a timestamped log file.
     Both service processes are terminated on script exit (success or failure).
 
@@ -85,6 +89,24 @@ $SubAccountLedgers = @(
     @{
         AccountName  = "HL-ISA"
         LedgerPath   = Join-Path $InvestmentsDir "HL_ISA_SubAccount_Ledger.xlsx"
+        DisplayName  = "HL ISA"
+    }
+)
+
+# Capital ledger files produced by run_pipeline.ps1's create_capital_ledger step
+# (Step 3, for accounts with IsCapitalAccount=$true) and the account names they
+# should be registered under in the portfolio-analysis-service. Account names
+# match those used for $SubAccountLedgers above  - capital and position-ladder
+# resources are keyed by the same account_name but stored independently.
+$CapitalLedgers = @(
+    @{
+        AccountName  = "HL-SIPP"
+        LedgerPath   = Join-Path $InvestmentsDir "HL_SIPP_Capital_Ledger.xlsx"
+        DisplayName  = "HL SIPP"
+    }
+    @{
+        AccountName  = "HL-ISA"
+        LedgerPath   = Join-Path $InvestmentsDir "HL_ISA_Capital_Ledger.xlsx"
         DisplayName  = "HL ISA"
     }
 )
@@ -289,6 +311,83 @@ function Invoke-LedgerIngestion {
     return $success
 }
 
+function Invoke-CapitalLedgerIngestion {
+    <#
+    .SYNOPSIS
+        POSTs an XLSX file to POST /v1/accounts/{account}/capital.
+    .OUTPUTS
+        $true on HTTP 200/201; $false on any error.
+    #>
+    param(
+        [string] $AccountName,
+        [string] $LedgerPath,
+        [string] $DisplayName
+    )
+
+    if (-not (Test-Path $LedgerPath)) {
+        Write-Log "  Capital ledger file not found: $LedgerPath" -Level Error
+        return $false
+    }
+
+    $url = "$AnalysisBaseUrl/v1/accounts/$AccountName/capital"
+    Write-Log "  POST $url" -Level Detail
+    Write-Log "       File: $LedgerPath" -Level Detail
+
+    Add-Type -AssemblyName 'System.Net.Http' -ErrorAction SilentlyContinue
+
+    $client  = $null
+    $stream  = $null
+    $form    = $null
+    $success = $false
+
+    try {
+        $client = [System.Net.Http.HttpClient]::new()
+        $client.Timeout = [TimeSpan]::FromSeconds(120)
+
+        $form    = [System.Net.Http.MultipartFormDataContent]::new()
+        $stream  = [System.IO.File]::OpenRead($LedgerPath)
+        $content = [System.Net.Http.StreamContent]::new($stream)
+        $content.Headers.ContentType = `
+            [System.Net.Http.Headers.MediaTypeHeaderValue]::new(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        $form.Add($content, "file", [System.IO.Path]::GetFileName($LedgerPath))
+
+        $response     = $client.PostAsync($url, $form).GetAwaiter().GetResult()
+        $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        $statusCode   = [int]$response.StatusCode
+
+        if ($statusCode -eq 200) {
+            $parsed = $responseBody | ConvertFrom-Json
+            Write-Log "  ${DisplayName}: refreshed (checksum matched, ledger confirmed current)." -Level OK
+            Write-Log "  Row count: $($parsed.row_count)  From: $($parsed.from_date)  To: $($parsed.to_date)" -Level Detail
+            $success = $true
+        } elseif ($statusCode -eq 201) {
+            $parsed = $responseBody | ConvertFrom-Json
+            Write-Log "  ${DisplayName}: created successfully." -Level OK
+            Write-Log "  Row count: $($parsed.row_count)  From: $($parsed.from_date)  To: $($parsed.to_date)" -Level Detail
+            $success = $true
+        } elseif ($statusCode -eq 409) {
+            Write-Log "  ${DisplayName}: conflict (HTTP 409). A different capital ledger already exists for this account." -Level Warn
+            Write-Log "  Detail: $responseBody" -Level Detail
+            $success = $false
+        } else {
+            Write-Log "  ${DisplayName}: unexpected HTTP $statusCode." -Level Error
+            Write-Log "  Response: $responseBody" -Level Detail
+            $success = $false
+        }
+    } catch {
+        Write-Log "  ${DisplayName}: ingestion request failed: $_" -Level Error
+        $success = $false
+    } finally {
+        if ($stream)  { $stream.Dispose() }
+        if ($form)    { $form.Dispose() }
+        if ($client)  { $client.Dispose() }
+    }
+
+    return $success
+}
+
 # -- Config helpers -------------------------------------------------------------
 
 function Assert-ConfigYaml {
@@ -376,6 +475,16 @@ foreach ($ledger in $SubAccountLedgers) {
     } else {
         Write-Log "  [MISSING] $($ledger.DisplayName): $($ledger.LedgerPath)" -Level Warn
         Write-Log "  This ledger will be skipped during ingestion (Phase 5)." -Level Detail
+    }
+}
+
+Write-Log "  Verifying capital ledger files..." -Level Info
+foreach ($ledger in $CapitalLedgers) {
+    if (Test-Path $ledger.LedgerPath) {
+        Write-Log "  [FOUND] $($ledger.DisplayName): $($ledger.LedgerPath)" -Level OK
+    } else {
+        Write-Log "  [MISSING] $($ledger.DisplayName): $($ledger.LedgerPath)" -Level Warn
+        Write-Log "  This capital ledger will be skipped during ingestion (Phase 6)." -Level Detail
     }
 }
 
@@ -569,6 +678,46 @@ foreach ($ledger in $SubAccountLedgers) {
 
 Write-Log "" -Level Detail
 Write-Log "  Ingestion summary: $ingestSuccessCount succeeded, $ingestFailCount failed." -Level Info
+
+# =============================================================================
+#  Phase 6  - Ingest capital ledgers
+# =============================================================================
+
+Write-PhaseHeader 6 "Ingest Capital Ledgers"
+
+Write-Log "  Ingesting $($CapitalLedgers.Count) capital ledger(s) into portfolio-analysis-service..." -Level Info
+
+$capitalSuccessCount = 0
+$capitalFailCount    = 0
+
+foreach ($ledger in $CapitalLedgers) {
+    Write-Log "" -Level Detail
+    Write-Log "  -- $($ledger.DisplayName) -----------------------------" -Level Info
+    Write-Log "     Account : $($ledger.AccountName)" -Level Detail
+    Write-Log "     File    : $($ledger.LedgerPath)" -Level Detail
+
+    if (-not (Test-Path $ledger.LedgerPath)) {
+        Write-Log "  Capital ledger file does not exist  - skipping." -Level Warn
+        $capitalFailCount++
+        continue
+    }
+
+    $ok = Invoke-CapitalLedgerIngestion `
+        -AccountName $ledger.AccountName `
+        -LedgerPath  $ledger.LedgerPath `
+        -DisplayName $ledger.DisplayName
+
+    if ($ok) {
+        $capitalSuccessCount++
+        Write-Log "  Download: $AnalysisBaseUrl/v1/accounts/$($ledger.AccountName)/capital/download" -Level Detail
+    } else {
+        $capitalFailCount++
+        $OverallSuccess = $false
+    }
+}
+
+Write-Log "" -Level Detail
+Write-Log "  Capital ledger ingestion summary: $capitalSuccessCount succeeded, $capitalFailCount failed." -Level Info
 
 # =============================================================================
 #  Final Summary
