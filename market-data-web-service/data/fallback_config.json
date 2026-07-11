@@ -54,5 +54,13 @@
         "date_column": "Date",
         "price_column": "Close",
         "use_local_only": true
+    },
+    "zero" : {
+        "name": "Zeroes",
+        "csv_path": "./data/zero.csv",
+        "currency": "GBP",
+        "date_column": "Date",
+        "price_column": "Close",
+        "use_local_only": true
     }
 }

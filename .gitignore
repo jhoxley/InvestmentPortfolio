@@ -6,3 +6,5 @@ Data/__pycache__/*
 
 # Ignore generated cache files
 *.parquet
+
+logs/*

@@ -1,0 +1,311 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Locally hosted API for portfolio analysis features. Accepts sub-account
+    ledger files, expands them into daily position ladders, and makes them
+    available for retrieval.
+  version: "0.1.0"
+
+servers:
+  - url: http://localhost:8001/v1
+    description: Local development server
+
+paths:
+  /accounts/{account_name}/ladder:
+
+    post:
+      operationId: ingest_ladder
+      summary: Ingest a sub-account ledger and generate a daily position ladder
+      tags: [Ladder]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+          description: >
+            Case-sensitive account identifier. Restricted to alphanumeric
+            characters, hyphens, and underscores; 1–64 characters.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: >
+                    XLSX file produced by the create_subaccount_ledger pipeline
+                    mode. Must contain columns: date, sub_account, book_cost,
+                    quantity, total_income.
+      responses:
+        "201":
+          description: Ladder created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionSummary"
+              example:
+                account_name: my-portfolio
+                status: created
+                row_count: 1240
+                from_date: "2022-01-03"
+                to_date: "2026-07-03"
+                sub_accounts: ["Cash", "AAPL.L", "VWRL.L"]
+                ingested_at: "2026-07-06T10:00:00Z"
+                _links:
+                  self: "/v1/accounts/my-portfolio/ladder"
+                  download: "/v1/accounts/my-portfolio/ladder/download"
+        "200":
+          description: >
+            File checksum matches existing ladder — no reprocessing performed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionSummary"
+              example:
+                account_name: my-portfolio
+                status: unchanged
+                row_count: 1240
+                from_date: "2022-01-03"
+                to_date: "2026-07-03"
+                sub_accounts: ["Cash", "AAPL.L", "VWRL.L"]
+                ingested_at: "2026-07-06T09:00:00Z"
+                _links:
+                  self: "/v1/accounts/my-portfolio/ladder"
+                  download: "/v1/accounts/my-portfolio/ladder/download"
+        "409":
+          description: >
+            A ladder already exists for this account with a different checksum.
+            Merging updated ledgers is not currently supported.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: >
+            Validation failed — invalid account name, non-XLSX file, missing
+            columns, bad data types, or empty date range.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+    get:
+      operationId: get_ladder_summary
+      summary: Retrieve summary of a stored position ladder
+      tags: [Ladder]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+      responses:
+        "200":
+          description: Ladder summary returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LadderSummary"
+        "404":
+          description: No ladder found for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: Invalid account name format
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+  /accounts/{account_name}/ladder/download:
+
+    get:
+      operationId: download_ladder
+      summary: Download the full position ladder as an XLSX binary
+      tags: [Ladder]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+      responses:
+        "200":
+          description: XLSX file download
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              example: attachment; filename="my-portfolio-ladder.xlsx"
+        "404":
+          description: No ladder found for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: Invalid account name format
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+  /health:
+    get:
+      operationId: health_check
+      summary: Liveness check
+      tags: [Operations]
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /ready:
+    get:
+      operationId: readiness_check
+      summary: Readiness check — confirms data directory is accessible
+      tags: [Operations]
+      responses:
+        "200":
+          description: Service is ready to accept requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+        "503":
+          description: Service not ready (e.g., data directory inaccessible)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+components:
+  schemas:
+
+    Links:
+      type: object
+      required: [self, download]
+      properties:
+        self:
+          type: string
+          description: URL of the summary resource
+        download:
+          type: string
+          description: URL to download the full XLSX ladder
+
+    IngestionSummary:
+      type: object
+      required:
+        - account_name
+        - status
+        - row_count
+        - from_date
+        - to_date
+        - sub_accounts
+        - ingested_at
+        - _links
+      properties:
+        account_name:
+          type: string
+        status:
+          type: string
+          enum: [created, unchanged]
+        row_count:
+          type: integer
+          minimum: 0
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+        sub_accounts:
+          type: array
+          items:
+            type: string
+        ingested_at:
+          type: string
+          format: date-time
+        _links:
+          $ref: "#/components/schemas/Links"
+
+    LadderSummary:
+      type: object
+      required:
+        - account_name
+        - row_count
+        - from_date
+        - to_date
+        - sub_accounts
+        - ingested_at
+        - _links
+      properties:
+        account_name:
+          type: string
+        row_count:
+          type: integer
+          minimum: 0
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+        sub_accounts:
+          type: array
+          items:
+            type: string
+        ingested_at:
+          type: string
+          format: date-time
+        _links:
+          $ref: "#/components/schemas/Links"
+
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI identifying the error type
+        title:
+          type: string
+          description: Short human-readable summary
+        status:
+          type: integer
+          description: HTTP status code
+        detail:
+          type: string
+          description: Full human-readable explanation
+        instance:
+          type: string
+          description: Request path that triggered the error

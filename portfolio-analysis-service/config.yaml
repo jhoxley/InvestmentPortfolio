@@ -1,0 +1,9 @@
+data:
+  directory: ./data
+
+market_data_service:
+  base_url: http://127.0.0.1:8001
+  timeout_seconds: 30
+
+identifier_mapping:
+  path: C:/Users/jhoxl/OneDrive/Investments/InvestmentDataStatic.json

@@ -51,7 +51,10 @@ class LocalPricingProvider(PricingProvider):
                 price = float(row[self._entry.price_column])
             except (ValueError, TypeError):
                 continue
-            if price <= 0:
+            # Zero/negative values are treated as bad data from live sources (yfinance),
+            # but an explicit use_local_only fallback is trusted data and must flow through
+            # unfiltered — e.g. legitimately zero-valued instruments.
+            if price <= 0 and not self._entry.use_local_only:
                 continue
             results.append((parsed_date, price))
 
