@@ -1,0 +1,271 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Locally hosted API for portfolio analysis features. Adds a read-only account
+    time series endpoint that joins ingested capital ledgers and position ladders,
+    plus supporting metadata and account-enumeration endpoints.
+  version: "0.4.0"
+
+servers:
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+paths:
+  /accounts/{account_name}/timeseries:
+
+    get:
+      operationId: get_account_timeseries
+      summary: >
+        Retrieve a per-business-day time series of requested attributes for an
+        account, joining its ingested capital ledger and position ladder
+      tags: [Timeseries]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+        - name: attribute
+          in: query
+          required: true
+          description: >
+            Repeated parameter; at least one required. One of capital, income,
+            book_cost, market_value, pnl.
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [capital, income, book_cost, market_value, pnl]
+            minItems: 1
+          style: form
+          explode: true
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the later of the required sources' earliest recorded
+            dates. Adjusted forward to the next business day if it falls on a
+            weekend.
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the business day before today. Must not be later than
+            today. Adjusted forward to the next business day if it falls on a
+            weekend (capped at today).
+      responses:
+        "200":
+          description: Time series returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeSeriesResponse"
+              example:
+                account_name: HL-SIPP
+                attributes: [capital, market_value, pnl]
+                from_date: "2024-01-02"
+                to_date: "2024-01-10"
+                entries:
+                  - date: "2024-01-02"
+                    capital: 236634.5
+                    market_value: 240120.11
+                    pnl: 11576.44
+                _links:
+                  self: "/v1/accounts/HL-SIPP/timeseries?attribute=capital&attribute=market_value&attribute=pnl&start=2024-01-02&end=2024-01-10"
+                  attributes: "/v1/timeseries/attributes"
+                  accounts: "/v1/accounts"
+        "404":
+          description: No capital ledger or position ladder has been ingested for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: >
+            Validation failed — invalid account name, no attribute supplied, an
+            unsupported attribute name, an invalid date range, a future end date,
+            or a required source missing/insufficient for a requested attribute
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+  /timeseries/attributes:
+
+    get:
+      operationId: get_timeseries_attribute_metadata
+      summary: Describe the attributes that can be requested from the time series endpoint
+      tags: [Timeseries]
+      responses:
+        "200":
+          description: Attribute metadata returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttributeMetadataResponse"
+              example:
+                attributes:
+                  - name: capital
+                    description: The capital value on that date.
+                    source: capital_ledger
+                  - name: pnl
+                    description: income + market_value - book_cost on that date.
+                    source: "capital_ledger,position_ladder"
+                _links:
+                  self: "/v1/timeseries/attributes"
+
+  /accounts:
+
+    get:
+      operationId: list_accounts
+      summary: >
+        Enumerate every account with at least one ingested resource, and each
+        resource's earliest/latest available date
+      tags: [Accounts]
+      responses:
+        "200":
+          description: Accounts returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountsResponse"
+              example:
+                accounts:
+                  - account_name: HL-SIPP
+                    capital_ledger: { from_date: "2016-04-20", to_date: "2026-06-01" }
+                    position_ladder: { from_date: "2016-04-20", to_date: "2026-07-08" }
+                  - account_name: capital-only-portfolio
+                    capital_ledger: { from_date: "2020-01-02", to_date: "2020-06-01" }
+                    position_ladder: null
+                _links:
+                  self: "/v1/accounts"
+
+components:
+  schemas:
+
+    TimeSeriesEntry:
+      type: object
+      required: [date]
+      properties:
+        date:
+          type: string
+          format: date
+      additionalProperties:
+        type: number
+        format: float
+      description: >
+        Additional properties are the requested attribute values (e.g. `capital`,
+        `market_value`) — only requested attributes appear on each entry.
+
+    TimeSeriesResponse:
+      type: object
+      required: [account_name, attributes, from_date, to_date, entries, _links]
+      properties:
+        account_name:
+          type: string
+        attributes:
+          type: array
+          items:
+            type: string
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSeriesEntry"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    AttributeDefinition:
+      type: object
+      required: [name, description, source]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        source:
+          type: string
+
+    AttributeMetadataResponse:
+      type: object
+      required: [attributes, _links]
+      properties:
+        attributes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttributeDefinition"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    AccountResourceRange:
+      type: object
+      required: [from_date, to_date]
+      properties:
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+
+    AccountSummary:
+      type: object
+      required: [account_name]
+      properties:
+        account_name:
+          type: string
+        capital_ledger:
+          oneOf:
+            - $ref: "#/components/schemas/AccountResourceRange"
+            - type: "null"
+        position_ladder:
+          oneOf:
+            - $ref: "#/components/schemas/AccountResourceRange"
+            - type: "null"
+
+    AccountsResponse:
+      type: object
+      required: [accounts, _links]
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountSummary"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string

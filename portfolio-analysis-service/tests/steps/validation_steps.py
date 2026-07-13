@@ -1,11 +1,11 @@
 """BDD step implementations for validation.feature (edge cases and error paths)."""
 
 import io
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 from fastapi.testclient import TestClient
-from pytest_bdd import parsers, scenarios, then, when
+from pytest_bdd import given, parsers, scenarios, then, when
 
 scenarios("validation.feature")
 
@@ -285,3 +285,124 @@ def upload_capital_saturday_only(account_name: str, app_client: TestClient) -> o
         f"/v1/accounts/{account_name}/capital",
         files=_multipart(_xlsx_bytes(df)),
     )
+
+
+# ---------------------------------------------------------------------------
+# Timeseries endpoint edge cases
+# ---------------------------------------------------------------------------
+
+
+def _val_ledger_bytes(earliest: date) -> bytes:
+    """Build a minimal valid sub-account ledger XLSX starting well in the past.
+
+    Args:
+        earliest: The earliest activity date to record.
+
+    Returns:
+        Raw XLSX bytes.
+    """
+    df = pd.DataFrame(
+        {
+            "date": [earliest],
+            "sub_account": ["Cash"],
+            "book_cost": [1000.0],
+            "quantity": [1000.0],
+            "total_income": [0.0],
+        }
+    )
+    return _xlsx_bytes(df)
+
+
+def _val_capital_bytes() -> bytes:
+    """Build a minimal valid capital ledger XLSX with a single recorded observation.
+
+    Returns:
+        Raw XLSX bytes.
+    """
+    return _xlsx_bytes(
+        pd.DataFrame(
+            {
+                "date": [date(2020, 1, 2)],
+                "capital": [1000.0],
+                "income": [0.0],
+                "book_value": [900.0],
+            }
+        )
+    )
+
+
+@given(parsers.parse('account "{account_name}" has only a position ladder ingested for validation'))
+def val_ladder_only_account(account_name: str, app_client: TestClient) -> None:
+    """Ingest only a position ladder for the given account."""
+    resp = app_client.post(
+        f"/v1/accounts/{account_name}/ladder",
+        files=_multipart(_val_ledger_bytes(date.today() - timedelta(days=365 * 5))),
+    )
+    assert resp.status_code == 201, f"Ladder setup failed: {resp.text}"
+
+
+@given(parsers.parse('account "{account_name}" has an ingested capital ledger for validation'))
+def val_capital_only_account(account_name: str, app_client: TestClient) -> None:
+    """Ingest only a capital ledger for the given account."""
+    resp = app_client.post(
+        f"/v1/accounts/{account_name}/capital",
+        files=_multipart(_val_capital_bytes()),
+    )
+    assert resp.status_code == 201, f"Capital setup failed: {resp.text}"
+
+
+@when(
+    parsers.parse(
+        'a timeseries request is made for attribute "{attribute}" for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def request_timeseries_attribute(
+    attribute: str, account_name: str, app_client: TestClient
+) -> object:
+    """GET the timeseries endpoint for a single attribute, no date range."""
+    return app_client.get(
+        f"/v1/accounts/{account_name}/timeseries", params=[("attribute", attribute)]
+    )
+
+
+@when(
+    parsers.parse(
+        'a timeseries request is made for attribute "{attribute}" with start "{start}" and '
+        'end "{end}" for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def request_timeseries_attribute_with_start_end(
+    attribute: str, start: str, end: str, account_name: str, app_client: TestClient
+) -> object:
+    """GET the timeseries endpoint for a single attribute with an explicit start/end date."""
+    return app_client.get(
+        f"/v1/accounts/{account_name}/timeseries",
+        params=[("attribute", attribute), ("start", start), ("end", end)],
+    )
+
+
+@when(
+    parsers.parse(
+        'a timeseries request is made for attribute "{attribute}" starting "{start}" '
+        'for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def request_timeseries_attribute_with_start(
+    attribute: str, start: str, account_name: str, app_client: TestClient
+) -> object:
+    """GET the timeseries endpoint for a single attribute with an explicit start date."""
+    return app_client.get(
+        f"/v1/accounts/{account_name}/timeseries",
+        params=[("attribute", attribute), ("start", start)],
+    )
+
+
+@then(parsers.parse("the timeseries response contains exactly {count:d} entry"))
+@then(parsers.parse("the timeseries response contains exactly {count:d} entries"))
+def check_timeseries_entry_count(val_response: object, count: int) -> None:
+    """Assert the timeseries response contains exactly the given number of entries."""
+    entries = val_response.json()["entries"]
+    assert len(entries) == count, f"Expected {count} entries, got {len(entries)}"

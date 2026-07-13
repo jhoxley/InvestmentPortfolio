@@ -10,18 +10,23 @@ import structlog.contextvars
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.api import capital, health, ladder
+from app.api import accounts, capital, health, ladder, timeseries
 from app.config import get_settings
 from app.exceptions import (
     AccountNotFoundError,
     EmptyCapitalDateRangeError,
     EmptyDateRangeError,
+    FutureEndDateError,
     IdentifierMappingError,
     InvalidAccountNameError,
+    InvalidDateRangeError,
     MarketDataServiceError,
     MergeNotSupportedError,
+    MissingRequiredSourceError,
+    NoAttributesRequestedError,
     PriceCoverageError,
     SchemaValidationError,
+    UnsupportedAttributeError,
 )
 from app.logging_config import setup_logging
 from app.models.ladder import ProblemDetail
@@ -56,6 +61,8 @@ app = FastAPI(
 
 app.include_router(ladder.router)
 app.include_router(capital.router)
+app.include_router(timeseries.router)
+app.include_router(accounts.router)
 app.include_router(health.router)
 
 
@@ -271,6 +278,93 @@ async def price_coverage_error_handler(request: Request, exc: PriceCoverageError
         detail=exc.message,
     )
     return _problem(request, 422, "price-coverage-failed", "Price Coverage Failed", exc.message)
+
+
+@app.exception_handler(NoAttributesRequestedError)
+async def no_attributes_requested_handler(
+    request: Request, exc: NoAttributesRequestedError
+) -> JSONResponse:
+    """Handle NoAttributesRequestedError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning("no_attributes_requested", detail=exc.message)
+    return _problem(request, 422, "no-attributes-requested", "No Attributes Requested", exc.message)
+
+
+@app.exception_handler(UnsupportedAttributeError)
+async def unsupported_attribute_handler(
+    request: Request, exc: UnsupportedAttributeError
+) -> JSONResponse:
+    """Handle UnsupportedAttributeError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning("unsupported_attribute", requested=exc.requested, detail=exc.message)
+    return _problem(request, 422, "unsupported-attribute", "Unsupported Attribute", exc.message)
+
+
+@app.exception_handler(FutureEndDateError)
+async def future_end_date_handler(request: Request, exc: FutureEndDateError) -> JSONResponse:
+    """Handle FutureEndDateError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning("future_end_date", end=str(exc.end), today=str(exc.today), detail=exc.message)
+    return _problem(request, 422, "future-end-date", "Future End Date", exc.message)
+
+
+@app.exception_handler(InvalidDateRangeError)
+async def invalid_date_range_handler(request: Request, exc: InvalidDateRangeError) -> JSONResponse:
+    """Handle InvalidDateRangeError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning("invalid_date_range", start=str(exc.start), end=str(exc.end), detail=exc.message)
+    return _problem(request, 422, "invalid-date-range", "Invalid Date Range", exc.message)
+
+
+@app.exception_handler(MissingRequiredSourceError)
+async def missing_required_source_handler(
+    request: Request, exc: MissingRequiredSourceError
+) -> JSONResponse:
+    """Handle MissingRequiredSourceError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning(
+        "missing_required_source",
+        account_name=exc.account_name,
+        attribute=exc.attribute,
+        source=exc.source,
+        detail=exc.message,
+    )
+    return _problem(request, 422, "missing-required-source", "Missing Required Source", exc.message)
 
 
 @app.exception_handler(MarketDataServiceError)

@@ -275,3 +275,114 @@ class TestLadderMarketDataSC003CallVolume:
             calls = fake_market_data_service.calls_for(f"Equity-{i}")
             assert len(calls) == 1, f"Expected exactly 1 call for 'Equity-{i}', got {len(calls)}"
         assert fake_market_data_service.calls_for("Cash") == []
+
+
+def _generate_multi_year_capital_ledger(years: int = 10) -> bytes:
+    """Generate a sparse capital ledger spanning `years` years back from today.
+
+    Args:
+        years: Number of years of history to generate (one row per month, enough
+            to seed forward-fill across the full ~2,600 business day range).
+
+    Returns:
+        XLSX file contents as bytes.
+    """
+    end = date.today() - timedelta(days=200)
+    start = end - timedelta(days=365 * years)
+    dates = pd.bdate_range(start=start, end=end, freq="MS")
+    df = pd.DataFrame(
+        {
+            "date": dates.date,
+            "capital": [1000.0 + i for i in range(len(dates))],
+            "income": [float(i % 10) for i in range(len(dates))],
+            "book_value": [900.0 + i for i in range(len(dates))],
+        }
+    )
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    return buf.getvalue()
+
+
+def _generate_multi_year_ladder(years: int = 10) -> bytes:
+    """Generate a sparse position ladder spanning `years` years back from today.
+
+    Args:
+        years: Number of years of history to generate (one row per month per
+            sub-account, enough to seed forward-fill across the full range).
+
+    Returns:
+        XLSX file contents as bytes.
+    """
+    end = date.today() - timedelta(days=200)
+    start = end - timedelta(days=365 * years)
+    dates = pd.bdate_range(start=start, end=end, freq="MS")
+    records = []
+    for sa in ["Equity-A", "Cash"]:
+        for i, d in enumerate(dates.date):
+            records.append(
+                {
+                    "date": d,
+                    "sub_account": sa,
+                    "book_cost": 1000.0 + i,
+                    "quantity": 10.0,
+                    "total_income": float(i),
+                }
+            )
+    df = pd.DataFrame(records)
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    return buf.getvalue()
+
+
+class TestTimeseriesSC001MultiYearPerformance:
+    """Account Timeseries API SC-001: a ~2,600 business day request completes within 5 seconds."""
+
+    def test_multi_year_timeseries_within_5_seconds(self, app_client: TestClient) -> None:
+        """GET a 10-year capital+ladder joined time series; assert completion in ≤5 s."""
+        account_name = "perf-test-timeseries-sc001"
+        capital_resp = app_client.post(
+            f"/v1/accounts/{account_name}/capital",
+            files=_capital_multipart(_generate_multi_year_capital_ledger(years=10)),
+        )
+        assert capital_resp.status_code == 201, f"Capital setup failed: {capital_resp.text}"
+        ladder_resp = app_client.post(
+            f"/v1/accounts/{account_name}/ladder",
+            files=_multipart(_generate_multi_year_ladder(years=10)),
+        )
+        assert ladder_resp.status_code == 201, f"Ladder setup failed: {ladder_resp.text}"
+
+        start = time.perf_counter()
+        resp = app_client.get(
+            f"/v1/accounts/{account_name}/timeseries",
+            params=[
+                ("attribute", "capital"),
+                ("attribute", "market_value"),
+                ("attribute", "pnl"),
+            ],
+        )
+        elapsed = time.perf_counter() - start
+        assert resp.status_code == 200, f"Timeseries request failed: {resp.text}"
+        assert len(resp.json()["entries"]) >= 2500, "Expected ~10 years of business day entries"
+        assert elapsed <= 5.0, f"SC-001 violated: timeseries took {elapsed:.2f}s (limit 5s)"
+
+
+class TestTimeseriesSC003RejectionPerformance:
+    """Account Timeseries API SC-003: an unsupported attribute is rejected within 1 second."""
+
+    def test_unsupported_attribute_rejected_within_1_second(self, app_client: TestClient) -> None:
+        """GET with an unsupported attribute name; assert rejection completes in ≤1 s."""
+        account_name = "perf-test-timeseries-sc003"
+        resp = app_client.post(
+            f"/v1/accounts/{account_name}/capital",
+            files=_capital_multipart(_generate_multi_year_capital_ledger(years=1)),
+        )
+        assert resp.status_code == 201, f"Capital setup failed: {resp.text}"
+
+        start = time.perf_counter()
+        rejection = app_client.get(
+            f"/v1/accounts/{account_name}/timeseries",
+            params=[("attribute", "not_a_real_attribute")],
+        )
+        elapsed = time.perf_counter() - start
+        assert rejection.status_code == 422, f"Expected 422, got {rejection.status_code}"
+        assert elapsed <= 1.0, f"SC-003 violated: rejection took {elapsed:.2f}s (limit 1s)"

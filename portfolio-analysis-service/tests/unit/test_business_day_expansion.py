@@ -84,3 +84,17 @@ class TestReindexesOverFullCalendarRangeBeforeFiltering:
         monday_row = result[result["date"] == monday]
         assert len(monday_row) == 1
         assert monday_row.iloc[0]["value"] == 100.0
+
+
+class TestForwardFillsWhenStartIsEntirelyAfterLastRecordedDate:
+    """A stale source (no rows anywhere inside [start, end]) still forward-fills, not nulls."""
+
+    def test_forward_fills_when_start_is_entirely_after_last_recorded_date(self) -> None:
+        """The last known value seeds forward-fill even when it predates the requested start."""
+        last_recorded = date(2024, 1, 2)  # Tuesday
+        start = date(2024, 2, 5)  # Monday, well after last_recorded
+        end = date(2024, 2, 7)  # Wednesday
+        df = pd.DataFrame({"date": [last_recorded], "value": [100.0]})
+        result = expand_business_days(df, ["value"], start, end)
+        assert len(result) == 3
+        assert (result["value"] == 100.0).all()

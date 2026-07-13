@@ -80,3 +80,37 @@ Feature: Input Validation
     When a capital XLSX whose only recorded date is a Saturday is uploaded for account "valid-account"
     Then the validation response status is 422
     And the response is a problem detail with type "empty-capital-date-range"
+
+  @validation
+  Scenario: Requesting market_value on an account with only a position ladder succeeds
+    Given account "ts-ladder-only-val" has only a position ladder ingested for validation
+    When a timeseries request is made for attribute "market_value" for account "ts-ladder-only-val"
+    Then the validation response status is 200
+
+  @validation
+  Scenario: A start date earlier than the required source's earliest recorded date is rejected
+    Given account "ts-early-start-val" has an ingested capital ledger for validation
+    When a timeseries request is made for attribute "capital" starting "2000-01-01" for account "ts-early-start-val"
+    Then the validation response status is 422
+    And the response is a problem detail with type "missing-required-source"
+
+  @validation
+  Scenario: Requesting pnl with only the capital ledger ingested is rejected
+    Given account "ts-pnl-one-source-val" has an ingested capital ledger for validation
+    When a timeseries request is made for attribute "pnl" for account "ts-pnl-one-source-val"
+    Then the validation response status is 422
+    And the response is a problem detail with type "missing-required-source"
+
+  @validation
+  Scenario: An unsupported attribute name is rejected
+    Given account "ts-unsupported-attr-val" has an ingested capital ledger for validation
+    When a timeseries request is made for attribute "bogus_attribute" for account "ts-unsupported-attr-val"
+    Then the validation response status is 422
+    And the response is a problem detail with type "unsupported-attribute"
+
+  @validation
+  Scenario: A single business day request succeeds with exactly one entry
+    Given account "ts-single-day-val" has an ingested capital ledger for validation
+    When a timeseries request is made for attribute "capital" with start "2020-01-02" and end "2020-01-02" for account "ts-single-day-val"
+    Then the validation response status is 200
+    And the timeseries response contains exactly 1 entry
