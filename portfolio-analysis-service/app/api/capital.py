@@ -1,58 +1,28 @@
 """API router for capital ledger ingestion and retrieval endpoints."""
 
-import re
 from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.config import Settings, get_settings
-from app.exceptions import AccountNotFoundError, InvalidAccountNameError
+from app.api.dependencies import get_capital_repository
+from app.exceptions import AccountNotFoundError
 from app.models.capital import CapitalIngestionSummary, CapitalSummary
 from app.models.ladder import Links
 from app.repositories.capital_repository import CapitalRepository
 from app.services.capital_ingestion_service import CapitalIngestionService
 from app.services.capital_ledger_expander import CapitalLedgerExpander
+from app.validators.account_name import validate_account_name
 from app.validators.capital_ledger import CapitalLedgerValidator
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/accounts", tags=["Capital"])
 
-_ACCOUNT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-
-
-def _validate_account_name(account_name: str) -> None:
-    """Raise InvalidAccountNameError if the account name does not match the allowed pattern.
-
-    Args:
-        account_name: The account identifier to validate.
-
-    Raises:
-        InvalidAccountNameError: If the name contains illegal characters or exceeds 64 chars.
-    """
-    if not _ACCOUNT_NAME_PATTERN.match(account_name):
-        raise InvalidAccountNameError(
-            account_name=account_name,
-            pattern=_ACCOUNT_NAME_PATTERN.pattern,
-        )
-
-
-def _get_capital_repository(settings: Settings = Depends(get_settings)) -> CapitalRepository:
-    """Dependency that returns a CapitalRepository bound to the configured data directory.
-
-    Args:
-        settings: Application settings (injected by FastAPI).
-
-    Returns:
-        CapitalRepository instance.
-    """
-    return CapitalRepository(data_dir=settings.data.directory)
-
 
 def _get_capital_ingestion_service(
-    repository: CapitalRepository = Depends(_get_capital_repository),
+    repository: CapitalRepository = Depends(get_capital_repository),
 ) -> CapitalIngestionService:
     """Dependency that returns a wired CapitalIngestionService.
 
@@ -109,7 +79,7 @@ async def ingest_capital_ledger(
         EmptyCapitalDateRangeError: Recorded date range contains no business days.
         MergeNotSupportedError: A different file was submitted for an existing account.
     """
-    _validate_account_name(account_name)
+    validate_account_name(account_name)
     file_bytes = await file.read()
     summary = service.ingest(account_name=account_name, file_bytes=file_bytes)
     status_code = 201 if summary.status == "created" else 200
@@ -127,7 +97,7 @@ async def ingest_capital_ledger(
 )
 async def get_capital_ledger_summary(
     account_name: str,
-    repository: CapitalRepository = Depends(_get_capital_repository),
+    repository: CapitalRepository = Depends(get_capital_repository),
 ) -> JSONResponse:
     """Return a JSON summary of a previously ingested capital ledger.
 
@@ -142,7 +112,7 @@ async def get_capital_ledger_summary(
         InvalidAccountNameError: Account name fails pattern check.
         AccountNotFoundError: No capital ledger has been stored for this account.
     """
-    _validate_account_name(account_name)
+    validate_account_name(account_name)
     if not repository.exists(account_name):
         raise AccountNotFoundError(
             account_name=account_name,
@@ -174,7 +144,7 @@ async def get_capital_ledger_summary(
 )
 async def download_capital_ledger(
     account_name: str,
-    repository: CapitalRepository = Depends(_get_capital_repository),
+    repository: CapitalRepository = Depends(get_capital_repository),
 ) -> FileResponse:
     """Return the stored capital ledger XLSX file as a binary download.
 
@@ -190,7 +160,7 @@ async def download_capital_ledger(
         InvalidAccountNameError: Account name fails pattern check.
         AccountNotFoundError: No capital ledger has been stored for this account.
     """
-    _validate_account_name(account_name)
+    validate_account_name(account_name)
     if not repository.exists(account_name):
         raise AccountNotFoundError(
             account_name=account_name,

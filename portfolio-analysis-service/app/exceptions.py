@@ -170,6 +170,102 @@ class PriceCoverageError(Exception):
         super().__init__(self.message)
 
 
+class NoAttributesRequestedError(Exception):
+    """Raised when a time series request specifies zero attributes."""
+
+    def __init__(self, message: str | None = None) -> None:
+        """Initialise with a default or overridden message.
+
+        Args:
+            message: Optional override message.
+        """
+        self.message = message or "At least one attribute must be requested."
+        super().__init__(self.message)
+
+
+class UnsupportedAttributeError(Exception):
+    """Raised when one or more requested attribute names aren't in the supported set."""
+
+    def __init__(
+        self, requested: list[str], supported: list[str], message: str | None = None
+    ) -> None:
+        """Initialise with the invalid attribute names and the supported set.
+
+        Args:
+            requested: The attribute names that aren't supported.
+            supported: The full set of supported attribute names.
+            message: Optional override message.
+        """
+        self.requested = requested
+        self.supported = supported
+        invalid = ", ".join(f"'{name}'" for name in requested)
+        valid = ", ".join(f"'{name}'" for name in supported)
+        self.message = message or (
+            f"Unsupported attribute(s): {invalid}. Supported attributes are: {valid}."
+        )
+        super().__init__(self.message)
+
+
+class FutureEndDateError(Exception):
+    """Raised when a supplied end date is later than today."""
+
+    def __init__(self, end: date, today: date, message: str | None = None) -> None:
+        """Initialise with the supplied end date and today's date.
+
+        Args:
+            end: The supplied end date.
+            today: The current date.
+            message: Optional override message.
+        """
+        self.end = end
+        self.today = today
+        self.message = message or (
+            f"End date {end} is later than today ({today}). The end date must not be in the future."
+        )
+        super().__init__(self.message)
+
+
+class InvalidDateRangeError(Exception):
+    """Raised when the resolved start date is after the resolved end date."""
+
+    def __init__(self, start: date, end: date, message: str | None = None) -> None:
+        """Initialise with the resolved start and end dates.
+
+        Args:
+            start: The resolved start date.
+            end: The resolved end date.
+            message: Optional override message.
+        """
+        self.start = start
+        self.end = end
+        self.message = message or (f"Resolved start date {start} is after resolved end date {end}.")
+        super().__init__(self.message)
+
+
+class MissingRequiredSourceError(Exception):
+    """Raised when a requested attribute's required source is missing or insufficient."""
+
+    def __init__(
+        self, account_name: str, attribute: str, source: str, message: str | None = None
+    ) -> None:
+        """Initialise with the account, attribute, and source that could not be satisfied.
+
+        Args:
+            account_name: The account being queried.
+            attribute: The requested attribute that could not be computed.
+            source: The required source ('capital_ledger' or 'position_ladder').
+            message: Optional override message.
+        """
+        self.account_name = account_name
+        self.attribute = attribute
+        self.source = source
+        self.message = message or (
+            f"Attribute '{attribute}' requires {source}, which is unavailable or "
+            f"insufficient for account '{account_name}'."
+        )
+        super().__init__(self.message)
+
+
 class MarketDataServiceError(Exception):
     """Raised when a market-data-service request fails (network error, non-2xx, timeout)."""
 

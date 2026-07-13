@@ -167,3 +167,38 @@ class LadderRepository:
         if not path.exists():
             raise FileNotFoundError(f"No ladder file found for account '{account_name}'")
         return path
+
+    def read_full_df(self, account_name: str) -> pd.DataFrame:
+        """Read back the stored ladder with every column, including enrichment columns.
+
+        Unlike read_ladder_df (which deliberately drops price/market_value/
+        portfolio_weight for the refresh path), this returns the full stored ladder —
+        used by the time series endpoint, which needs market_value.
+
+        Args:
+            account_name: The account identifier.
+
+        Returns:
+            DataFrame with all stored columns.
+
+        Raises:
+            FileNotFoundError: If no ladder file exists for the account.
+        """
+        path = self._ladder_path(account_name)
+        if not path.exists():
+            raise FileNotFoundError(f"No ladder file found for account '{account_name}'")
+        return pd.read_excel(path, engine="openpyxl")
+
+    def list_accounts(self) -> list[str]:
+        """List every account name with a stored position ladder.
+
+        Returns:
+            Account names (subdirectory names of data_dir) containing a meta.json.
+        """
+        if not self._data_dir.exists():
+            return []
+        return [
+            child.name
+            for child in self._data_dir.iterdir()
+            if child.is_dir() and (child / "meta.json").exists()
+        ]

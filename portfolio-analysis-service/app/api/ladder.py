@@ -1,6 +1,5 @@
 """API router for position ladder ingestion and retrieval endpoints."""
 
-import re
 from datetime import date
 from pathlib import Path
 
@@ -8,48 +7,20 @@ import structlog
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
+from app.api.dependencies import get_ladder_repository
 from app.clients.market_data_client import HttpMarketDataClient, MarketDataClient
 from app.config import Settings, get_settings
-from app.exceptions import AccountNotFoundError, InvalidAccountNameError
+from app.exceptions import AccountNotFoundError
 from app.models.ladder import IngestionSummary, LadderSummary, Links
 from app.repositories.identifier_mapping_repository import IdentifierMappingRepository
 from app.repositories.ladder_repository import LadderRepository
 from app.services.ingestion_service import IngestionService
 from app.services.pricing_enrichment_service import PricingEnrichmentService
+from app.validators.account_name import validate_account_name
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/accounts", tags=["Ladder"])
-
-_ACCOUNT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-
-
-def _validate_account_name(account_name: str) -> None:
-    """Raise InvalidAccountNameError if the account name does not match the allowed pattern.
-
-    Args:
-        account_name: The account identifier to validate.
-
-    Raises:
-        InvalidAccountNameError: If the name contains illegal characters or exceeds 64 chars.
-    """
-    if not _ACCOUNT_NAME_PATTERN.match(account_name):
-        raise InvalidAccountNameError(
-            account_name=account_name,
-            pattern=_ACCOUNT_NAME_PATTERN.pattern,
-        )
-
-
-def _get_repository(settings: Settings = Depends(get_settings)) -> LadderRepository:
-    """Dependency that returns a LadderRepository bound to the configured data directory.
-
-    Args:
-        settings: Application settings (injected by FastAPI).
-
-    Returns:
-        LadderRepository instance.
-    """
-    return LadderRepository(data_dir=settings.data.directory)
 
 
 def _get_identifier_mapping_repository(
@@ -100,7 +71,7 @@ def _get_pricing_enrichment_service(
 
 
 def _get_ingestion_service(
-    repository: LadderRepository = Depends(_get_repository),
+    repository: LadderRepository = Depends(get_ladder_repository),
     enrichment_service: PricingEnrichmentService = Depends(_get_pricing_enrichment_service),
 ) -> IngestionService:
     """Dependency that returns a wired IngestionService.
@@ -157,7 +128,7 @@ async def ingest_ladder(
         EmptyDateRangeError: Expansion range contains no business days.
         MergeNotSupportedError: A different file was submitted for an existing account.
     """
-    _validate_account_name(account_name)
+    validate_account_name(account_name)
     file_bytes = await file.read()
     today = date.today()
     summary = service.ingest(account_name=account_name, file_bytes=file_bytes, today=today)
@@ -176,7 +147,7 @@ async def ingest_ladder(
 )
 async def get_ladder_summary(
     account_name: str,
-    repository: LadderRepository = Depends(_get_repository),
+    repository: LadderRepository = Depends(get_ladder_repository),
 ) -> JSONResponse:
     """Return a JSON summary of a previously ingested position ladder.
 
@@ -191,7 +162,7 @@ async def get_ladder_summary(
         InvalidAccountNameError: Account name fails pattern check.
         AccountNotFoundError: No ladder has been stored for this account.
     """
-    _validate_account_name(account_name)
+    validate_account_name(account_name)
     if not repository.exists(account_name):
         raise AccountNotFoundError(account_name=account_name)
     meta = repository.read_meta(account_name)
@@ -221,7 +192,7 @@ async def get_ladder_summary(
 )
 async def download_ladder(
     account_name: str,
-    repository: LadderRepository = Depends(_get_repository),
+    repository: LadderRepository = Depends(get_ladder_repository),
 ) -> FileResponse:
     """Return the stored position ladder XLSX file as a binary download.
 
@@ -237,7 +208,7 @@ async def download_ladder(
         InvalidAccountNameError: Account name fails pattern check.
         AccountNotFoundError: No ladder has been stored for this account.
     """
-    _validate_account_name(account_name)
+    validate_account_name(account_name)
     if not repository.exists(account_name):
         raise AccountNotFoundError(account_name=account_name)
     xlsx_path: Path = repository.read_xlsx(account_name)

@@ -162,3 +162,35 @@ class CapitalRepository:
         if not path.exists():
             raise FileNotFoundError(f"No capital ledger file found for account '{account_name}'")
         return path
+
+    def read_df(self, account_name: str) -> pd.DataFrame:
+        """Read back the stored capital ledger as a DataFrame.
+
+        Args:
+            account_name: The account identifier.
+
+        Returns:
+            DataFrame with columns [date, capital, income, book_value].
+
+        Raises:
+            FileNotFoundError: If no capital ledger file exists for the account.
+        """
+        path = self._xlsx_path(account_name)
+        if not path.exists():
+            raise FileNotFoundError(f"No capital ledger file found for account '{account_name}'")
+        df = pd.read_excel(path, engine="openpyxl")
+        return df[["date", "capital", "income", "book_value"]]
+
+    def list_accounts(self) -> list[str]:
+        """List every account name with a stored capital ledger.
+
+        Returns:
+            Account names (subdirectory names of data_dir) containing a capital_meta.json.
+        """
+        if not self._data_dir.exists():
+            return []
+        return [
+            child.name
+            for child in self._data_dir.iterdir()
+            if child.is_dir() and (child / "capital_meta.json").exists()
+        ]
