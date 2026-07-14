@@ -5,6 +5,14 @@
 **Status**: Draft
 **Input**: User description: "Create a template Python 'dash' app as the core container and UI for this project. All code should be in Python. There should be a standard header detailing this to be a "Investment Portfolio Browser", a standard footer that details the software version and date of last publication. The main content body should have a left-hand menu structure taking no more than 20% of the width of the display and a content body taking the remaining space. This content body should have a section at the top for key parameters and controls that apply to all charts, tables and text below it. For this initial feature placeholders can be inserted for these elements and a subsequent feature will add real data and charts."
 
+## Clarifications
+
+### Session 2026-07-13
+
+- Q: Which navigation section should be selected by default when the app first loads? → A: "Overview" is the default selected section on load.
+- Q: Is there a formal accessibility conformance requirement for this feature? → A: Baseline accessibility expected (keyboard-navigable, semantic markup, adequate color contrast); no formal WCAG level target yet.
+- Q: How should the left-hand navigation menu behave at narrower (tablet) viewport widths? → A: Sidebar stays always-visible and shrinks proportionally (still ≤20% width); text/icons may wrap or truncate rather than the sidebar collapsing behind a toggle.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - View the persistent application shell (Priority: P1)
@@ -56,9 +64,9 @@ footer, and navigation menu remain unchanged.
 
 **Acceptance Scenarios**:
 
-1. **Given** the app is loaded with a default section selected, **When** the
-   user clicks a different navigation item, **Then** the main content area
-   updates to show that section's placeholder content.
+1. **Given** the app is loaded with "Overview" selected by default,
+   **When** the user clicks a different navigation item, **Then** the main
+   content area updates to show that section's placeholder content.
 2. **Given** the user has navigated to a non-default section, **When** the
    user views the header, footer, and navigation menu, **Then** they remain
    visible and unchanged.
@@ -92,7 +100,9 @@ date.
 ### Edge Cases
 
 - What happens when the browser viewport is narrower (tablet width)? The
-  layout MUST remain usable — the navigation menu and content area must not
+  navigation menu MUST remain always-visible (no collapsing behind a
+  toggle) and shrink proportionally, staying within its 20% width budget;
+  its text/icons may wrap or truncate. The menu and content area must not
   overlap or clip content.
 - How does the system handle a missing/unset version or publish-date value?
   It MUST show a clear fallback (e.g. "unknown") rather than a blank or
@@ -118,13 +128,23 @@ date.
 - **FR-006**: All content in the parameters/controls section and the main
   content body MUST be placeholder content in this feature; no live
   portfolio data is displayed.
-- **FR-007**: The navigation menu MUST offer multiple selectable sections;
-  selecting a section MUST update the main content area's placeholder
-  content to reflect that selection.
+- **FR-007**: The navigation menu MUST offer multiple selectable sections,
+  with "Overview" selected by default on first load; selecting a section
+  MUST update the main content area's placeholder content to reflect that
+  selection.
 - **FR-008**: The header, footer, and navigation menu MUST remain visible
   and unchanged when the user switches between navigation sections.
 - **FR-009**: The layout MUST remain usable (readable, no clipped or
-  overlapping content) at common desktop and tablet viewport widths.
+  overlapping content) at common desktop and tablet viewport widths; the
+  navigation menu MUST stay always-visible and shrink proportionally
+  (remaining within its 20% width budget) rather than collapsing behind a
+  toggle at narrower widths.
+- **FR-010**: The header, footer, navigation menu, and parameters/controls
+  section MUST meet baseline accessibility expectations: full keyboard
+  operability (no mouse-only interactions), semantic markup (proper heading
+  levels, landmark regions, labeled controls), and text/background color
+  contrast sufficient for readability. A specific WCAG conformance level is
+  not required for this feature.
 
 ### Key Entities
 
@@ -139,16 +159,17 @@ date.
 
 ### Measurable Outcomes
 
-- **SC-001**: A user can identify the application's name/purpose
-  immediately upon page load, with the header visible without scrolling.
+- **SC-001**: A user can identify the application's name/purpose within 1
+  second of the page load completing, with the header visible without
+  scrolling.
 - **SC-002**: The navigation menu is visually distinguishable from the
   content area at a glance and never exceeds one-fifth of the screen width
   on a desktop viewport.
 - **SC-003**: 100% of navigation menu selections update the content area
   without a full page reload or loss of header/footer/menu state.
 - **SC-004**: A user can locate the software version and last-published
-  date in a single glance at the footer, without scrolling or navigating
-  away from their current section.
+  date by looking at the footer, without scrolling, navigating away from
+  their current section, or waiting more than 1 second after page load.
 
 ## Assumptions
 
