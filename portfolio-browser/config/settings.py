@@ -15,3 +15,8 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8050
     debug: bool = False
+
+    # Backing service URLs (market-data-web-service, portfolio-analysis-service).
+    # Defaults match run_end_to_end.ps1's port assignments for local development.
+    market_data_service_url: str = "http://127.0.0.1:8001"
+    portfolio_analysis_service_url: str = "http://127.0.0.1:8000"

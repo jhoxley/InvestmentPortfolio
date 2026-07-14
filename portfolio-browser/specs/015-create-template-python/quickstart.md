@@ -10,11 +10,16 @@ python -m venv .venv
 
 ## Configure
 
-Copy `.env.example` to `.env` and adjust host/port/debug if needed:
+Copy `.env.example` to `.env` and adjust host/port/debug, and the
+`MARKET_DATA_SERVICE_URL`/`PORTFOLIO_ANALYSIS_SERVICE_URL` backing service
+URLs, if needed:
 
 ```bash
 cp .env.example .env
 ```
+
+`run_end_to_end.ps1` sets these two service URLs automatically (Phase 7)
+when it launches this app after starting both backing services.
 
 Edit `config/content.yaml` to change the app name, version, published date,
 or navigation section labels — these are validated at startup, so a
