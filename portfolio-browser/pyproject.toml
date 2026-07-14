@@ -1,0 +1,61 @@
+[project]
+name = "portfolio-browser"
+version = "0.1.0"
+description = "Investment Portfolio Browser - Dash UI"
+requires-python = ">=3.11"
+dependencies = [
+    "dash>=2.17",
+    "dash-bootstrap-components>=1.5",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-bdd>=7",
+    "dash[testing]>=2.17",
+    "webdriver-manager>=4",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Test code: fixtures come from third-party pytest plugins (pytest-bdd,
+# dash.testing) without type stubs, so requiring full annotations here adds
+# ceremony without catching real bugs. Production code (config/, src/,
+# app.py) keeps full strictness.
+module = "tests.*"
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["app"]
+
+[tool.setuptools.packages.find]
+include = ["config*", "src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+bdd_features_base_dir = "tests/bdd/features/"

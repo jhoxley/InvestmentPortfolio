@@ -8,3 +8,22 @@ Data/__pycache__/*
 *.parquet
 
 logs/*
+
+# Python virtual environments / build artifacts (portfolio-browser and others)
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environment overrides (never commit real secrets)
+.env
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

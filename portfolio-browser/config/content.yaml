@@ -1,0 +1,20 @@
+app_name: "Investment Portfolio Browser"
+
+build_info:
+  version: "0.1.0"
+  published_date: "2026-07-13"
+
+nav_sections:
+  - key: overview
+    label: Overview
+    order: 1
+    is_default: true
+  - key: positions
+    label: Positions
+    order: 2
+  - key: performance
+    label: Performance
+    order: 3
+  - key: income
+    label: Income
+    order: 4
