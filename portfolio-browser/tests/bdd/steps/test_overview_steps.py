@@ -12,6 +12,7 @@ the Dash server starts, so these tests are hermetic.
 
 from __future__ import annotations
 
+import time
 from datetime import date, timedelta
 from typing import Any
 
@@ -34,6 +35,7 @@ from src.models.portfolio_analysis import (
     TimeSeriesEntry,
     TimeSeriesResponse,
 )
+from src.pages._overview_chart import _earliest_from_date, _last_business_day, _years_before
 
 # Importing this registers its @given/@when/@then step definitions (pytest-bdd
 # resolves steps against a session-wide registry) so "the app is launched" and
@@ -47,6 +49,7 @@ scenarios("../features/overview_default_chart.feature")
 scenarios("../features/overview_switch_account.feature")
 scenarios("../features/overview_date_range.feature")
 scenarios("../features/overview_metric_toggles.feature")
+scenarios("../features/overview_date_range_shortcuts.feature")
 
 _ATTRIBUTES = [
     AttributeDefinition(
@@ -93,11 +96,13 @@ class _FakeClient:
         attributes: list[AttributeDefinition],
         entries: list[dict[str, Any]] | None,
         raise_error: bool = False,
+        delay_seconds: float = 0.0,
     ) -> None:
         self._accounts = accounts
         self._attributes = attributes
         self._entries = entries if entries is not None else self._default_entries()
         self._raise_error = raise_error
+        self._delay_seconds = delay_seconds
 
     @staticmethod
     def _default_entries() -> list[dict[str, Any]]:
@@ -127,6 +132,8 @@ class _FakeClient:
     def get_timeseries(
         self, account_name: str, attributes: list[str], start: date, end: date
     ) -> TimeSeriesResponse:
+        if self._delay_seconds:
+            time.sleep(self._delay_seconds)
         if self._raise_error:
             raise PortfolioAnalysisServiceError("stubbed failure")
         entries = [
@@ -476,3 +483,133 @@ def real_parameters_bar_shown(dash_duo):
     assert account.get_attribute("disabled") is None
     dash_duo.find_element("#app-parameters-from-date")
     dash_duo.find_element("#app-parameters-to-date")
+
+
+# --- 017: Date range shortcut buttons -------------------------------------
+
+_SHORTCUT_BUTTON_IDS = {
+    "YtD": "overview-shortcut-ytd",
+    "1Y": "overview-shortcut-1y",
+    "3Y": "overview-shortcut-3y",
+    "5Y": "overview-shortcut-5y",
+    "All": "overview-shortcut-all",
+}
+
+
+def _short_history_account() -> AccountSummary:
+    # Always "less than 5 years" relative to whenever the test actually
+    # runs, rather than a hardcoded date that could go stale.
+    from_date = date.today() - timedelta(days=365 * 2)
+    return AccountSummary(
+        account_name="new-portfolio",
+        capital_ledger=AccountResourceRange(from_date=from_date, to_date=date.today()),
+        position_ladder=AccountResourceRange(from_date=from_date, to_date=date.today()),
+    )
+
+
+@given(
+    "portfolio-analysis-service has an account with less than 5 years of recorded history",
+    target_fixture="stub_client",
+)
+def stub_client_with_short_history_account(monkeypatch):
+    client = _FakeClient([_short_history_account()], _ATTRIBUTES, entries=None)
+    _install_stub_client(monkeypatch, client)
+    return client
+
+
+@when(parsers.parse('the user clicks the "{label}" shortcut button'))
+def click_shortcut_button(dash_duo, label):
+    button_id = _SHORTCUT_BUTTON_IDS[label]
+    dash_duo.find_element(f"#{button_id}").click()
+    dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
+
+
+@then("the \"from\" date is set to 1 January of the current year")
+def from_date_is_start_of_year(dash_duo):
+    from_date_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#app-parameters-from-date input').value;"
+    )
+    assert from_date_value == date(date.today().year, 1, 1).isoformat()
+
+
+@then("the \"to\" date is set to the most recently completed business day")
+def to_date_is_set_to_last_business_day(dash_duo):
+    to_date_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#app-parameters-to-date input').value;"
+    )
+    assert to_date_value == _last_business_day(date.today()).isoformat()
+
+
+@then("the chart refreshes to show only data within that range")
+def chart_refreshes_to_range(dash_duo):
+    dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
+
+
+@then(parsers.parse('the "from" date is set to exactly {years:d} years before today'))
+def from_date_is_years_before_today(dash_duo, years):
+    from_date_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#app-parameters-from-date input').value;"
+    )
+    assert from_date_value == _years_before(date.today(), years).isoformat()
+
+
+@then('the "from" and "to" fields show the exact dates now being charted')
+def from_to_fields_match_charted_dates(dash_duo):
+    from_date_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#app-parameters-from-date input').value;"
+    )
+    to_date_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#app-parameters-to-date input').value;"
+    )
+    assert from_date_value == _years_before(date.today(), 3).isoformat()
+    assert to_date_value == _last_business_day(date.today()).isoformat()
+
+
+@then("the \"from\" date is set to that account's earliest recorded date")
+def from_date_matches_account_earliest(dash_duo, stub_client):
+    account_select = Select(dash_duo.find_element("#app-parameters-account"))
+    selected_name = account_select.first_selected_option.get_attribute("value")
+    selected_account = next(a for a in stub_client._accounts if a.account_name == selected_name)
+    from_date_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#app-parameters-from-date input').value;"
+    )
+    assert from_date_value == _earliest_from_date(selected_account).isoformat()
+
+
+@then("the chart shows the account's complete available history with no error")
+def chart_shows_full_history_no_error(dash_duo):
+    dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
+    assert dash_duo.find_elements("#overview-error-state") == []
+
+
+@given("portfolio-analysis-service takes a moment to respond", target_fixture="stub_client")
+def stub_client_with_delay(monkeypatch):
+    client = _FakeClient(_ACCOUNTS, _ATTRIBUTES, entries=None, delay_seconds=1.0)
+    _install_stub_client(monkeypatch, client)
+    return client
+
+
+@when(
+    parsers.parse(
+        'the user clicks the "{label}" shortcut button without waiting for the refresh '
+        "to finish"
+    )
+)
+def click_shortcut_button_no_wait(dash_duo, label):
+    button_id = _SHORTCUT_BUTTON_IDS[label]
+    dash_duo.find_element(f"#{button_id}").click()
+
+
+@then("all shortcut buttons are disabled while the chart refreshes")
+def shortcut_buttons_disabled_during_refresh(dash_duo):
+    for button_id in _SHORTCUT_BUTTON_IDS.values():
+        button = dash_duo.find_element(f"#{button_id}")
+        assert button.get_attribute("disabled") is not None
+
+
+@then("all shortcut buttons are enabled once the chart has refreshed")
+def shortcut_buttons_enabled_after_refresh(dash_duo):
+    dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
+    for button_id in _SHORTCUT_BUTTON_IDS.values():
+        button = dash_duo.find_element(f"#{button_id}")
+        assert button.get_attribute("disabled") is None

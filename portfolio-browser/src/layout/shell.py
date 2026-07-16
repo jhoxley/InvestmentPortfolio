@@ -54,8 +54,31 @@ def _build_static_parameters_bar() -> list:
     ]
 
 
+_SHORTCUT_BUTTONS = [
+    ("overview-shortcut-ytd", "YtD"),
+    ("overview-shortcut-1y", "1Y"),
+    ("overview-shortcut-3y", "3Y"),
+    ("overview-shortcut-5y", "5Y"),
+    ("overview-shortcut-all", "All"),
+]
+
+
+def _build_shortcut_buttons() -> dbc.Col:
+    """Five Reporting Period Shortcut buttons (017; FR-001).
+
+    Click handling (which date range each computes, and disabling them
+    during a refresh per FR-013) lives in src/pages/overview.py — this only
+    builds the buttons themselves.
+    """
+    buttons = [
+        dbc.Button(label, id=button_id, size="sm", color="secondary", outline=True)
+        for button_id, label in _SHORTCUT_BUTTONS
+    ]
+    return dbc.Col(dbc.ButtonGroup(buttons), width="auto")
+
+
 def _build_overview_parameters_bar() -> list:
-    """Real Account selector + From/To date pickers (016; FR-001-FR-004).
+    """Real Account selector + From/To date pickers + shortcut buttons (016/017).
 
     Options/values are populated by a callback in src/pages/overview.py once
     the page has fetched /v1/accounts — this only builds the empty controls.
@@ -84,6 +107,7 @@ def _build_overview_parameters_bar() -> list:
             width="auto",
         ),
         dbc.Col(to_date, width="auto"),
+        _build_shortcut_buttons(),
     ]
 
 

@@ -33,6 +33,15 @@ _WEEKDAY_MONDAY = 0
 _WEEKDAY_SATURDAY = 5
 _WEEKDAY_SUNDAY = 6
 
+# Reporting Period Shortcut codes (017; data-model.md's "Reporting Period
+# Shortcut" entity). Fixed, spec-defined set — not user-configurable.
+SHORTCUT_YTD = "ytd"
+SHORTCUT_1Y = "1y"
+SHORTCUT_3Y = "3y"
+SHORTCUT_5Y = "5y"
+SHORTCUT_ALL = "all"
+_SHORTCUT_YEAR_OFFSETS = {SHORTCUT_1Y: 1, SHORTCUT_3Y: 3, SHORTCUT_5Y: 5}
+
 
 def _color_for(attribute: str) -> str:
     """Return the fixed color for an attribute, falling back to a default.
@@ -78,6 +87,54 @@ def _earliest_from_date(account: AccountSummary) -> date:
         r.from_date for r in (account.capital_ledger, account.position_ladder) if r is not None
     ]
     return min(candidates)
+
+
+def _years_before(today: date, years: int) -> date:
+    """Return the exact calendar-date offset `years` before `today`.
+
+    Args:
+        today: The reference date.
+        years: Number of years to subtract.
+
+    Returns:
+        `today` with `years` subtracted from the year, falling back to 28
+        February when `today` is a leap day (29 Feb) and the target year
+        is not itself a leap year.
+    """
+    try:
+        return today.replace(year=today.year - years)
+    except ValueError:
+        return today.replace(year=today.year - years, day=28)
+
+
+def _shortcut_from_date(code: str, account: AccountSummary, today: date) -> date:
+    """Compute (and clamp) a Reporting Period Shortcut's "from" date (FR-002-FR-006, FR-008).
+
+    Args:
+        code: One of `SHORTCUT_YTD`, `SHORTCUT_1Y`, `SHORTCUT_3Y`, `SHORTCUT_5Y`,
+            `SHORTCUT_ALL`.
+        account: The currently selected account (for the clamp floor and
+            `SHORTCUT_ALL`'s own value).
+        today: The reference "today" date.
+
+    Returns:
+        The computed date, never earlier than `account`'s own
+        `_earliest_from_date` (FR-008) — a no-op clamp for `SHORTCUT_ALL`,
+        since that *is* the earliest date already.
+
+    Raises:
+        ValueError: `code` is not one of the five known shortcut codes.
+    """
+    earliest = _earliest_from_date(account)
+    if code == SHORTCUT_ALL:
+        return earliest
+    if code == SHORTCUT_YTD:
+        computed = date(today.year, 1, 1)
+    elif code in _SHORTCUT_YEAR_OFFSETS:
+        computed = _years_before(today, _SHORTCUT_YEAR_OFFSETS[code])
+    else:
+        raise ValueError(f"Unknown shortcut code: {code!r}")
+    return max(computed, earliest)
 
 
 def _build_figure(entries: list[dict[str, Any]], toggled_attributes: list[str]) -> go.Figure:

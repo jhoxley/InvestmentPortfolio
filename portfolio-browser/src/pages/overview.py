@@ -27,6 +27,11 @@ Callback graph (see specs/016-link-real-portfolio/contracts/ui-contract.md):
    chart whenever the account, from-date, to-date, or any metric toggle
    changes; this is one callback (not one per user story) because Dash
    forbids two callbacks from targeting the same Output.
+6. `_apply_date_range_shortcut` (017) — five `n_clicks` Inputs (one per
+   Reporting Period Shortcut button, built in src/layout/shell.py), sets
+   the same `app-parameters-from-date`/`to-date` props #3 already sets;
+   `_render_chart` picks up the change and re-fetches automatically — no
+   new render logic (research.md #3 in specs/017-chart-date-range-shortcuts).
 """
 
 from __future__ import annotations
@@ -37,13 +42,23 @@ from typing import Any
 import dash
 import dash_bootstrap_components as dbc
 import structlog
-from dash import ALL, Input, Output, State, callback, dcc, html
+from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
 from config.settings import Settings
 from src.exceptions import PortfolioAnalysisServiceError
 from src.models.portfolio_analysis import AccountSummary, AttributeDefinition
-from src.pages._overview_chart import _build_figure, _earliest_from_date, _last_business_day
+from src.pages._overview_chart import (
+    SHORTCUT_1Y,
+    SHORTCUT_3Y,
+    SHORTCUT_5Y,
+    SHORTCUT_ALL,
+    SHORTCUT_YTD,
+    _build_figure,
+    _earliest_from_date,
+    _last_business_day,
+    _shortcut_from_date,
+)
 from src.services.portfolio_analysis_client import (
     HttpPortfolioAnalysisClient,
     PortfolioAnalysisClient,
@@ -55,6 +70,15 @@ logger = structlog.get_logger(__name__)
 
 _DEFAULT_METRIC = "market_value"
 _TOGGLE_ID_TYPE = "overview-attribute-toggle"
+
+# Must match src/layout/shell.py's _SHORTCUT_BUTTONS ids.
+_SHORTCUT_CODE_BY_BUTTON_ID = {
+    "overview-shortcut-ytd": SHORTCUT_YTD,
+    "overview-shortcut-1y": SHORTCUT_1Y,
+    "overview-shortcut-3y": SHORTCUT_3Y,
+    "overview-shortcut-5y": SHORTCUT_5Y,
+    "overview-shortcut-all": SHORTCUT_ALL,
+}
 
 
 def _get_client() -> PortfolioAnalysisClient:
@@ -231,8 +255,8 @@ def _apply_default_account(
 
 
 @callback(
-    Output("app-parameters-from-date", "date"),
-    Output("app-parameters-to-date", "date"),
+    Output("app-parameters-from-date", "date", allow_duplicate=True),
+    Output("app-parameters-to-date", "date", allow_duplicate=True),
     Input("app-parameters-account", "value"),
     State("overview-accounts-store", "data"),
     prevent_initial_call=True,
@@ -276,6 +300,10 @@ def _sync_from_date_max_to_to_date(to_date: str | None) -> Any:
     Input("app-parameters-to-date", "date"),
     Input({"type": _TOGGLE_ID_TYPE, "name": ALL}, "value"),
     State({"type": _TOGGLE_ID_TYPE, "name": ALL}, "id"),
+    running=[
+        (Output(button_id, "disabled"), True, False)
+        for button_id in _SHORTCUT_CODE_BY_BUTTON_ID
+    ],
     prevent_initial_call=True,
 )
 def _render_chart(
@@ -306,3 +334,46 @@ def _render_chart(
 
     client = _get_client()
     return _render_timeseries(client, account_name, toggled_attributes, from_date, to_date)
+
+
+@callback(
+    Output("app-parameters-from-date", "date", allow_duplicate=True),
+    Output("app-parameters-to-date", "date", allow_duplicate=True),
+    Input("overview-shortcut-ytd", "n_clicks"),
+    Input("overview-shortcut-1y", "n_clicks"),
+    Input("overview-shortcut-3y", "n_clicks"),
+    Input("overview-shortcut-5y", "n_clicks"),
+    Input("overview-shortcut-all", "n_clicks"),
+    State("app-parameters-account", "value"),
+    State("overview-accounts-store", "data"),
+    prevent_initial_call=True,
+)
+def _apply_date_range_shortcut(
+    _ytd: int | None,
+    _1y: int | None,
+    _3y: int | None,
+    _5y: int | None,
+    _all: int | None,
+    account_name: str | None,
+    accounts_data: list[dict[str, Any]] | None,
+) -> tuple[Any, Any]:
+    """Apply a Reporting Period Shortcut's date range (017; FR-002-FR-010).
+
+    Sets the same two props `_sync_date_range_to_selected_account` sets —
+    `_render_chart` already has both as Inputs, so setting them here is
+    sufficient to trigger a fresh chart request (FR-010); no new fetch/render
+    code needed (research.md #3 in specs/017-chart-date-range-shortcuts).
+    """
+    button_id = ctx.triggered_id
+    code = _SHORTCUT_CODE_BY_BUTTON_ID.get(button_id)
+    if code is None or not account_name or not accounts_data:
+        raise PreventUpdate
+
+    match = next((a for a in accounts_data if a["account_name"] == account_name), None)
+    if match is None:
+        raise PreventUpdate
+
+    account = AccountSummary.model_validate(match)
+    from_date = _shortcut_from_date(code, account, date.today())
+    to_date = _last_business_day(date.today())
+    return from_date.isoformat(), to_date.isoformat()
