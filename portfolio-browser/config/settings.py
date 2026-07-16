@@ -20,3 +20,6 @@ class Settings(BaseSettings):
     # Defaults match run_end_to_end.ps1's port assignments for local development.
     market_data_service_url: str = "http://127.0.0.1:8001"
     portfolio_analysis_service_url: str = "http://127.0.0.1:8000"
+
+    # Timeout for outbound calls to portfolio_analysis_service_url.
+    request_timeout_seconds: float = 5.0

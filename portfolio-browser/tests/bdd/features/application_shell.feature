@@ -16,7 +16,8 @@ Feature: Persistent application shell
     And the navigation menu occupies no more than 20% of the page width
 
   Scenario: Content area occupies the remaining width with a parameters bar above it
-    When the user views the main content area
+    When the user clicks the "Positions" navigation item
+    And the user views the main content area
     Then it occupies the remaining page width
     And a parameters/controls placeholder section is positioned above the page content
 
