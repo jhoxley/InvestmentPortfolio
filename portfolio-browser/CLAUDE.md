@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at
-`specs/015-create-template-python/plan.md`.
+`specs/016-link-real-portfolio/plan.md`.
 <!-- SPECKIT END -->

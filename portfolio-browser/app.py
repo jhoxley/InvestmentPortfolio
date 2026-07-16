@@ -24,8 +24,14 @@ def create_app() -> Dash:
         pages_folder=str(_PAGES_FOLDER),
         external_stylesheets=[dbc.themes.BOOTSTRAP],
         title=content.app_name,
+        # The Overview route's real parameters-bar controls (app-parameters-
+        # from-date/to-date) and the pattern-matched metric-toggle switches
+        # are created dynamically by callbacks, not present in the initial
+        # static layout — Dash's own startup validation needs this relaxed
+        # for those dynamic component IDs to be valid callback targets.
+        suppress_callback_exceptions=True,
     )
-    app.layout = build_shell(content)
+    app.layout = build_shell(app, content)
     return app
 
 
