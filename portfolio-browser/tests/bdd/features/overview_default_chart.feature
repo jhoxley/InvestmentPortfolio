@@ -22,3 +22,11 @@ Feature: Default account performance chart on Overview
   Scenario: Vertical axis shows GBP amounts
     Given the Overview page has finished loading its default chart
     Then the vertical axis is labeled with GBP amounts
+
+  Scenario: Returning to Overview after navigating away still shows the chart
+    Given the Overview page has finished loading its default chart
+    When the user clicks the "Positions" navigation item
+    And the user clicks the "Performance" navigation item
+    And the user navigates back to Overview via the navigation menu
+    Then a line chart is displayed automatically showing the "market_value" metric for the alphabetically-first account
+    And the Account selector and date-range controls are populated

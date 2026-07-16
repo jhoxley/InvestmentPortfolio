@@ -433,6 +433,27 @@ def chart_still_shows_metric(dash_duo, metric):
     assert metric in names
 
 
+@when("the user navigates back to Overview via the navigation menu")
+def navigate_back_to_overview(dash_duo):
+    dash_duo.find_element("#app-sidebar-nav-overview").click()
+    dash_duo.wait_for_element("#overview-chart-container", timeout=_TIMEOUT)
+    dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
+
+
+@then("the Account selector and date-range controls are populated")
+def parameters_bar_is_populated(dash_duo):
+    select = Select(dash_duo.find_element("#app-parameters-account"))
+    assert select.first_selected_option.get_attribute("value") == "AAA-ISA"
+    from_date_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#app-parameters-from-date input').value;"
+    )
+    to_date_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#app-parameters-to-date input').value;"
+    )
+    assert from_date_value != ""
+    assert to_date_value != ""
+
+
 @then("no metric-toggle panel is shown")
 def no_metric_toggle_panel(dash_duo):
     toggles_containers = dash_duo.find_elements("#overview-attribute-toggles")

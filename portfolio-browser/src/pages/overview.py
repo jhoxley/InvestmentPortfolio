@@ -2,10 +2,18 @@
 
 Callback graph (see specs/016-link-real-portfolio/contracts/ui-contract.md):
 
-1. `_fetch_accounts_and_attributes` — triggered once the route-aware
-   parameters bar (src/layout/shell.py) has rendered the real Overview
-   controls; fetches /v1/accounts + /v1/timeseries/attributes, populates the
-   account dropdown, the metric-toggle switches, and the two stores.
+1. `_fetch_accounts_and_attributes` — triggered by `overview-mount-trigger`
+   (a `dcc.Interval` declared in this page's own layout, firing its one tick
+   shortly after every mount — including revisits, not just first load);
+   fetches /v1/accounts + /v1/timeseries/attributes, populates the account
+   dropdown, the metric-toggle switches, and the two stores. Deliberately
+   NOT triggered by `app-parameters-bar.children` (a shell.py-owned signal)
+   — that indirection raced against Dash's own internal page-routing swap
+   on revisits, leaving the page stuck on "Loading account performance…"
+   with the Account/From/To controls unpopulated (see git history/PR notes
+   for the bug this replaced). A same-page `dcc.Interval` sidesteps that
+   entirely: it only exists while Overview is mounted, so it inherently
+   cannot fire on other routes, and it fires fresh on every single mount.
 2. `_apply_default_account_and_metric` — once both stores are populated,
    auto-selects the alphabetically-first account and defaults the
    `market_value` toggle on (FR-001a).
@@ -141,6 +149,12 @@ def _attribute_toggle(attribute: AttributeDefinition) -> html.Div:
 
 layout = html.Div(
     [
+        # Fires its one tick ~200ms after every mount of this layout (first
+        # load AND every revisit), giving shell.py's own pathname-triggered
+        # bar-render callback (fast, no I/O) a head start so the real
+        # app-parameters-account/from-date/to-date controls reliably exist
+        # before this page tries to populate them.
+        dcc.Interval(id="overview-mount-trigger", interval=200, max_intervals=1),
         dcc.Store(id="overview-accounts-store"),
         dcc.Store(id="overview-attributes-store"),
         html.Div(id="overview-attribute-toggles", className="mb-3"),
@@ -162,20 +176,16 @@ layout = html.Div(
     Output("app-parameters-account", "options"),
     Output("overview-attribute-toggles", "children"),
     Output("overview-chart-container", "children", allow_duplicate=True),
-    Input("app-parameters-bar", "children"),
-    State("_pages_location", "pathname"),
+    Input("overview-mount-trigger", "n_intervals"),
     prevent_initial_call=True,
 )
-def _fetch_accounts_and_attributes(
-    _bar_children: Any, pathname: str | None
-) -> tuple[Any, ...]:
-    """Fetch /v1/accounts and /v1/timeseries/attributes once the Overview bar renders.
+def _fetch_accounts_and_attributes(_n_intervals: int) -> tuple[Any, ...]:
+    """Fetch /v1/accounts and /v1/timeseries/attributes on every Overview mount.
 
-    Satisfies FR-001 and FR-005.
+    Satisfies FR-001 and FR-005. `overview-mount-trigger` only exists inside
+    this page's own layout, so this cannot fire while on another route —
+    no separate pathname check needed.
     """
-    if pathname != "/":
-        raise PreventUpdate
-
     client = _get_client()
     try:
         accounts = client.list_accounts()
