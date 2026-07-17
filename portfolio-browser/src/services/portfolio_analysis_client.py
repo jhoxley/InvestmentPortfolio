@@ -18,6 +18,8 @@ from src.exceptions import PortfolioAnalysisServiceError
 from src.models.portfolio_analysis import (
     AccountSummary,
     AttributeDefinition,
+    PositionSummary,
+    PositionTimeSeriesResponse,
     TimeSeriesResponse,
 )
 
@@ -52,6 +54,46 @@ class PortfolioAnalysisClient(Protocol):
 
         Returns:
             The parsed TimeSeriesResponse.
+        """
+        ...
+
+    def list_account_positions(self, account_name: str) -> list[PositionSummary]:
+        """Return every position recorded for an account.
+
+        Args:
+            account_name: The account to enumerate positions for.
+
+        Returns:
+            List of PositionSummary parsed from the response.
+        """
+        ...
+
+    def list_position_attributes(self) -> list[AttributeDefinition]:
+        """Return every chartable/tabulable position attribute."""
+        ...
+
+    def get_position_timeseries(
+        self,
+        account_name: str,
+        positions: list[str],
+        attributes: list[str],
+        start: date,
+        end: date,
+    ) -> PositionTimeSeriesResponse:
+        """Return the per-position timeseries for an account over a date range.
+
+        Args:
+            account_name: The account to request a position timeseries for.
+            positions: Position names to include, sent explicitly even when
+                every known position is selected (no "omit if all selected"
+                special-casing). An empty list is forwarded as-is (the
+                endpoint's own default is "every position").
+            attributes: One or more attribute names to request.
+            start: Start of the requested date range (inclusive).
+            end: End of the requested date range (inclusive).
+
+        Returns:
+            The parsed PositionTimeSeriesResponse.
         """
         ...
 
@@ -132,6 +174,76 @@ class HttpPortfolioAnalysisClient:
             log_context={"account_name": account_name},
         )
         return TimeSeriesResponse.model_validate(payload)
+
+    def list_account_positions(self, account_name: str) -> list[PositionSummary]:
+        """Return every position recorded for an account.
+
+        Args:
+            account_name: The account to enumerate positions for.
+
+        Returns:
+            List of PositionSummary parsed from the response.
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        payload = self._get(
+            f"/v1/accounts/{account_name}/positions",
+            params=None,
+            log_context={"account_name": account_name},
+        )
+        return [PositionSummary.model_validate(p) for p in payload.get("positions", [])]
+
+    def list_position_attributes(self) -> list[AttributeDefinition]:
+        """Return every chartable/tabulable position attribute.
+
+        Returns:
+            List of AttributeDefinition parsed from the response.
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        payload = self._get("/v1/positions/attributes", params=None, log_context={})
+        return [AttributeDefinition.model_validate(a) for a in payload.get("attributes", [])]
+
+    def get_position_timeseries(
+        self,
+        account_name: str,
+        positions: list[str],
+        attributes: list[str],
+        start: date,
+        end: date,
+    ) -> PositionTimeSeriesResponse:
+        """Return the per-position timeseries for an account over a date range.
+
+        Args:
+            account_name: The account to request a position timeseries for.
+            positions: Position names to include, sent explicitly even when
+                every known position is selected.
+            attributes: One or more attribute names to request.
+            start: Start of the requested date range (inclusive).
+            end: End of the requested date range (inclusive).
+
+        Returns:
+            The parsed PositionTimeSeriesResponse.
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        params: list[tuple[str, str | int | float | bool | None]] = [
+            ("position", p) for p in positions
+        ]
+        params.extend(("attribute", a) for a in attributes)
+        params.extend([("start", str(start)), ("end", str(end))])
+        payload = self._get(
+            f"/v1/accounts/{account_name}/position",
+            params=params,
+            log_context={"account_name": account_name},
+        )
+        return PositionTimeSeriesResponse.model_validate(payload)
 
     def _get(
         self,

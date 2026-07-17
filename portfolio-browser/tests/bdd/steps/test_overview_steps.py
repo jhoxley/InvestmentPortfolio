@@ -27,6 +27,11 @@ from selenium.webdriver.support.ui import Select
 # `src.pages.overview` on its own, first, raises `PageError` (no app yet).
 import app as app_module
 import src.pages.overview as overview_module
+from src.components.date_range_controls import (
+    _earliest_from_date,
+    _last_business_day,
+    _years_before,
+)
 from src.exceptions import PortfolioAnalysisServiceError
 from src.models.portfolio_analysis import (
     AccountResourceRange,
@@ -35,7 +40,6 @@ from src.models.portfolio_analysis import (
     TimeSeriesEntry,
     TimeSeriesResponse,
 )
-from src.pages._overview_chart import _earliest_from_date, _last_business_day, _years_before
 
 # Importing this registers its @given/@when/@then step definitions (pytest-bdd
 # resolves steps against a session-wide registry) so "the app is launched" and
@@ -483,6 +487,22 @@ def real_parameters_bar_shown(dash_duo):
     assert account.get_attribute("disabled") is None
     dash_duo.find_element("#app-parameters-from-date")
     dash_duo.find_element("#app-parameters-to-date")
+
+
+@when("the browser loads the Positions page", target_fixture="dash_app")
+def load_positions_page(dash_duo):
+    """Navigate straight to /positions and wait only for the parameters bar.
+
+    Deliberately does not stub `src.pages.positions._get_client` (018) —
+    this scenario only asserts on the shell-level parameters bar (rendered
+    by shell.py's own pathname-triggered callback, independent of the
+    page's own data fetch), so it doesn't need the page's own fetch to
+    succeed.
+    """
+    dash_duo.start_server(app_module.app)
+    dash_duo.driver.get(f"{dash_duo.server_url}/positions")
+    dash_duo.wait_for_element("#app-parameters-account", timeout=_TIMEOUT)
+    return app_module.app
 
 
 # --- 017: Date range shortcut buttons -------------------------------------

@@ -40,25 +40,25 @@ from datetime import date
 from typing import Any
 
 import dash
-import dash_bootstrap_components as dbc
 import structlog
 from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
 from config.settings import Settings
-from src.exceptions import PortfolioAnalysisServiceError
-from src.models.portfolio_analysis import AccountSummary, AttributeDefinition
-from src.pages._overview_chart import (
+from src.components.attribute_toggles import build_attribute_toggles
+from src.components.date_range_controls import (
     SHORTCUT_1Y,
     SHORTCUT_3Y,
     SHORTCUT_5Y,
     SHORTCUT_ALL,
     SHORTCUT_YTD,
-    _build_figure,
     _earliest_from_date,
     _last_business_day,
     _shortcut_from_date,
 )
+from src.exceptions import PortfolioAnalysisServiceError
+from src.models.portfolio_analysis import AccountSummary
+from src.pages._overview_chart import _build_figure
 from src.services.portfolio_analysis_client import (
     HttpPortfolioAnalysisClient,
     PortfolioAnalysisClient,
@@ -149,28 +149,6 @@ def _render_timeseries(
     return dcc.Graph(id="overview-chart", figure=figure, style={"height": "600px"})
 
 
-def _attribute_toggle(attribute: AttributeDefinition) -> html.Div:
-    toggle_id = {"type": _TOGGLE_ID_TYPE, "name": attribute.name}
-    dom_id = f"overview-attribute-toggle-{attribute.name}"
-    return html.Div(
-        [
-            dbc.Switch(
-                id=toggle_id,
-                label=attribute.name,
-                value=attribute.name == _DEFAULT_METRIC,
-                className="d-inline-block me-2",
-            ),
-            dbc.Tooltip(
-                attribute.description,
-                target=dom_id,
-                id=f"overview-attribute-tooltip-{attribute.name}",
-            ),
-        ],
-        id=dom_id,
-        className="d-inline-block me-4",
-    )
-
-
 layout = html.Div(
     [
         # Fires its one tick ~200ms after every mount of this layout (first
@@ -228,7 +206,9 @@ def _fetch_accounts_and_attributes(_n_intervals: int) -> tuple[Any, ...]:
         )
 
     account_options = [{"label": a.account_name, "value": a.account_name} for a in accounts]
-    toggle_children = [_attribute_toggle(a) for a in attributes]
+    toggle_children = build_attribute_toggles(
+        attributes, _TOGGLE_ID_TYPE, frozenset({_DEFAULT_METRIC})
+    )
     return (
         [a.model_dump(mode="json") for a in accounts],
         [a.model_dump(mode="json") for a in attributes],

@@ -57,3 +57,45 @@ class TimeSeriesResponse(BaseModel):
     to_date: date
     entries: list[TimeSeriesEntry]
     links: dict[str, str] = Field(default_factory=dict)
+
+
+class PositionSummary(BaseModel):
+    """One entry in GET /v1/accounts/{account_name}/positions's `positions` array."""
+
+    position: str
+    from_date: date
+    to_date: date
+
+
+class PositionsResponse(BaseModel):
+    """Response body for GET /v1/accounts/{account_name}/positions."""
+
+    account_name: str
+    positions: list[PositionSummary]
+    links: dict[str, str] = Field(default_factory=dict)
+
+
+class PositionTimeSeriesEntry(BaseModel):
+    """One row of a position timeseries response: a date, a position, plus dynamic attribute values.
+
+    Only `date` and `position` are declared; requested attribute values
+    (e.g. `market_value`) arrive as extra keys via `extra="allow"`, mirroring
+    `TimeSeriesEntry`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    date: date
+    position: str
+
+
+class PositionTimeSeriesResponse(BaseModel):
+    """Response body for GET /v1/accounts/{account_name}/position."""
+
+    account_name: str
+    attributes: list[str]
+    positions: list[str]
+    from_date: date
+    to_date: date
+    entries: list[PositionTimeSeriesEntry]
+    links: dict[str, str] = Field(default_factory=dict)

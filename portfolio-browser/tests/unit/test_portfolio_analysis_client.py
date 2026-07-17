@@ -177,3 +177,130 @@ def test_get_timeseries_raises_on_connection_error() -> None:
             start=date(2024, 1, 2),
             end=date(2024, 1, 10),
         )
+
+
+def test_list_account_positions_success() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/accounts/HL-SIPP/positions"
+        return httpx.Response(
+            200,
+            json={
+                "account_name": "HL-SIPP",
+                "positions": [
+                    {"position": "Apple Inc", "from_date": "2020-03-02", "to_date": "2026-07-08"},
+                    {"position": "Cash", "from_date": "2016-04-20", "to_date": "2026-07-08"},
+                ],
+                "_links": {"self": "/v1/accounts/HL-SIPP/positions"},
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    positions = client.list_account_positions(account_name="HL-SIPP")
+
+    assert [p.position for p in positions] == ["Apple Inc", "Cash"]
+    assert positions[0].from_date == date(2020, 3, 2)
+
+
+def test_list_position_attributes_success() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/positions/attributes"
+        return httpx.Response(
+            200,
+            json={
+                "attributes": [
+                    {
+                        "name": "market_value",
+                        "description": "The position's market value on that date.",
+                        "source": "position_ladder",
+                    },
+                    {
+                        "name": "quantity",
+                        "description": "The position's quantity on that date.",
+                        "source": "position_ladder",
+                    },
+                ],
+                "_links": {"self": "/v1/positions/attributes"},
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    attributes = client.list_position_attributes()
+
+    assert [a.name for a in attributes] == ["market_value", "quantity"]
+
+
+def test_get_position_timeseries_sends_explicit_position_list() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/accounts/HL-SIPP/position"
+        params = httpx.QueryParams(request.url.query)
+        assert params.get_list("position") == ["Apple Inc", "Cash"]
+        assert params.get_list("attribute") == ["market_value", "quantity"]
+        assert params.get("start") == "2024-01-02"
+        assert params.get("end") == "2024-01-10"
+        return httpx.Response(
+            200,
+            json={
+                "account_name": "HL-SIPP",
+                "attributes": ["market_value", "quantity"],
+                "positions": ["Apple Inc", "Cash"],
+                "from_date": "2024-01-02",
+                "to_date": "2024-01-10",
+                "entries": [
+                    {
+                        "date": "2024-01-02",
+                        "position": "Apple Inc",
+                        "market_value": 5000.0,
+                        "quantity": 25.0,
+                    },
+                ],
+                "_links": {"self": "/v1/accounts/HL-SIPP/position"},
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    response = client.get_position_timeseries(
+        account_name="HL-SIPP",
+        positions=["Apple Inc", "Cash"],
+        attributes=["market_value", "quantity"],
+        start=date(2024, 1, 2),
+        end=date(2024, 1, 10),
+    )
+
+    assert response.account_name == "HL-SIPP"
+    assert len(response.entries) == 1
+    assert response.entries[0].position == "Apple Inc"
+    assert response.entries[0].model_dump()["market_value"] == 5000.0
+
+
+@pytest.mark.parametrize("status_code", [404, 422])
+def test_get_position_timeseries_raises_on_error_status(status_code: int) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status_code,
+            json={
+                "type": "about:blank",
+                "title": "Error",
+                "status": status_code,
+                "detail": "boom",
+                "instance": str(request.url),
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_position_timeseries(
+            account_name="HL-SIPP",
+            positions=["Apple Inc"],
+            attributes=["market_value"],
+            start=date(2024, 1, 2),
+            end=date(2024, 1, 10),
+        )
+
+
+def test_list_account_positions_raises_on_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TimeoutException("timed out", request=request)
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.list_account_positions(account_name="HL-SIPP")
