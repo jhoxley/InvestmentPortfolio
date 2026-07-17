@@ -395,7 +395,14 @@ def _render_positions(
             None,
         )
 
-    entries = [entry.model_dump(mode="json") for entry in response.entries]
+    # mode="python" (the default), NOT mode="json": _build_comparison_rows
+    # compares entry["date"] (a datetime.date) against from_date/to_date
+    # (also datetime.date) by equality — model_dump(mode="json") would
+    # serialize "date" to an ISO string instead, silently breaking that
+    # comparison (every value would read as absent) while the chart itself
+    # stayed visibly correct (Plotly accepts either form for x-values, so
+    # nothing there would reveal the mismatch).
+    entries = [entry.model_dump() for entry in response.entries]
     if not entries:
         return (
             _empty_state(

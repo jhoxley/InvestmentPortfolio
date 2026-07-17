@@ -9,6 +9,7 @@ from __future__ import annotations
 import colorsys
 from datetime import date
 
+from src.models.portfolio_analysis import PositionTimeSeriesEntry
 from src.pages._positions_chart import (
     _build_comparison_rows,
     _build_comparison_table,
@@ -194,3 +195,54 @@ def test_build_comparison_table_returns_data_table_with_style_conditional() -> N
     assert column_ids == {"position", "market_value", "market_value_prev"}
     assert len(table.data) == 3
     assert len(table.style_data_conditional) >= 2
+
+
+def test_comparison_rows_match_dates_from_real_model_dump() -> None:
+    """Regression test: positions.py must pass `entries` built via
+    `PositionTimeSeriesEntry.model_dump()` (python mode), not
+    `model_dump(mode="json")` — the latter serializes `date` to an ISO
+    *string*, which silently never equals the `datetime.date`
+    `from_date`/`to_date` this function compares against, making every
+    value read as absent (reported bug: table always showed "-").
+    """
+    from_date = date(2024, 1, 2)
+    to_date = date(2024, 1, 10)
+    entries = [
+        PositionTimeSeriesEntry.model_validate(
+            {"date": from_date, "position": "Apple Inc", "market_value": 5000.0}
+        ).model_dump(),
+        PositionTimeSeriesEntry.model_validate(
+            {"date": to_date, "position": "Apple Inc", "market_value": 5500.0}
+        ).model_dump(),
+    ]
+
+    rows = _build_comparison_rows(entries, ["market_value"], from_date, to_date)
+
+    assert rows[0]["market_value"] == "£5,500.00"
+    assert rows[0]["market_value_prev"] == "£5,000.00"
+    assert rows[0]["_market_value_shading"] == "up"
+
+
+def test_comparison_rows_do_not_match_json_mode_dump_dates() -> None:
+    """Documents the exact failure mode the bug produced, so a future
+
+    accidental reintroduction of `model_dump(mode="json")` in the caller is
+    caught here rather than only visible as "-" in a running app.
+    """
+    from_date = date(2024, 1, 2)
+    to_date = date(2024, 1, 10)
+    entries = [
+        PositionTimeSeriesEntry.model_validate(
+            {"date": from_date, "position": "Apple Inc", "market_value": 5000.0}
+        ).model_dump(mode="json"),
+        PositionTimeSeriesEntry.model_validate(
+            {"date": to_date, "position": "Apple Inc", "market_value": 5500.0}
+        ).model_dump(mode="json"),
+    ]
+
+    rows = _build_comparison_rows(entries, ["market_value"], from_date, to_date)
+
+    # This is the bug's exact symptom — asserted here so the fix (caller
+    # using plain `model_dump()`) doesn't silently regress.
+    assert rows[0]["market_value"] == "—"
+    assert rows[0]["market_value_prev"] == "—"
