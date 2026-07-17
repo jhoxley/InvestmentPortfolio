@@ -114,3 +114,31 @@ Feature: Input Validation
     When a timeseries request is made for attribute "capital" with start "2020-01-02" and end "2020-01-02" for account "ts-single-day-val"
     Then the validation response status is 200
     And the timeseries response contains exactly 1 entry
+
+  @validation
+  Scenario: Duplicate position query values are treated as a single position
+    Given account "pos-duplicate-val" has only a position ladder ingested for validation
+    When a position request is made for attribute "market_value" for position "Cash" twice for account "pos-duplicate-val"
+    Then the validation response status is 200
+    And the position response lists exactly 1 position
+
+  @validation
+  Scenario: A valid position with zero overlap with the resolved range produces zero entries, not a failure
+    Given account "pos-zero-overlap-val" has a position ladder with "Cash" and a recently-opened "Late Corp" position for validation
+    When a position request is made for attribute "market_value" for position "Late Corp" with start "2021-01-04" and end "2021-01-05" for account "pos-zero-overlap-val"
+    Then the validation response status is 200
+    And the position response contains zero entries
+
+  @validation
+  Scenario: Position-name matching is case-sensitive
+    Given account "pos-case-val" has only a position ladder ingested for validation
+    When a position request is made for attribute "market_value" for position "cash" for account "pos-case-val"
+    Then the validation response status is 200
+    And the position response contains zero entries
+
+  @validation
+  Scenario: A single business day position request succeeds with exactly one entry
+    Given account "pos-single-day-val" has a position ladder starting 2020-01-02 for validation
+    When a position request is made for attribute "market_value" with start "2020-01-02" and end "2020-01-02" for account "pos-single-day-val"
+    Then the validation response status is 200
+    And the position response contains exactly 1 entry
