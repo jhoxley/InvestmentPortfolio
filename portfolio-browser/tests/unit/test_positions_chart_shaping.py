@@ -15,7 +15,6 @@ from src.pages._positions_chart import (
     _build_comparison_table,
     _build_figure,
     _color_for_position,
-    _format_attribute_value,
     _generate_palette,
 )
 
@@ -53,21 +52,6 @@ def test_generate_palette_colors_have_minimum_hue_separation() -> None:
     gaps = [hues[i + 1] - hues[i] for i in range(len(hues) - 1)]
     gaps.append(360 - hues[-1] + hues[0])  # wrap-around gap
     assert min(gaps) >= 5.0
-
-
-# --- Value formatting (FR-008a) ----------------------------------------------
-
-
-def test_format_attribute_value_currency_for_monetary_attribute() -> None:
-    assert _format_attribute_value("market_value", 1234.5) == "£1,234.50"
-
-
-def test_format_attribute_value_plain_for_quantity() -> None:
-    assert _format_attribute_value("quantity", 25.0) == "25.00"
-
-
-def test_format_attribute_value_currency_fallback_for_unknown_attribute() -> None:
-    assert _format_attribute_value("some_future_attribute", 10.0) == "£10.00"
 
 
 # --- Figure building (FR-007, FR-008, FR-015, FR-016a) -----------------------

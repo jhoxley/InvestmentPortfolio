@@ -40,6 +40,7 @@ from datetime import date
 from typing import Any
 
 import dash
+import dash_bootstrap_components as dbc
 import structlog
 from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 from dash.exceptions import PreventUpdate
@@ -59,6 +60,7 @@ from src.components.date_range_controls import (
 from src.exceptions import PortfolioAnalysisServiceError
 from src.models.portfolio_analysis import AccountSummary
 from src.pages._overview_chart import _build_figure
+from src.pages._overview_position_widgets import _build_pie_figure, _build_winners_losers_table
 from src.services.portfolio_analysis_client import (
     HttpPortfolioAnalysisClient,
     PortfolioAnalysisClient,
@@ -166,6 +168,39 @@ layout = html.Div(
                 _empty_state("Loading account performance…"),
                 id="overview-chart-container",
             ),
+        ),
+        # New row (019): pie chart + "Biggest winners and losers" table.
+        # xs=12/lg=6 stacks the two halves vertically below this project's
+        # own tablet-width test convention (800px — above Bootstrap's
+        # default md breakpoint of 768px, below its lg breakpoint of 992px;
+        # research.md #5), side-by-side at desktop widths.
+        dbc.Row(
+            [
+                dbc.Col(
+                    dcc.Loading(
+                        id="overview-pie-loading",
+                        children=html.Div(
+                            _empty_state("Loading position weights…"),
+                            id="overview-pie-container",
+                        ),
+                    ),
+                    xs=12,
+                    lg=6,
+                ),
+                dbc.Col(
+                    dcc.Loading(
+                        id="overview-winners-losers-loading",
+                        children=html.Div(
+                            _empty_state("Loading biggest winners and losers…"),
+                            id="overview-winners-losers-container",
+                        ),
+                    ),
+                    xs=12,
+                    lg=6,
+                ),
+            ],
+            id="overview-position-widgets-row",
+            className="mt-4 g-3",
         ),
     ],
     className="p-3",
@@ -357,3 +392,60 @@ def _apply_date_range_shortcut(
     from_date = _shortcut_from_date(code, account, date.today())
     to_date = _last_business_day(date.today())
     return from_date.isoformat(), to_date.isoformat()
+
+
+@callback(
+    Output("overview-pie-container", "children"),
+    Output("overview-winners-losers-container", "children"),
+    Input("app-parameters-account", "value"),
+    Input("app-parameters-to-date", "date"),
+    prevent_initial_call=True,
+)
+def _render_position_widgets(
+    account_name: str | None, to_date: str | None
+) -> tuple[Any, Any]:
+    """Render the position-weight pie chart and "Biggest winners and losers"
+
+    table together, from one fetch (019; FR-002-FR-014).
+
+    Deliberately independent of `_render_chart` — no shared `Input`/`Output`
+    with it, and no `Input` on `app-parameters-from-date` or any attribute
+    toggle (FR-010): both widgets are a single-date snapshot as of the "To"
+    date only.
+    """
+    if not account_name or not to_date:
+        # `/speckit-analyze` finding G1: without this guard, the callback
+        # can be invoked with `to_date` still `None` while the
+        # account-change -> date-sync chain is still resolving (initial
+        # mount or account switch), raising on `date.fromisoformat(None)`.
+        raise PreventUpdate
+
+    client = _get_client()
+    try:
+        response = client.get_position_timeseries(
+            account_name=account_name,
+            positions=[],
+            attributes=["market_value", "pnl", "book_cost"],
+            start=date.fromisoformat(to_date),
+            end=date.fromisoformat(to_date),
+        )
+    except PortfolioAnalysisServiceError:
+        logger.error("overview_position_widgets_fetch_failed", account_name=account_name)
+        message = (
+            "Could not load position data from portfolio-analysis-service. "
+            "Please try again shortly."
+        )
+        return _error_state(message), _error_state(message)
+
+    entries = [entry.model_dump() for entry in response.entries]
+    if not entries:
+        message = "No position data is available for the selected account and date."
+        return _empty_state(message), _empty_state(message)
+
+    pie = dcc.Graph(
+        id="overview-pie-chart", figure=_build_pie_figure(entries), style={"height": "400px"}
+    )
+    table = _build_winners_losers_table(entries)
+    return pie, html.Div(
+        [html.H5("Biggest winners and losers", className="mt-2"), table]
+    )

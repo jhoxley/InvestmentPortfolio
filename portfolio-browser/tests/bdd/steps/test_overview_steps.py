@@ -37,6 +37,8 @@ from src.models.portfolio_analysis import (
     AccountResourceRange,
     AccountSummary,
     AttributeDefinition,
+    PositionTimeSeriesEntry,
+    PositionTimeSeriesResponse,
     TimeSeriesEntry,
     TimeSeriesResponse,
 )
@@ -54,6 +56,8 @@ scenarios("../features/overview_switch_account.feature")
 scenarios("../features/overview_date_range.feature")
 scenarios("../features/overview_metric_toggles.feature")
 scenarios("../features/overview_date_range_shortcuts.feature")
+scenarios("../features/overview_position_pie_chart.feature")
+scenarios("../features/overview_winners_losers_table.feature")
 
 _ATTRIBUTES = [
     AttributeDefinition(
@@ -101,12 +105,73 @@ class _FakeClient:
         entries: list[dict[str, Any]] | None,
         raise_error: bool = False,
         delay_seconds: float = 0.0,
+        position_entries: list[dict[str, Any]] | None = None,
     ) -> None:
         self._accounts = accounts
         self._attributes = attributes
         self._entries = entries if entries is not None else self._default_entries()
         self._raise_error = raise_error
         self._delay_seconds = delay_seconds
+        self._position_entries = (
+            position_entries if position_entries is not None else self._default_position_entries()
+        )
+
+    @staticmethod
+    def _default_position_entries() -> list[dict[str, Any]]:
+        return [
+            {"position": "Apple Inc", "market_value": 700.0, "pnl": 500.0, "book_cost": 200.0},
+            {"position": "Cash", "market_value": 300.0, "pnl": 0.0, "book_cost": 300.0},
+            {"position": "Bond Fund", "market_value": 50.0, "pnl": -100.0, "book_cost": 150.0},
+        ]
+
+    @staticmethod
+    def _n_position_entries(n: int) -> list[dict[str, Any]]:
+        """`n` positions with distinct pnl values (1..n), for ranking scenarios."""
+        return [
+            {
+                "position": f"Position {i}",
+                "market_value": 100.0 + i,
+                "pnl": float(i),
+                "book_cost": 100.0,
+            }
+            for i in range(1, n + 1)
+        ]
+
+    def get_position_timeseries(
+        self,
+        account_name: str,
+        positions: list[str],
+        attributes: list[str],
+        start: date,
+        end: date,
+    ) -> PositionTimeSeriesResponse:
+        if self._delay_seconds:
+            time.sleep(self._delay_seconds)
+        if self._raise_error:
+            raise PortfolioAnalysisServiceError("stubbed failure")
+        selected = (
+            [e for e in self._position_entries if e["position"] in positions]
+            if positions
+            else self._position_entries
+        )
+        entries = [
+            PositionTimeSeriesEntry.model_validate(
+                {
+                    "date": start,
+                    "position": e["position"],
+                    **{a: e[a] for a in attributes if a in e},
+                }
+            )
+            for e in selected
+        ]
+        return PositionTimeSeriesResponse(
+            account_name=account_name,
+            attributes=attributes,
+            positions=[e["position"] for e in selected],
+            from_date=start,
+            to_date=end,
+            entries=entries,
+        )
 
     @staticmethod
     def _default_entries() -> list[dict[str, Any]]:
@@ -181,6 +246,44 @@ def stub_client_with_no_entries(monkeypatch):
 @given("portfolio-analysis-service is unavailable", target_fixture="stub_client")
 def stub_client_unavailable(monkeypatch):
     client = _FakeClient(_ACCOUNTS, _ATTRIBUTES, entries=None, raise_error=True)
+    _install_stub_client(monkeypatch, client)
+    return client
+
+
+@given(
+    "portfolio-analysis-service has an account with position data",
+    target_fixture="stub_client",
+)
+def stub_client_with_position_data(monkeypatch):
+    client = _FakeClient(_ACCOUNTS, _ATTRIBUTES, entries=None)
+    _install_stub_client(monkeypatch, client)
+    return client
+
+
+@given(
+    "portfolio-analysis-service has an account with no position data",
+    target_fixture="stub_client",
+)
+def stub_client_with_no_position_data(monkeypatch):
+    client = _FakeClient(_ACCOUNTS, _ATTRIBUTES, entries=None, position_entries=[])
+    _install_stub_client(monkeypatch, client)
+    return client
+
+
+@given(
+    parsers.parse(
+        "portfolio-analysis-service has an account with {count:d} positions "
+        "with recorded profit/loss"
+    ),
+    target_fixture="stub_client",
+)
+def stub_client_with_n_positions(monkeypatch, count):
+    client = _FakeClient(
+        _ACCOUNTS,
+        _ATTRIBUTES,
+        entries=None,
+        position_entries=_FakeClient._n_position_entries(count),
+    )
     _install_stub_client(monkeypatch, client)
     return client
 
@@ -633,3 +736,201 @@ def shortcut_buttons_enabled_after_refresh(dash_duo):
     for button_id in _SHORTCUT_BUTTON_IDS.values():
         button = dash_duo.find_element(f"#{button_id}")
         assert button.get_attribute("disabled") is None
+
+
+# --- 019: Overview position pie chart + winners/losers table --------------
+
+
+@when('the user changes the "To" date')
+def change_to_date(dash_duo):
+    earlier = (date.today() - timedelta(days=10)).isoformat()
+    dash_duo.driver.execute_script(
+        "var input = document.querySelector('#app-parameters-to-date input');"
+        "input.value = arguments[0];"
+        "input.dispatchEvent(new Event('change', {bubbles: true}));",
+        earlier,
+    )
+    dash_duo.wait_for_element("#overview-pie-container .js-plotly-plot", timeout=_TIMEOUT)
+
+
+def _pie_data(dash_duo):
+    return dash_duo.driver.execute_script(
+        "var gd = document.querySelector('#overview-pie-container .js-plotly-plot');"
+        "return gd && gd.data && gd.data[0] ? gd.data[0] : null;"
+    )
+
+
+@then("the pie chart shows one slice per position, sized by market-value share")
+def pie_chart_one_slice_per_position(dash_duo):
+    dash_duo.wait_for_element("#overview-pie-container .js-plotly-plot", timeout=_TIMEOUT)
+    pie = _pie_data(dash_duo)
+    assert pie is not None
+    assert len(pie["labels"]) == 3
+    assert set(pie["labels"]) == {"Apple Inc", "Cash", "Bond Fund"}
+
+
+@then("any slice of at least 5% share is labeled directly with its position name")
+def pie_chart_labels_large_slices(dash_duo):
+    pie = _pie_data(dash_duo)
+    labels = pie["labels"]
+    values = pie["values"]
+    text = pie["text"]
+    total = sum(values)
+    for label, value, slice_text in zip(labels, values, text, strict=True):
+        if value / total >= 0.05:
+            assert slice_text == label
+
+
+@then("every slice reveals its exact name, value, and percentage on hover")
+def pie_chart_hover_has_details(dash_duo):
+    pie = _pie_data(dash_duo)
+    assert "%{label}" in pie["hovertemplate"]
+    assert "%{percent}" in pie["hovertemplate"]
+    assert "%{value" in pie["hovertemplate"]
+
+
+@then("the pie chart refreshes to that account's own position weights")
+def pie_chart_refreshes_for_account(dash_duo):
+    dash_duo.wait_for_element("#overview-pie-container .js-plotly-plot", timeout=_TIMEOUT)
+    pie = _pie_data(dash_duo)
+    assert pie is not None and len(pie["labels"]) > 0
+
+
+@then("the pie chart refreshes to the newly selected date's position weights")
+def pie_chart_refreshes_for_date(dash_duo):
+    dash_duo.wait_for_element("#overview-pie-container .js-plotly-plot", timeout=_TIMEOUT)
+    pie = _pie_data(dash_duo)
+    assert pie is not None and len(pie["labels"]) > 0
+
+
+@then('a "no data" message is shown in place of the pie chart')
+def pie_chart_no_data_message(dash_duo):
+    dash_duo.wait_for_element("#overview-pie-container #overview-empty-state", timeout=_TIMEOUT)
+    assert dash_duo.find_elements("#overview-pie-container .js-plotly-plot") == []
+
+
+@then("the pie chart and winners/losers table stack vertically instead of side-by-side")
+def widgets_stack_vertically(dash_duo):
+    pie_col = dash_duo.find_element("#overview-pie-container").find_element(
+        "xpath", "./ancestor::div[contains(@class, 'col')][1]"
+    )
+    table_col = dash_duo.find_element("#overview-winners-losers-container").find_element(
+        "xpath", "./ancestor::div[contains(@class, 'col')][1]"
+    )
+    # Stacked = the table's column starts at or below the bottom of the pie
+    # chart's column, rather than alongside it at the same vertical position.
+    assert table_col.location["y"] >= pie_col.location["y"] + pie_col.size["height"] - 5
+
+
+def _table_rows(dash_duo):
+    return dash_duo.driver.execute_script(
+        "return Array.from(document.querySelectorAll("
+        "'#overview-winners-losers-container .dash-spreadsheet tr')).slice(1);"
+    )
+
+
+@then('a table captioned "Biggest winners and losers" is shown to the right of the pie chart')
+def table_is_captioned(dash_duo):
+    dash_duo.wait_for_element(
+        "#overview-winners-losers-container .dash-spreadsheet", timeout=_TIMEOUT
+    )
+    # Caption lives in the surrounding container, adjacent to the table itself.
+    text = dash_duo.find_element("#overview-winners-losers-container").text
+    assert "Biggest winners and losers" in text
+
+
+@then("the first 5 rows are the 5 highest profit/loss positions in descending order")
+def table_first_5_rows_are_highest(dash_duo):
+    dash_duo.wait_for_element(
+        "#overview-winners-losers-container .dash-spreadsheet", timeout=_TIMEOUT
+    )
+    rows = dash_duo.driver.execute_script(
+        "return Array.from(document.querySelectorAll("
+        "'#overview-winners-losers-container .dash-spreadsheet tr')).slice(1, 6)"
+        ".map(function(r) { return r.cells[0].innerText; });"
+    )
+    assert rows == ["Position 12", "Position 11", "Position 10", "Position 9", "Position 8"]
+
+
+@then("the last 5 rows are the 5 lowest profit/loss positions, mildest first and worst last")
+def table_last_5_rows_are_lowest(dash_duo):
+    rows = dash_duo.driver.execute_script(
+        "return Array.from(document.querySelectorAll("
+        "'#overview-winners-losers-container .dash-spreadsheet tr')).slice(6, 11)"
+        ".map(function(r) { return r.cells[0].innerText; });"
+    )
+    assert rows == ["Position 5", "Position 4", "Position 3", "Position 2", "Position 1"]
+
+
+@then("no position appears twice in the table")
+def table_no_duplicate_positions(dash_duo):
+    rows = dash_duo.driver.execute_script(
+        "return Array.from(document.querySelectorAll("
+        "'#overview-winners-losers-container .dash-spreadsheet tr')).slice(1)"
+        ".map(function(r) { return r.cells[0].innerText; });"
+    )
+    assert len(rows) == len(set(rows))
+
+
+def _row_background(dash_duo, row_index_1based: int) -> str:
+    return dash_duo.driver.execute_script(
+        "var rows = document.querySelectorAll("
+        "'#overview-winners-losers-container .dash-spreadsheet tr');"
+        "return rows[arguments[0]].cells[0].style.backgroundColor;",
+        row_index_1based,
+    )
+
+
+@then("row 1 is shaded the brightest green and row 5 the palest green")
+def rows_1_and_5_green_gradient(dash_duo):
+    dash_duo.wait_for_element(
+        "#overview-winners-losers-container .dash-spreadsheet", timeout=_TIMEOUT
+    )
+    assert _row_background(dash_duo, 1) != ""
+    assert _row_background(dash_duo, 5) != ""
+    assert _row_background(dash_duo, 1) != _row_background(dash_duo, 5)
+
+
+@then("row 6 is shaded the palest blue and row 10 the brightest blue")
+def rows_6_and_10_blue_gradient(dash_duo):
+    assert _row_background(dash_duo, 6) != ""
+    assert _row_background(dash_duo, 10) != ""
+    assert _row_background(dash_duo, 6) != _row_background(dash_duo, 10)
+
+
+@then(
+    "each row of the winners/losers table shows a position name, its profit/loss, "
+    "and its book cost"
+)
+def table_row_shows_all_columns(dash_duo):
+    dash_duo.wait_for_element(
+        "#overview-winners-losers-container .dash-spreadsheet", timeout=_TIMEOUT
+    )
+    headers = dash_duo.driver.execute_script(
+        "return Array.from(document.querySelectorAll("
+        "'#overview-winners-losers-container .dash-spreadsheet th'))"
+        ".map(function(t) { return t.innerText; });"
+    )
+    assert "Position" in headers
+    assert "Profit/Loss" in headers
+    assert "Book Cost" in headers
+
+
+@then(
+    parsers.parse("the winners/losers table shows exactly {count:d} rows with no position repeated")
+)
+def table_shows_exactly_n_rows(dash_duo, count):
+    dash_duo.wait_for_element(
+        "#overview-winners-losers-container .dash-spreadsheet", timeout=_TIMEOUT
+    )
+    rows = _table_rows(dash_duo)
+    assert len(rows) == count
+
+
+@then("the winners/losers table refreshes to that account's own biggest winners and losers")
+def table_refreshes_for_account(dash_duo):
+    dash_duo.wait_for_element(
+        "#overview-winners-losers-container .dash-spreadsheet", timeout=_TIMEOUT
+    )
+    rows = _table_rows(dash_duo)
+    assert len(rows) > 0

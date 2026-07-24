@@ -18,32 +18,10 @@ from typing import Any
 import plotly.graph_objects as go
 from dash import dash_table
 
+from src.components.value_formatting import _PLAIN_NUMERIC_ATTRIBUTES, _format_attribute_value
+
 _PALETTE_SIZE = 50
 _MISSING_VALUE_DISPLAY = "—"  # em dash
-
-# Attribute-aware value formatting (FR-008a, research.md #6a). `quantity` is
-# a share count, not a currency value; every other currently known Positions
-# attribute (market_value, income, book_cost, pnl, close_price) is monetary.
-# Currency is the fallback for any attribute not in this set, matching
-# _overview_chart.py's ATTRIBUTE_COLORS/DEFAULT_ATTRIBUTE_COLOR
-# fixed-mapping-with-default shape.
-_PLAIN_NUMERIC_ATTRIBUTES = frozenset({"quantity"})
-
-
-def _format_attribute_value(attribute_name: str, value: float) -> str:
-    """Format a numeric attribute value for display (FR-008a).
-
-    Args:
-        attribute_name: The wire-format attribute name (e.g. "market_value").
-        value: The raw numeric value to format.
-
-    Returns:
-        `"£1,234.50"`-style for monetary attributes; `"25.00"`-style (no
-        currency symbol) for `quantity`.
-    """
-    if attribute_name in _PLAIN_NUMERIC_ATTRIBUTES:
-        return f"{value:,.2f}"
-    return f"£{value:,.2f}"
 
 
 def _generate_palette(size: int) -> list[str]:
