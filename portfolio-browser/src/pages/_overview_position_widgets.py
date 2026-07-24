@@ -17,8 +17,6 @@ from dash import dash_table
 
 from src.components.value_formatting import _format_attribute_value
 
-_LABEL_THRESHOLD = 0.05  # FR-002a: on-slice label shown at >=5% share
-
 # Gradient endpoints (FR-008). Specific shades are a visual-design detail
 # (spec Assumptions) — these satisfy the described ordinal behavior
 # (brightest winner -> palest winner, palest loser -> brightest loser).
@@ -29,9 +27,18 @@ _LOSER_BRIGHT = "#1c5fc9"
 
 _MAX_PER_GROUP = 5
 
+# Pie layout: on-slice callout labels were dropped (crowded the chart with
+# long position names, per user report after 019 shipped) in favor of a
+# vertical legend below the chart, sized to the number of positions so it
+# never overlaps/shrinks the pie itself regardless of how many positions an
+# account holds.
+_PIE_AREA_HEIGHT = 320  # px reserved for the pie itself, fixed regardless of legend size
+_LEGEND_ROW_HEIGHT = 22  # px per legend entry (one position per row)
+_MIN_FIGURE_HEIGHT = 380
+
 
 def _build_pie_figure(entries: list[dict[str, Any]]) -> go.Figure:
-    """Build a pie chart of position weights by market value (FR-002, FR-002a).
+    """Build a pie chart of position weights by market value (FR-002).
 
     Args:
         entries: Single-date per-position entries (dicts with `position`
@@ -41,10 +48,15 @@ def _build_pie_figure(entries: list[dict[str, Any]]) -> go.Figure:
             drawn as a slice of a whole.
 
     Returns:
-        A `go.Figure` with one `go.Pie` trace: on-slice text for any slice
-        whose share is at least 5% of the total (empty text otherwise), and
-        a hover template showing the exact position name, market value, and
-        percentage for every slice regardless of size.
+        A `go.Figure` with one `go.Pie` trace, no on-slice text (a hover
+        tooltip showing the exact position name, market value, and
+        percentage — plus the legend's color-to-name mapping — are
+        sufficient to identify a slice without crowding the chart with
+        callout labels for potentially dozens of long position names). The
+        legend is a vertical list positioned below the pie (not to the
+        right, where it would cover half the chart), and the figure's own
+        height grows with the number of positions so the legend always has
+        room without shrinking the pie.
     """
     qualifying = [
         (e["position"], e["market_value"])
@@ -53,19 +65,18 @@ def _build_pie_figure(entries: list[dict[str, Any]]) -> go.Figure:
     ]
     labels = [position for position, _ in qualifying]
     values = [value for _, value in qualifying]
-    total = sum(values)
 
-    text = [
-        position if total > 0 and (value / total) >= _LABEL_THRESHOLD else ""
-        for position, value in qualifying
-    ]
+    figure_height = max(
+        _MIN_FIGURE_HEIGHT, _PIE_AREA_HEIGHT + len(labels) * _LEGEND_ROW_HEIGHT
+    )
+    pie_fraction = _PIE_AREA_HEIGHT / figure_height
 
     pie = go.Pie(
         labels=labels,
         values=values,
-        text=text,
-        textinfo="text",
+        textinfo="none",
         hovertemplate="%{label}<br>Market value: £%{value:,.2f}<br>%{percent}<extra></extra>",
+        domain={"y": [1 - pie_fraction, 1]},
     )
     fig = go.Figure(data=[pie])
     fig.update_layout(
@@ -73,6 +84,14 @@ def _build_pie_figure(entries: list[dict[str, Any]]) -> go.Figure:
         template="plotly_white",
         font={"family": "Helvetica, Arial, sans-serif"},
         margin={"l": 20, "r": 20, "t": 50, "b": 20},
+        legend={
+            "orientation": "v",
+            "y": 1 - pie_fraction - 0.02,
+            "yanchor": "top",
+            "x": 0.5,
+            "xanchor": "center",
+        },
+        height=figure_height,
     )
     return fig
 

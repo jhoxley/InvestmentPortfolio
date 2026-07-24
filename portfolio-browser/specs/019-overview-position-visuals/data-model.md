@@ -15,8 +15,12 @@ whose `entries` all share the same (single) date.
 |---|---|---|
 | `position` | `str` | From `entries[].position`. |
 | `market_value` | `float` | From `entries[].market_value`; excluded entirely if absent or `<= 0` (FR-012, Edge Cases). |
-| `share` | `float` | `market_value / sum(market_value across all included slices)`. |
-| `label_visible` | `bool` | `share >= 0.05` (FR-002a / `/speckit-clarify` Q1) — controls whether Plotly draws the position name directly on the slice. |
+| `share` | `float` | `market_value / sum(market_value across all included slices)`. Used only to compute the hover tooltip's percentage — no longer drives any on-slice labeling decision. |
+
+*(Revised 2026-07-24, research.md #3: the original `label_visible`
+5%-threshold field was removed — no slice ever carries on-slice text now.
+Identification is via the below-chart legend's color mapping and via
+hover only.)*
 
 ## Position Performance Rank Row (new, derived — not fetched, not stored)
 

@@ -442,9 +442,10 @@ def _render_position_widgets(
         message = "No position data is available for the selected account and date."
         return _empty_state(message), _empty_state(message)
 
-    pie = dcc.Graph(
-        id="overview-pie-chart", figure=_build_pie_figure(entries), style={"height": "400px"}
-    )
+    # No fixed `style` height here: _build_pie_figure() sets its own
+    # `layout.height`, growing with the number of positions so the legend
+    # (now below the chart, not to the right) always has room.
+    pie = dcc.Graph(id="overview-pie-chart", figure=_build_pie_figure(entries))
     table = _build_winners_losers_table(entries)
     return pie, html.Div(
         [html.H5("Biggest winners and losers", className="mt-2"), table]

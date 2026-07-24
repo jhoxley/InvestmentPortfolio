@@ -51,35 +51,57 @@
   `018` extractions were meant to avoid — a small, explicit shared module
   is one import away either way, with a clearer ownership story.
 
-## 3. Pie chart: labeling threshold, hover, and slice coloring
+## 3. Pie chart: labeling, legend placement/sizing, and slice coloring
 
-- **Decision**: A single `plotly.graph_objects.Pie` trace. Per-slice `text`
-  is set to the position name only for slices whose share is ≥5% of the
-  account's total market value (empty string otherwise, so Plotly draws no
-  on-slice label for small slices — `textinfo="text"`); `hovertemplate` is
-  set on every slice regardless of size, showing exact position name,
-  market value, and percentage. Slice colors use Plotly's own default
-  qualitative color sequence — no custom palette.
-- **Rationale**: `go.Pie`'s own `text`/`textinfo`/`hovertemplate` props are
-  the built-in, first-class mechanism for exactly this per-slice
-  label-vs-hover split (Principle V: use the library's own mechanism, same
-  precedent `018` set for `stackgroup`). The 5% labeling threshold and
-  always-on hover were fixed directly by `/speckit-clarify`'s Q1 answer.
-  Slice coloring has no cross-refresh *stability* requirement in this
-  spec (unlike `018`'s FR-015 for the line chart, which explicitly required
-  a position to keep the same color across selections/date ranges) — this
-  pie chart is a single, self-contained snapshot re-rendered wholesale on
-  every account/date change, so there is no "does this color persist"
-  question to answer, and Plotly's own default sequence is sufficient
-  without reinventing `018`'s 50-color hash palette for a materially
-  different requirement.
-- **Alternatives considered**: Reusing `_positions_chart.py`'s
-  `_color_for_position()` hash-based palette for pie slices too — rejected:
-  that function exists specifically to guarantee color *stability* across
-  a line chart's changing selection over time, a property this pie chart's
-  spec never asks for; reusing it here would import a Positions-page
-  concept into Overview for a requirement that doesn't exist, adding
-  coupling without a corresponding need. Grouping small slices into an
+- **Original decision (2026-07-17, superseded below)**: A single
+  `plotly.graph_objects.Pie` trace with per-slice `text` set to the
+  position name for slices ≥5% share (`textinfo="text"`), default
+  (right-hand, vertical) legend placement.
+- **Revised decision (2026-07-24, post-ship user report)**: `textinfo` is
+  `"none"` — no on-slice text at all, at any share. The legend is
+  positioned *below* the pie (`legend.orientation="v"`, centered, anchored
+  just under the pie's own `domain`), not to the right. The `go.Pie`
+  trace's own `domain.y` is fixed to a constant pixel band
+  (`_PIE_AREA_HEIGHT = 320`px, expressed as a fraction of the figure's
+  total height) so the pie itself never shrinks; instead, the whole
+  figure's `layout.height` grows linearly with the number of positions
+  (`_PIE_AREA_HEIGHT + count * _LEGEND_ROW_HEIGHT`, `_LEGEND_ROW_HEIGHT =
+  22`px) so the legend always has exactly enough room below, however many
+  positions the account holds. `hovertemplate` is unchanged — still shown
+  on every slice regardless of size. Slice colors still use Plotly's own
+  default qualitative color sequence — no custom palette.
+- **Rationale**: The original 5%-threshold labeling (from
+  `/speckit-clarify` Q1) assumed short position names; in practice most
+  names in this domain are long (fund/ETF names), so even one or two
+  on-slice labels with Plotly's default leader-line placement crowded the
+  chart and forced the pie itself smaller to make room — compounded by the
+  right-hand vertical legend covering roughly half the remaining chart
+  area. Moving the legend below and removing on-slice text entirely
+  resolves both complaints with one change: `go.Pie`'s own
+  `hovertemplate` already carries the exact name/value/percentage per
+  slice (Principle V — no new mechanism, just using more of the one
+  already in place), and a fixed pixel-height pie with the *figure's own*
+  height scaling to the legend (rather than the legend being squeezed into
+  a fixed figure height) is a purely arithmetic, deterministic layout with
+  no dependency on Plotly's own text-fitting/leader-line heuristics, which
+  were the actual source of the crowding.
+- **Alternatives considered**: A horizontal (`orientation="h"`) legend
+  below the chart, wrapping across multiple rows — rejected: Plotly wraps
+  horizontal legends based on available width, which is unpredictable to
+  reason about or test for entries as long as most position names here,
+  and doesn't yield a clean formula for how much figure height to reserve.
+  A vertical legend with one entry per row gives an exact, testable
+  height calculation instead. Truncating long position names in the
+  legend — rejected: the full name is already one hover away, and
+  truncation risks two different positions reading identically in the
+  legend, undermining the very identification the legend exists for.
+  Reusing `_positions_chart.py`'s `_color_for_position()` hash-based
+  palette for pie slices too — rejected: that function exists specifically
+  to guarantee color *stability* across a line chart's changing selection
+  over time, a property this pie chart's spec never asks for; reusing it
+  here would import a Positions-page concept into Overview for a
+  requirement that doesn't exist, adding coupling without a corresponding
+  need. Grouping small slices into an
   "Other" catch-all — rejected per spec Assumptions (every position is its
   own slice; the labeling threshold, not a grouping cutoff, is how small
   positions are handled per `/speckit-clarify` Q1).

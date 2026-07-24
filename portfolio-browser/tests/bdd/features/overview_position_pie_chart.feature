@@ -9,7 +9,8 @@ Feature: Overview position weight pie chart
   Scenario: The pie chart renders with one slice per position
     Given the Overview page has finished loading its default chart
     Then the pie chart shows one slice per position, sized by market-value share
-    And any slice of at least 5% share is labeled directly with its position name
+    And no slice carries an on-slice callout label
+    And a legend below the chart lists every position with a matching color
     And every slice reveals its exact name, value, and percentage on hover
 
   Scenario: Changing the account refreshes the pie chart

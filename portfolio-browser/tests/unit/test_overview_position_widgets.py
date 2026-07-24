@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from src.pages._overview_position_widgets import (
     _build_pie_figure,
     _build_winners_losers_table,
@@ -45,30 +47,60 @@ def test_build_pie_figure_excludes_non_positive_or_missing_market_value() -> Non
     assert set(pie.labels) == {"Apple Inc"}
 
 
-def test_build_pie_figure_labels_slices_at_or_above_5_percent() -> None:
+def test_build_pie_figure_has_no_on_slice_text() -> None:
+    """No callout labels on the slices themselves (crowds the chart with
+
+    long position names) — identification is via hover + the legend's
+    color-to-name mapping only.
+    """
     entries = [
-        {"position": "Big Holding", "market_value": 950.0},  # 95%
-        {"position": "Small Holding", "market_value": 50.0},  # 5%
+        {"position": "Big Holding", "market_value": 950.0},
+        {"position": "Small Holding", "market_value": 50.0},
     ]
     fig = _build_pie_figure(entries)
     pie = fig.data[0]
 
-    by_label = dict(zip(pie.labels, pie.text, strict=True))
-    assert by_label["Big Holding"] == "Big Holding"
-    assert by_label["Small Holding"] == "Small Holding"
+    assert pie.textinfo == "none"
 
 
-def test_build_pie_figure_does_not_label_slices_below_5_percent() -> None:
+def test_build_pie_figure_legend_is_vertical_below_the_chart() -> None:
     entries = [
-        {"position": "Big Holding", "market_value": 980.0},  # 98%
-        {"position": "Tiny Holding", "market_value": 20.0},  # 2%
+        {"position": "Big Holding", "market_value": 950.0},
+        {"position": "Small Holding", "market_value": 50.0},
     ]
     fig = _build_pie_figure(entries)
-    pie = fig.data[0]
 
-    by_label = dict(zip(pie.labels, pie.text, strict=True))
-    assert by_label["Big Holding"] == "Big Holding"
-    assert by_label["Tiny Holding"] == ""
+    assert fig.layout.legend.orientation == "v"
+    assert fig.layout.legend.x == 0.5
+    assert fig.layout.legend.xanchor == "center"
+    # Positioned below the pie's own domain, not to the right of it.
+    assert fig.layout.legend.y < fig.data[0].domain.y[0] + 0.05
+
+
+def test_build_pie_figure_height_grows_with_position_count() -> None:
+    few_entries = [{"position": f"P{i}", "market_value": 10.0} for i in range(3)]
+    many_entries = [{"position": f"P{i}", "market_value": 10.0} for i in range(30)]
+
+    few_fig = _build_pie_figure(few_entries)
+    many_fig = _build_pie_figure(many_entries)
+
+    assert many_fig.layout.height > few_fig.layout.height
+
+
+def test_build_pie_figure_pie_domain_height_is_constant_regardless_of_position_count() -> None:
+    """The pie itself never shrinks to make room for a long legend — only
+
+    the figure's total height (and therefore the legend's own space) grows.
+    """
+    few_entries = [{"position": f"P{i}", "market_value": 10.0} for i in range(3)]
+    many_entries = [{"position": f"P{i}", "market_value": 10.0} for i in range(30)]
+
+    few_fig = _build_pie_figure(few_entries)
+    many_fig = _build_pie_figure(many_entries)
+
+    few_pie_px = (1 - few_fig.data[0].domain.y[0]) * few_fig.layout.height
+    many_pie_px = (1 - many_fig.data[0].domain.y[0]) * many_fig.layout.height
+    assert few_pie_px == pytest.approx(many_pie_px, abs=1.0)
 
 
 def test_build_pie_figure_hover_includes_name_value_and_percent_for_every_slice() -> None:

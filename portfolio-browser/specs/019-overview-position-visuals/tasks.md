@@ -233,3 +233,17 @@ Task: "Write failing unit tests for _gradient_color()"
 - No `tests/contract/` directory tasks — this feature adds no new external
   API contract (reuses `018`'s endpoint as-is, per
   `contracts/ui-contract.md`)
+- **Post-ship fix (2026-07-24)**: user feedback after this feature shipped
+  reported the pie chart's right-hand legend covered half the chart, and
+  on-slice callout labels (T003/T004's original 5%-threshold design)
+  crowded the chart given how long most position names are in practice.
+  Fixed in `_build_pie_figure()` (T004): `textinfo` is now always `"none"`
+  (no on-slice text at any share), and the legend moved to a vertical list
+  below the pie, with the figure's own height now growing with position
+  count so the legend never overlaps/shrinks the pie. See spec.md's
+  "Post-ship revision 2026-07-24" and research.md #3's revised decision.
+  T003's/T005's original label-threshold unit tests were replaced with
+  tests for the new no-label/legend-position/height-scaling behavior; the
+  BDD scenario in `overview_position_pie_chart.feature` was updated to
+  match. No task IDs were renumbered — this is a same-scope fix to
+  already-completed T003/T004, not new task work.

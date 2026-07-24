@@ -22,6 +22,23 @@
   elsewhere in the app shell, rather than squeezing both side-by-side down
   to an illegible width.
 
+### Post-ship revision 2026-07-24
+
+- On-slice callout labels (the 5% threshold above) turned out not to work
+  in practice: most position names are long, so labeling even a handful of
+  slices with leader lines crowded the chart and shrank the pie itself to
+  the point of being unusable, and the (previously right-hand, vertical)
+  legend covered roughly half the chart. **Superseded**: on-slice callout
+  labels are removed entirely — a hover tooltip (still showing the exact
+  position name, market value, and percentage) plus the legend's
+  color-to-name mapping are sufficient to identify a slice. The legend
+  moves from the right-hand side to a vertical list below the chart, and
+  the chart's own height now grows with the number of positions so the
+  legend never overlaps or shrinks the pie regardless of account size.
+  FR-002a and the Position Weight Slice entity below reflect this
+  revision; the original 5%-labeling clarification above is kept for
+  history but no longer describes current behavior.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - See portfolio composition at a glance (Priority: P1)
@@ -48,9 +65,9 @@ the pie chart's slices accordingly.
    **When** the user looks at the row below it, **Then** a pie chart is
    shown with one slice per position, sized by that position's share of
    the account's total market value on the currently selected "To" date,
-   with the position name labeled directly on any slice of at least 5%
-   share, and every slice's exact name/value/percentage available on
-   hover.
+   with no on-slice text label, a legend below the chart listing every
+   position with its matching color, and every slice's exact
+   name/value/percentage available on hover.
 2. **Given** the pie chart is displayed, **When** the user changes the
    selected account, **Then** the pie chart refreshes to show that
    account's own position weights as of its own current "To" date.
@@ -167,12 +184,13 @@ blue through bright blue (biggest loser).
   slice per position held by the selected account, sized by that
   position's market value as a share of the account's total market value
   on the currently selected "To" date.
-- **FR-002a**: Every slice representing at least 5% of the account's
-  total market value MUST show its position name directly on (or
-  immediately next to) the slice. Every slice, regardless of size, MUST
-  reveal its exact position name, market value, and percentage share on
-  hover (or the equivalent touch interaction), so smaller/unlabeled slices
-  remain individually identifiable on demand.
+- **FR-002a** *(revised 2026-07-24, see Clarifications)*: No slice MUST
+  show an on-slice text label — a legend positioned below the chart (not
+  beside it) MUST list every position with its matching color, and every
+  slice, regardless of size, MUST reveal its exact position name, market
+  value, and percentage share on hover (or the equivalent touch
+  interaction). The chart's rendered height MUST grow with the number of
+  positions so the legend never overlaps or shrinks the pie itself.
 - **FR-003**: The pie chart MUST use the account's market value on the
   "To" date only (a single-date snapshot), not a range — it is unaffected
   by the "From" date.
@@ -222,8 +240,8 @@ blue through bright blue (biggest loser).
 
 - **Position Weight Slice**: One pie-chart slice, representing a single
   position's market value as a percentage of its account's total market
-  value on the selected "To" date — labeled directly when its share is at
-  least 5%, otherwise identifiable via hover.
+  value on the selected "To" date — identifiable via the below-chart
+  legend's color mapping and via hover, never via an on-slice text label.
 - **Position Performance Rank Row**: One row of the winners/losers table,
   holding a position's name, its profit/loss value, its book cost value,
   its rank (1st highest through 5th highest, or worst through 5th-worst),

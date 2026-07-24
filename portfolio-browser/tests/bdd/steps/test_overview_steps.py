@@ -769,16 +769,31 @@ def pie_chart_one_slice_per_position(dash_duo):
     assert set(pie["labels"]) == {"Apple Inc", "Cash", "Bond Fund"}
 
 
-@then("any slice of at least 5% share is labeled directly with its position name")
-def pie_chart_labels_large_slices(dash_duo):
+@then("no slice carries an on-slice callout label")
+def pie_chart_has_no_callout_labels(dash_duo):
     pie = _pie_data(dash_duo)
-    labels = pie["labels"]
-    values = pie["values"]
-    text = pie["text"]
-    total = sum(values)
-    for label, value, slice_text in zip(labels, values, text, strict=True):
-        if value / total >= 0.05:
-            assert slice_text == label
+    assert pie["textinfo"] == "none"
+
+
+@then("a legend below the chart lists every position with a matching color")
+def pie_chart_legend_below_lists_every_position(dash_duo):
+    pie = _pie_data(dash_duo)
+    legend_entries = dash_duo.driver.execute_script(
+        "return document.querySelectorAll("
+        "'#overview-pie-container .legend .traces').length;"
+    )
+    assert legend_entries == len(pie["labels"])
+    gd = dash_duo.driver.execute_script(
+        "return document.querySelector('#overview-pie-container .js-plotly-plot');"
+    )
+    assert gd is not None
+    # Vertical legend, centered, positioned below the pie's own domain.
+    domain_bottom = pie["domain"]["y"][0]
+    legend_y = dash_duo.driver.execute_script(
+        "var gd = document.querySelector('#overview-pie-container .js-plotly-plot');"
+        "return gd.layout.legend.y;"
+    )
+    assert legend_y < domain_bottom + 0.05
 
 
 @then("every slice reveals its exact name, value, and percentage on hover")
