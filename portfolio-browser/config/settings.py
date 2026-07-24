@@ -21,5 +21,13 @@ class Settings(BaseSettings):
     market_data_service_url: str = "http://127.0.0.1:8001"
     portfolio_analysis_service_url: str = "http://127.0.0.1:8000"
 
-    # Timeout for outbound calls to portfolio_analysis_service_url.
-    request_timeout_seconds: float = 5.0
+    # Timeout for outbound calls to portfolio_analysis_service_url. Larger
+    # accounts (e.g. ~40+ positions) have been observed taking 5-6.6s to
+    # compute a response even when the service succeeds (verified via
+    # portfolio-analysis-api.log: status 200 responses at 5057-6597ms) — a
+    # 5s timeout was intermittently firing on correct, merely-slightly-slow
+    # responses, surfacing as a false "Could not load ... data" error with
+    # nothing wrong (or logged) on the service side. 20s gives real margin
+    # above the worst observed case, including when two widgets both fetch
+    # concurrently on the same account/date change.
+    request_timeout_seconds: float = 20.0
