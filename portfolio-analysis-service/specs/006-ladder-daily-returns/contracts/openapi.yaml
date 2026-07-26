@@ -1,0 +1,413 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Locally hosted API for portfolio analysis features. Ingestion of a sub-account ledger
+    now also computes and persists two per-row return metrics — position_return and
+    weighted_position_return — alongside the existing priced ladder columns, and both are
+    retrievable through the existing position time series endpoint.
+  version: "0.6.0"
+
+servers:
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+paths:
+  /accounts/{account_name}/ladder:
+
+    post:
+      operationId: ingest_ladder
+      summary: >
+        Ingest a sub-account ledger, generate a daily position ladder, and enrich it with
+        GBP price, market value, portfolio weight, position return, and weighted position
+        return
+      description: >
+        In addition to the existing price/market-value/portfolio-weight enrichment
+        (feature 002), ingestion now also computes and persists, for every row:
+        position_return (price change plus per-share income, relative to the previous
+        ladder date's price) and weighted_position_return (position_return scaled by the
+        sub-account's previous ladder date's portfolio_weight — its start-of-day weight).
+        Both metrics are 0.0 on a sub-account's first recorded ladder date. No additional
+        market-data-service calls are made for this computation — both metrics are derived
+        entirely from columns already present after price enrichment. The response shape
+        (IngestionSummary) is unchanged.
+      tags: [Ladder]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+          description: >
+            Case-sensitive account identifier. Restricted to alphanumeric
+            characters, hyphens, and underscores; 1–64 characters.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: >
+                    XLSX file produced by the create_subaccount_ledger pipeline
+                    mode. Must contain columns: date, sub_account, book_cost,
+                    quantity, total_income.
+      responses:
+        "201":
+          description: >
+            New ladder created and enriched with market data, position return, and
+            weighted position return successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionSummary"
+              example:
+                account_name: my-portfolio
+                status: created
+                row_count: 1240
+                from_date: "2022-01-03"
+                to_date: "2026-07-03"
+                sub_accounts: ["Cash", "AAPL.L", "VWRL.L"]
+                ingested_at: "2026-07-26T10:00:00Z"
+                _links:
+                  self: "/v1/accounts/my-portfolio/ladder"
+                  download: "/v1/accounts/my-portfolio/ladder/download"
+        "200":
+          description: >
+            File checksum matches an existing ladder — the underlying rows and date range
+            are not re-expanded, but price, market value, portfolio weight, position
+            return, and weighted position return are all recomputed from fresh
+            market-data-service calls plus the current stored ladder (status "refreshed")
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionSummary"
+              example:
+                account_name: my-portfolio
+                status: refreshed
+                row_count: 1240
+                from_date: "2022-01-03"
+                to_date: "2026-07-03"
+                sub_accounts: ["Cash", "AAPL.L", "VWRL.L"]
+                ingested_at: "2026-07-26T09:00:00Z"
+                _links:
+                  self: "/v1/accounts/my-portfolio/ladder"
+                  download: "/v1/accounts/my-portfolio/ladder/download"
+        "409":
+          description: >
+            A ladder already exists for this account with a different checksum.
+            Merging updated ledgers is not currently supported.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: >
+            Validation failed — invalid account name, non-XLSX file, missing columns, bad
+            data types, empty date range, a sub-account with no usable identifier-mapping
+            entry, or one or more (sub-account, date) pairs that could not be priced in
+            GBP. In the latter two cases every affected sub-account and date is named in
+            `detail`. (Unchanged by this feature — position_return and
+            weighted_position_return introduce no new validation failure modes.)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "502":
+          description: >
+            The configured market-data-service could not be reached, or returned an
+            error, while resolving prices for one or more sub-accounts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+  /accounts/{account_name}/position:
+
+    get:
+      operationId: get_position_timeseries
+      summary: >
+        Retrieve a per-business-day time series of requested attributes for one or more
+        positions (sub-accounts) within an account
+      tags: [Position Timeseries]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+        - name: position
+          in: query
+          required: false
+          description: >
+            Repeated parameter; zero or more. Position names may contain spaces and symbols
+            and MUST be percent-encoded. Values with no match in the account's recorded
+            sub_accounts are silently ignored. If omitted entirely, every position recorded
+            for the account (including "Cash") is included.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: attribute
+          in: query
+          required: true
+          description: >
+            Repeated parameter; at least one required. One of market_value, income,
+            book_cost, pnl, close_price, quantity, position_return,
+            weighted_position_return. Note: "capital" is not valid here.
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - market_value
+                - income
+                - book_cost
+                - pnl
+                - close_price
+                - quantity
+                - position_return
+                - weighted_position_return
+            minItems: 1
+          style: form
+          explode: true
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the account's own earliest recorded position-ladder date. Adjusted
+            forward to the next business day if it falls on a weekend.
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the business day before today. Must not be later than today.
+            Adjusted forward to the next business day if it falls on a weekend (capped at
+            today).
+      responses:
+        "200":
+          description: Position time series returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionTimeSeriesResponse"
+              example:
+                account_name: HL-SIPP
+                attributes: [position_return, weighted_position_return]
+                positions: ["Apple Inc", "Berkshire Hathaway Class B (BRK.B)"]
+                from_date: "2024-01-02"
+                to_date: "2024-01-10"
+                entries:
+                  - date: "2024-01-02"
+                    position: "Apple Inc"
+                    position_return: 0.0
+                    weighted_position_return: 0.0
+                  - date: "2024-01-03"
+                    position: "Apple Inc"
+                    position_return: 0.0123
+                    weighted_position_return: 0.0071
+                _links:
+                  self: >-
+                    /v1/accounts/HL-SIPP/position?attribute=position_return&attribute=weighted_position_return&start=2024-01-02&end=2024-01-10
+                  positions: "/v1/accounts/HL-SIPP/positions"
+                  attributes: "/v1/positions/attributes"
+                  accounts: "/v1/accounts"
+        "404":
+          description: No resource of any kind has been ingested for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: >
+            Validation failed — invalid account name, account known but no position ladder
+            ingested, no attribute supplied, an unsupported attribute name (including
+            "capital"), an invalid date range, a future end date, or a resolved start date
+            before the position ladder's earliest recorded date
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+  /positions/attributes:
+
+    get:
+      operationId: get_position_attribute_metadata
+      summary: Describe the attributes that can be requested from the position time series endpoint
+      tags: [Position Timeseries]
+      responses:
+        "200":
+          description: Attribute metadata returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttributeMetadataResponse"
+              example:
+                attributes:
+                  - name: market_value
+                    description: The position's market value on that date.
+                    source: position_ladder
+                  - name: pnl
+                    description: income + market_value - book_cost on that date, for this position.
+                    source: position_ladder
+                  - name: position_return
+                    description: >-
+                      The position's daily return: price change plus per-share income,
+                      relative to the previous day's price. Zero on the position's first
+                      recorded ladder date.
+                    source: position_ladder
+                  - name: weighted_position_return
+                    description: >-
+                      position_return scaled by the position's start-of-day (previous
+                      ladder date's) portfolio weight, for account- or theme-level
+                      contribution analysis.
+                    source: position_ladder
+                _links:
+                  self: "/v1/positions/attributes"
+
+components:
+  schemas:
+
+    Links:
+      type: object
+      required: [self]
+      properties:
+        self:
+          type: string
+        download:
+          type: string
+
+    IngestionSummary:
+      type: object
+      required:
+        [account_name, status, row_count, from_date, to_date, sub_accounts, ingested_at, _links]
+      properties:
+        account_name:
+          type: string
+        status:
+          type: string
+          enum: [created, refreshed]
+          description: >
+            'created' for a brand-new ladder; 'refreshed' when the checksum matched an
+            existing ladder but price/market_value/portfolio_weight/position_return/
+            weighted_position_return were all recomputed (rows and date range are not
+            re-expanded)
+        row_count:
+          type: integer
+          minimum: 0
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+        sub_accounts:
+          type: array
+          items:
+            type: string
+        ingested_at:
+          type: string
+          format: date-time
+        _links:
+          $ref: "#/components/schemas/Links"
+
+    PositionTimeSeriesEntry:
+      type: object
+      required: [date, position]
+      properties:
+        date:
+          type: string
+          format: date
+        position:
+          type: string
+      additionalProperties:
+        type: number
+        format: float
+      description: >
+        Additional properties are the requested attribute values (e.g. `market_value`,
+        `position_return`, `weighted_position_return`) — only requested attributes appear
+        on each entry.
+
+    PositionTimeSeriesResponse:
+      type: object
+      required: [account_name, attributes, positions, from_date, to_date, entries, _links]
+      properties:
+        account_name:
+          type: string
+        attributes:
+          type: array
+          items:
+            type: string
+        positions:
+          type: array
+          items:
+            type: string
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/PositionTimeSeriesEntry"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    AttributeDefinition:
+      type: object
+      required: [name, description, source]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        source:
+          type: string
+
+    AttributeMetadataResponse:
+      type: object
+      required: [attributes, _links]
+      properties:
+        attributes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttributeDefinition"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string

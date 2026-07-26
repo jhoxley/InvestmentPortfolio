@@ -542,3 +542,38 @@ def check_position_entry_count(val_response: object, count: int) -> None:
     """Assert the position response contains exactly the given number of entries."""
     entries = val_response.json()["entries"]
     assert len(entries) == count, f"Expected {count} entries, got {len(entries)}"
+
+
+@given(
+    parsers.parse(
+        'account "{account_name}" has a position ladder where "{sub_account}" is divested '
+        "to zero quantity for validation"
+    )
+)
+def val_ladder_with_divested_position(
+    account_name: str, sub_account: str, app_client: TestClient
+) -> None:
+    """Ingest a ladger where a position's quantity reaches 0.0 on its closure date (FR-005)."""
+    df = pd.DataFrame(
+        {
+            "date": [date(2020, 1, 2), date(2020, 1, 3)],
+            "sub_account": [sub_account, sub_account],
+            "book_cost": [500.0, 0.0],
+            "quantity": [5.0, 0.0],
+            "total_income": [0.0, 0.0],
+        }
+    )
+    resp = app_client.post(
+        f"/v1/accounts/{account_name}/ladder",
+        files=_multipart(_xlsx_bytes(df)),
+    )
+    assert resp.status_code == 201, f"Ladder setup failed: {resp.text}"
+
+
+@then("the position response has no null position_return values")
+def check_position_return_not_null(val_response: object) -> None:
+    """Assert every entry's position_return is present and not null (FR-005 no-raise guard)."""
+    entries = val_response.json()["entries"]
+    assert entries, "expected at least one entry"
+    for entry in entries:
+        assert entry.get("position_return") is not None

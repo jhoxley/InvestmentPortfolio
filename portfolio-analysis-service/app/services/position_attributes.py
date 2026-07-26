@@ -1,4 +1,4 @@
-"""Single source of truth for the six supported position time series attributes.
+"""Single source of truth for the eight supported position time series attributes.
 
 Both FR-008 (request validation) and FR-017 (metadata endpoint) read from the same
 `ATTRIBUTE_DEFINITIONS` list, so the two can never drift apart (SC-005). Unlike
@@ -40,6 +40,22 @@ ATTRIBUTE_DEFINITIONS: list[AttributeDefinition] = [
         description="The position's held quantity on that date.",
         source="position_ladder",
     ),
+    AttributeDefinition(
+        name="position_return",
+        description=(
+            "The position's daily return: price change plus per-share income, relative to "
+            "the previous day's price. Zero on the position's first recorded ladder date."
+        ),
+        source="position_ladder",
+    ),
+    AttributeDefinition(
+        name="weighted_position_return",
+        description=(
+            "position_return scaled by the position's start-of-day (previous ladder date's) "
+            "portfolio weight, for account- or theme-level contribution analysis."
+        ),
+        source="position_ladder",
+    ),
 ]
 
 SUPPORTED_ATTRIBUTES: frozenset[str] = frozenset(a.name for a in ATTRIBUTE_DEFINITIONS)
@@ -50,6 +66,8 @@ COLUMN_FOR_ATTRIBUTE: dict[str, str] = {
     "book_cost": "book_cost",
     "close_price": "price",
     "quantity": "quantity",
+    "position_return": "position_return",
+    "weighted_position_return": "weighted_position_return",
 }
 
 

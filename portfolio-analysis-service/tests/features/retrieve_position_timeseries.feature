@@ -89,3 +89,10 @@ Feature: Position Time Series
     When a request is made for attribute "market_value" for position "Apple Inc" ending on the most recent business day
     Then the response status is 200
     And "Apple Inc" has entries through the resolved end date, with every entry after its last ingested date carrying the same forward-filled market_value
+
+  @us4
+  Scenario: Position return and weighted position return are retrievable as time series attributes
+    Given account "test-portfolio" has an ingested position ladder containing positions "Apple Inc" and "Berkshire Hathaway Class B (BRK.B)"
+    When a request is made for attributes "position_return" and "weighted_position_return", for positions "Apple Inc" and "Berkshire Hathaway Class B (BRK.B)", from 2024-01-02 to 2024-01-10
+    Then the response status is 200
+    And every entry contains a "position_return" value and a "weighted_position_return" value

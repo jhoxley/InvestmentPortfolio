@@ -142,3 +142,10 @@ Feature: Input Validation
     When a position request is made for attribute "market_value" with start "2020-01-02" and end "2020-01-02" for account "pos-single-day-val"
     Then the validation response status is 200
     And the position response contains exactly 1 entry
+
+  @validation
+  Scenario: A divested position still ingests successfully with position_return recorded on its closure date
+    Given account "pos-divested-val" has a position ladder where "Sold Corp" is divested to zero quantity for validation
+    When a position request is made for attribute "position_return" for position "Sold Corp" for account "pos-divested-val"
+    Then the validation response status is 200
+    And the position response has no null position_return values

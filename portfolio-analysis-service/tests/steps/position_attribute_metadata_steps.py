@@ -26,8 +26,8 @@ def check_status_code(metadata_response: object, status_code: int) -> None:
 
 
 @then(
-    "the response lists all six supported attributes: market_value, income, book_cost, "
-    "pnl, close_price, and quantity"
+    "the response lists all eight supported attributes: market_value, income, book_cost, "
+    "pnl, close_price, quantity, position_return, and weighted_position_return"
 )
 def check_all_attributes_listed(metadata_response: object) -> None:
     """Assert the returned attribute-name set matches SUPPORTED_ATTRIBUTES exactly (SC-005)."""
