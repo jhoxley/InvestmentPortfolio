@@ -10,7 +10,15 @@ import structlog.contextvars
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.api import accounts, capital, health, ladder, position_timeseries, timeseries
+from app.api import (
+    accounts,
+    capital,
+    health,
+    ladder,
+    performance,
+    position_timeseries,
+    timeseries,
+)
 from app.config import get_settings
 from app.exceptions import (
     AccountNotFoundError,
@@ -65,6 +73,7 @@ app.include_router(capital.router)
 app.include_router(timeseries.router)
 app.include_router(accounts.router)
 app.include_router(position_timeseries.router)
+app.include_router(performance.router)
 app.include_router(health.router)
 
 

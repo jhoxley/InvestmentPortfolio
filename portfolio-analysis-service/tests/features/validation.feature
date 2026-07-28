@@ -149,3 +149,30 @@ Feature: Input Validation
     When a position request is made for attribute "position_return" for position "Sold Corp" for account "pos-divested-val"
     Then the validation response status is 200
     And the position response has no null position_return values
+
+  @validation
+  Scenario: Missing mandatory attribute is rejected for the performance endpoint
+    Given account "perf-missing-attr-val" has only a position ladder ingested for validation
+    When a performance request is made with no attribute for account "perf-missing-attr-val"
+    Then the validation response status is 422
+    And the response is a problem detail with type "no-attributes-requested"
+
+  @validation
+  Scenario: An unsupported attribute name is rejected for the performance endpoint
+    Given account "perf-unsupported-attr-val" has only a position ladder ingested for validation
+    When a performance request is made for attribute "bogus_measure" for account "perf-unsupported-attr-val"
+    Then the validation response status is 422
+    And the response is a problem detail with type "unsupported-attribute"
+
+  @validation
+  Scenario: Unknown account name is rejected for the performance endpoint
+    When a performance request is made for attribute "ITD" for account "perf-unknown-val"
+    Then the validation response status is 404
+    And the response is a problem detail with type "account-not-found"
+
+  @validation
+  Scenario: A known account without a position ladder is rejected for the performance endpoint
+    Given account "perf-capital-only-val" has an ingested capital ledger for validation
+    When a performance request is made for attribute "ITD" for account "perf-capital-only-val"
+    Then the validation response status is 422
+    And the response is a problem detail with type "missing-required-source"

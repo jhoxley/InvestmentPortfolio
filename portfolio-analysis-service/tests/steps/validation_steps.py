@@ -577,3 +577,32 @@ def check_position_return_not_null(val_response: object) -> None:
     assert entries, "expected at least one entry"
     for entry in entries:
         assert entry.get("position_return") is not None
+
+
+# ---------------------------------------------------------------------------
+# Performance endpoint validation (feature 007)
+# ---------------------------------------------------------------------------
+
+
+@when(
+    parsers.parse(
+        'a performance request is made for attribute "{attribute}" for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def request_performance_attribute(
+    attribute: str, account_name: str, app_client: TestClient
+) -> object:
+    """GET the performance endpoint for a single attribute, no date range."""
+    return app_client.get(
+        f"/v1/accounts/{account_name}/performance", params=[("attribute", attribute)]
+    )
+
+
+@when(
+    parsers.parse('a performance request is made with no attribute for account "{account_name}"'),
+    target_fixture="val_response",
+)
+def request_performance_no_attribute(account_name: str, app_client: TestClient) -> object:
+    """GET the performance endpoint with zero attribute params."""
+    return app_client.get(f"/v1/accounts/{account_name}/performance")
