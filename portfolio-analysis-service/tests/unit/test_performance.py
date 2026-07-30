@@ -386,3 +386,122 @@ class TestTimeseriesSC003RejectionPerformance:
         elapsed = time.perf_counter() - start
         assert rejection.status_code == 422, f"Expected 422, got {rejection.status_code}"
         assert elapsed <= 1.0, f"SC-003 violated: rejection took {elapsed:.2f}s (limit 1s)"
+
+
+def _generate_multi_year_ladder_many_positions(years: int = 5, positions: int = 50) -> bytes:
+    """Generate a sparse position ladder with many positions spanning several years.
+
+    Args:
+        years: Number of years of history to generate (monthly rows per position,
+            enough to seed forward-fill across the full expanded range).
+        positions: Number of distinct non-Cash positions to generate.
+
+    Returns:
+        XLSX file contents as bytes.
+    """
+    end = date.today() - timedelta(days=200)
+    start = end - timedelta(days=365 * years)
+    dates = pd.bdate_range(start=start, end=end, freq="MS")
+    records = []
+    for sa in [f"Position-{i}" for i in range(positions)] + ["Cash"]:
+        for i, d in enumerate(dates.date):
+            records.append(
+                {
+                    "date": d,
+                    "sub_account": sa,
+                    "book_cost": 1000.0 + i,
+                    "quantity": 10.0,
+                    "total_income": float(i),
+                }
+            )
+    df = pd.DataFrame(records)
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    return buf.getvalue()
+
+
+class TestPositionTimeseriesSC001MultiPositionPerformance:
+    """Position Time Series API SC-001: 50 positions over 5 years completes within budget.
+
+    Threshold raised 10s -> 15s (feature 006): adding position_return/weighted_position_return
+    widened every stored ladder by 2 columns on top of feature 002's price/market_value/
+    portfolio_weight. openpyxl parses every cell in the sheet regardless of which columns are
+    actually requested, so full-ladder read time scales with total column count, not just
+    requested attributes — see specs/006-ladder-daily-returns/research.md for the investigation
+    (a `usecols`-based read optimization was attempted and measured to have no effect, since
+    openpyxl's XML parsing happens before pandas' column filtering).
+    """
+
+    def test_fifty_positions_five_years_within_budget(self, app_client: TestClient) -> None:
+        """GET all 50 positions' market_value over a 5-year range; assert completion in ≤15 s."""
+        account_name = "perf-test-position-sc001"
+        ladder_resp = app_client.post(
+            f"/v1/accounts/{account_name}/ladder",
+            files=_multipart(_generate_multi_year_ladder_many_positions(years=5, positions=50)),
+        )
+        assert ladder_resp.status_code == 201, f"Ladder setup failed: {ladder_resp.text}"
+
+        start = time.perf_counter()
+        resp = app_client.get(
+            f"/v1/accounts/{account_name}/position",
+            params=[("attribute", "market_value")],
+        )
+        elapsed = time.perf_counter() - start
+        assert resp.status_code == 200, f"Position request failed: {resp.text}"
+        assert len(resp.json()["positions"]) == 51, "Expected 50 positions plus Cash"
+        assert elapsed <= 15.0, f"SC-001 violated: position request took {elapsed:.2f}s (limit 15s)"
+
+
+class TestPositionTimeseriesSC004RejectionPerformance:
+    """Position Time Series API SC-004: each rejection path completes within 1 second."""
+
+    def test_unsupported_attribute_rejected_within_1_second(self, app_client: TestClient) -> None:
+        """GET with an unsupported attribute name; assert rejection completes in ≤1 s."""
+        account_name = "perf-test-position-sc004-attr"
+        resp = app_client.post(
+            f"/v1/accounts/{account_name}/ladder",
+            files=_multipart(_generate_multi_year_ladder_many_positions(years=1, positions=5)),
+        )
+        assert resp.status_code == 201, f"Ladder setup failed: {resp.text}"
+
+        start = time.perf_counter()
+        rejection = app_client.get(
+            f"/v1/accounts/{account_name}/position",
+            params=[("attribute", "capital")],
+        )
+        elapsed = time.perf_counter() - start
+        assert rejection.status_code == 422, f"Expected 422, got {rejection.status_code}"
+        assert elapsed <= 1.0, f"SC-004 violated: rejection took {elapsed:.2f}s (limit 1s)"
+
+    def test_unknown_account_rejected_within_1_second(self, app_client: TestClient) -> None:
+        """GET for a wholly unknown account; assert rejection completes in ≤1 s."""
+        start = time.perf_counter()
+        rejection = app_client.get(
+            "/v1/accounts/perf-test-position-sc004-unknown/position",
+            params=[("attribute", "market_value")],
+        )
+        elapsed = time.perf_counter() - start
+        assert rejection.status_code == 404, f"Expected 404, got {rejection.status_code}"
+        assert elapsed <= 1.0, f"SC-004 violated: rejection took {elapsed:.2f}s (limit 1s)"
+
+    def test_invalid_date_range_rejected_within_1_second(self, app_client: TestClient) -> None:
+        """GET with start after end; assert rejection completes in ≤1 s."""
+        account_name = "perf-test-position-sc004-daterange"
+        resp = app_client.post(
+            f"/v1/accounts/{account_name}/ladder",
+            files=_multipart(_generate_multi_year_ladder_many_positions(years=1, positions=5)),
+        )
+        assert resp.status_code == 201, f"Ladder setup failed: {resp.text}"
+
+        start = time.perf_counter()
+        rejection = app_client.get(
+            f"/v1/accounts/{account_name}/position",
+            params=[
+                ("attribute", "market_value"),
+                ("start", "2024-02-01"),
+                ("end", "2024-01-01"),
+            ],
+        )
+        elapsed = time.perf_counter() - start
+        assert rejection.status_code == 422, f"Expected 422, got {rejection.status_code}"
+        assert elapsed <= 1.0, f"SC-004 violated: rejection took {elapsed:.2f}s (limit 1s)"

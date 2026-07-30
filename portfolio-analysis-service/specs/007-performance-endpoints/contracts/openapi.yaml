@@ -1,0 +1,242 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Locally hosted API for portfolio analysis features. This version adds a new "performance"
+    endpoint group exposing account-level return measures (ITD, ITD (Ann.), 1Y, 3Y, 5Y) derived
+    from the position ladder's weighted_position_return, using the same request/response shape
+    as the existing account time series endpoint.
+  version: "0.7.0"
+
+servers:
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+paths:
+  /accounts/{account_name}/performance:
+
+    get:
+      operationId: get_account_performance
+      summary: >
+        Retrieve a per-business-day time series of requested performance measures for an account
+      description: >
+        Computes a daily portfolio return for every business day of the account's position
+        ladder (the sum of weighted_position_return across every position present that day),
+        then derives ITD, ITD (Ann.), 1Y, 3Y, and 5Y from it. Trailing and inception-to-date
+        measures always look back as far as their definition requires, regardless of the
+        requested start date — only dates within the resolved window appear in the response.
+        A measure not yet computable for a given date (insufficient history) is simply omitted
+        from that date's entry.
+      tags: [Performance]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+          description: >
+            Case-sensitive account identifier. Restricted to alphanumeric
+            characters, hyphens, and underscores; 1–64 characters.
+        - name: attribute
+          in: query
+          required: true
+          description: Repeated parameter; at least one required.
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - ITD
+                - "ITD (Ann.)"
+                - 1Y
+                - 3Y
+                - 5Y
+            minItems: 1
+          style: form
+          explode: true
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the account's own earliest recorded position-ladder date. Adjusted
+            forward to the next business day if it falls on a weekend.
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the business day before today. Must not be later than today.
+            Adjusted forward to the next business day if it falls on a weekend (capped at
+            today).
+      responses:
+        "200":
+          description: Performance time series returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PerformanceResponse"
+              example:
+                account_name: HL-SIPP
+                attributes: [ITD, "1Y", "5Y"]
+                from_date: "2025-01-02"
+                to_date: "2025-01-10"
+                entries:
+                  - date: "2025-01-02"
+                    ITD: 0.183
+                    "1Y": 0.071
+                  - date: "2025-01-03"
+                    ITD: 0.187
+                    "1Y": 0.069
+                    "5Y": 0.062
+                _links:
+                  self: >-
+                    /v1/accounts/HL-SIPP/performance?attribute=ITD&attribute=1Y&attribute=5Y&start=2025-01-02&end=2025-01-10
+                  attributes: "/v1/performance/attributes"
+                  accounts: "/v1/accounts"
+        "404":
+          description: No resource of any kind has been ingested for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: >
+            Validation failed — invalid account name, account known but no position ladder
+            ingested, no attribute supplied, an unsupported attribute name, an invalid date
+            range, or a future end date
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+  /performance/attributes:
+
+    get:
+      operationId: get_performance_attribute_metadata
+      summary: Describe the measures that can be requested from the performance endpoint
+      tags: [Performance]
+      responses:
+        "200":
+          description: Attribute metadata returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PerformanceAttributeMetadataResponse"
+              example:
+                attributes:
+                  - name: ITD
+                    description: >-
+                      Inception to Date: the cumulative product of (1 + daily portfolio return)
+                      from the account's first recorded date through the given date, minus 1.
+                    source: position_ladder
+                  - name: "ITD (Ann.)"
+                    description: >-
+                      ITD expressed as an annualized rate, scaled by the number of trading days
+                      elapsed since inception (260-trading-day year).
+                    source: position_ladder
+                  - name: "1Y"
+                    description: >-
+                      The cumulative product of (1 + daily portfolio return) over the trailing
+                      260 business days, minus 1. Not annualized.
+                    source: position_ladder
+                  - name: "3Y"
+                    description: >-
+                      The cumulative product of (1 + daily portfolio return) over the trailing
+                      780 business days, annualized by raising to the power of 1/3.
+                    source: position_ladder
+                  - name: "5Y"
+                    description: >-
+                      The cumulative product of (1 + daily portfolio return) over the trailing
+                      1300 business days, annualized by raising to the power of 1/5.
+                    source: position_ladder
+                _links:
+                  self: "/v1/performance/attributes"
+
+components:
+  schemas:
+
+    PerformanceEntry:
+      type: object
+      required: [date]
+      properties:
+        date:
+          type: string
+          format: date
+      additionalProperties:
+        type: number
+        format: float
+      description: >
+        Additional properties are the requested measure values (ITD, ITD (Ann.), 1Y, 3Y, 5Y) —
+        a measure not yet computable for this date (insufficient history) is simply absent.
+
+    PerformanceResponse:
+      type: object
+      required: [account_name, attributes, from_date, to_date, entries, _links]
+      properties:
+        account_name:
+          type: string
+        attributes:
+          type: array
+          items:
+            type: string
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/PerformanceEntry"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    PerformanceAttributeDefinition:
+      type: object
+      required: [name, description, source]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        source:
+          type: string
+
+    PerformanceAttributeMetadataResponse:
+      type: object
+      required: [attributes, _links]
+      properties:
+        attributes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PerformanceAttributeDefinition"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string

@@ -10,7 +10,15 @@ import structlog.contextvars
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.api import accounts, capital, health, ladder, timeseries
+from app.api import (
+    accounts,
+    capital,
+    health,
+    ladder,
+    performance,
+    position_timeseries,
+    timeseries,
+)
 from app.config import get_settings
 from app.exceptions import (
     AccountNotFoundError,
@@ -24,6 +32,7 @@ from app.exceptions import (
     MergeNotSupportedError,
     MissingRequiredSourceError,
     NoAttributesRequestedError,
+    PositionLadderNotIngestedError,
     PriceCoverageError,
     SchemaValidationError,
     UnsupportedAttributeError,
@@ -63,6 +72,8 @@ app.include_router(ladder.router)
 app.include_router(capital.router)
 app.include_router(timeseries.router)
 app.include_router(accounts.router)
+app.include_router(position_timeseries.router)
+app.include_router(performance.router)
 app.include_router(health.router)
 
 
@@ -365,6 +376,27 @@ async def missing_required_source_handler(
         detail=exc.message,
     )
     return _problem(request, 422, "missing-required-source", "Missing Required Source", exc.message)
+
+
+@app.exception_handler(PositionLadderNotIngestedError)
+async def position_ladder_not_ingested_handler(
+    request: Request, exc: PositionLadderNotIngestedError
+) -> JSONResponse:
+    """Handle PositionLadderNotIngestedError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning(
+        "position_ladder_not_ingested", account_name=exc.account_name, detail=exc.message
+    )
+    return _problem(
+        request, 422, "position-ladder-not-ingested", "Position Ladder Not Ingested", exc.message
+    )
 
 
 @app.exception_handler(MarketDataServiceError)

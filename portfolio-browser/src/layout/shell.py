@@ -8,19 +8,19 @@ specs/016-link-real-portfolio).
 
 from __future__ import annotations
 
-from datetime import date
-
 import dash
 import dash_bootstrap_components as dbc
 from dash import Dash, Input, Output, dcc, html
 
 from config.content import ContentConfig
+from src.components.date_range_controls import build_account_date_controls
 from src.components.footer import build_footer
 from src.components.header import build_header
 from src.components.sidebar import build_sidebar
 
 _CONTENT_WIDTH = 10  # out of 12 grid columns — the remainder of the sidebar's 2
 _OVERVIEW_PATH = "/"
+_POSITIONS_PATH = "/positions"
 
 
 def _build_static_parameters_bar() -> list:
@@ -54,66 +54,54 @@ def _build_static_parameters_bar() -> list:
     ]
 
 
-_SHORTCUT_BUTTONS = [
-    ("overview-shortcut-ytd", "YtD"),
-    ("overview-shortcut-1y", "1Y"),
-    ("overview-shortcut-3y", "3Y"),
-    ("overview-shortcut-5y", "5Y"),
-    ("overview-shortcut-all", "All"),
-]
-
-
-def _build_shortcut_buttons() -> dbc.Col:
-    """Five Reporting Period Shortcut buttons (017; FR-001).
-
-    Click handling (which date range each computes, and disabling them
-    during a refresh per FR-013) lives in src/pages/overview.py — this only
-    builds the buttons themselves.
-    """
-    buttons = [
-        dbc.Button(label, id=button_id, size="sm", color="secondary", outline=True)
-        for button_id, label in _SHORTCUT_BUTTONS
-    ]
-    return dbc.Col(dbc.ButtonGroup(buttons), width="auto")
-
-
 def _build_overview_parameters_bar() -> list:
     """Real Account selector + From/To date pickers + shortcut buttons (016/017).
 
     Options/values are populated by a callback in src/pages/overview.py once
     the page has fetched /v1/accounts — this only builds the empty controls.
+    Shared with the Positions page (018) via
+    src/components/date_range_controls.py.
     """
-    account_selector = dbc.Select(id="app-parameters-account", options=[], value=None)
-    from_date = dcc.DatePickerSingle(id="app-parameters-from-date", placeholder="From")
-    # max_date_allowed=today is static (today doesn't change within a session);
-    # the "from" picker's max is kept in sync with the *current* "to" value
-    # dynamically instead, via a callback (src/pages/overview.py, FR-015).
-    to_date = dcc.DatePickerSingle(
-        id="app-parameters-to-date", placeholder="To", max_date_allowed=date.today().isoformat()
+    return build_account_date_controls()
+
+
+def _build_positions_parameters_bar() -> list:
+    """Real Account/From/To/shortcut controls (shared) + Positions-only controls (018).
+
+    Options/values are populated by callbacks in src/pages/positions.py once
+    the page has fetched /v1/accounts, /v1/positions/attributes, and
+    /v1/accounts/{account}/positions — this only builds the empty controls.
+    """
+    stacked_toggle = dbc.Switch(
+        id="positions-parameters-stacked-toggle",
+        label="Stacked area graph",
+        value=False,
+        className="d-inline-block",
+    )
+    position_filter = dcc.Dropdown(
+        id="positions-parameters-position-filter",
+        options=[],
+        value=[],
+        multi=True,
+        searchable=True,
+        placeholder="All positions",
     )
     return [
+        *build_account_date_controls(),
+        dbc.Col(stacked_toggle, width="auto"),
         dbc.Col(
-            html.Label("Account", htmlFor="app-parameters-account"),
+            html.Label("Positions", htmlFor="positions-parameters-position-filter"),
             width="auto",
         ),
-        dbc.Col(account_selector, width=3),
-        dbc.Col(
-            html.Label("From", htmlFor="app-parameters-from-date"),
-            width="auto",
-        ),
-        dbc.Col(from_date, width="auto"),
-        dbc.Col(
-            html.Label("To", htmlFor="app-parameters-to-date"),
-            width="auto",
-        ),
-        dbc.Col(to_date, width="auto"),
-        _build_shortcut_buttons(),
+        dbc.Col(position_filter, width=4),
     ]
 
 
 def _render_parameters_bar(pathname: str | None) -> list:
     if pathname == _OVERVIEW_PATH:
         return _build_overview_parameters_bar()
+    if pathname == _POSITIONS_PATH:
+        return _build_positions_parameters_bar()
     return _build_static_parameters_bar()
 
 

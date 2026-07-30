@@ -46,19 +46,21 @@ from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
 from config.settings import Settings
-from src.exceptions import PortfolioAnalysisServiceError
-from src.models.portfolio_analysis import AccountSummary, AttributeDefinition
-from src.pages._overview_chart import (
+from src.components.attribute_toggles import build_attribute_toggles
+from src.components.date_range_controls import (
     SHORTCUT_1Y,
     SHORTCUT_3Y,
     SHORTCUT_5Y,
     SHORTCUT_ALL,
     SHORTCUT_YTD,
-    _build_figure,
     _earliest_from_date,
     _last_business_day,
     _shortcut_from_date,
 )
+from src.exceptions import PortfolioAnalysisServiceError
+from src.models.portfolio_analysis import AccountSummary
+from src.pages._overview_chart import _build_figure
+from src.pages._overview_position_widgets import _build_pie_figure, _build_winners_losers_table
 from src.services.portfolio_analysis_client import (
     HttpPortfolioAnalysisClient,
     PortfolioAnalysisClient,
@@ -149,28 +151,6 @@ def _render_timeseries(
     return dcc.Graph(id="overview-chart", figure=figure, style={"height": "600px"})
 
 
-def _attribute_toggle(attribute: AttributeDefinition) -> html.Div:
-    toggle_id = {"type": _TOGGLE_ID_TYPE, "name": attribute.name}
-    dom_id = f"overview-attribute-toggle-{attribute.name}"
-    return html.Div(
-        [
-            dbc.Switch(
-                id=toggle_id,
-                label=attribute.name,
-                value=attribute.name == _DEFAULT_METRIC,
-                className="d-inline-block me-2",
-            ),
-            dbc.Tooltip(
-                attribute.description,
-                target=dom_id,
-                id=f"overview-attribute-tooltip-{attribute.name}",
-            ),
-        ],
-        id=dom_id,
-        className="d-inline-block me-4",
-    )
-
-
 layout = html.Div(
     [
         # Fires its one tick ~200ms after every mount of this layout (first
@@ -188,6 +168,39 @@ layout = html.Div(
                 _empty_state("Loading account performance…"),
                 id="overview-chart-container",
             ),
+        ),
+        # New row (019): pie chart + "Biggest winners and losers" table.
+        # xs=12/lg=6 stacks the two halves vertically below this project's
+        # own tablet-width test convention (800px — above Bootstrap's
+        # default md breakpoint of 768px, below its lg breakpoint of 992px;
+        # research.md #5), side-by-side at desktop widths.
+        dbc.Row(
+            [
+                dbc.Col(
+                    dcc.Loading(
+                        id="overview-pie-loading",
+                        children=html.Div(
+                            _empty_state("Loading position weights…"),
+                            id="overview-pie-container",
+                        ),
+                    ),
+                    xs=12,
+                    lg=6,
+                ),
+                dbc.Col(
+                    dcc.Loading(
+                        id="overview-winners-losers-loading",
+                        children=html.Div(
+                            _empty_state("Loading biggest winners and losers…"),
+                            id="overview-winners-losers-container",
+                        ),
+                    ),
+                    xs=12,
+                    lg=6,
+                ),
+            ],
+            id="overview-position-widgets-row",
+            className="mt-4 g-3",
         ),
     ],
     className="p-3",
@@ -228,7 +241,9 @@ def _fetch_accounts_and_attributes(_n_intervals: int) -> tuple[Any, ...]:
         )
 
     account_options = [{"label": a.account_name, "value": a.account_name} for a in accounts]
-    toggle_children = [_attribute_toggle(a) for a in attributes]
+    toggle_children = build_attribute_toggles(
+        attributes, _TOGGLE_ID_TYPE, frozenset({_DEFAULT_METRIC})
+    )
     return (
         [a.model_dump(mode="json") for a in accounts],
         [a.model_dump(mode="json") for a in attributes],
@@ -377,3 +392,61 @@ def _apply_date_range_shortcut(
     from_date = _shortcut_from_date(code, account, date.today())
     to_date = _last_business_day(date.today())
     return from_date.isoformat(), to_date.isoformat()
+
+
+@callback(
+    Output("overview-pie-container", "children"),
+    Output("overview-winners-losers-container", "children"),
+    Input("app-parameters-account", "value"),
+    Input("app-parameters-to-date", "date"),
+    prevent_initial_call=True,
+)
+def _render_position_widgets(
+    account_name: str | None, to_date: str | None
+) -> tuple[Any, Any]:
+    """Render the position-weight pie chart and "Biggest winners and losers"
+
+    table together, from one fetch (019; FR-002-FR-014).
+
+    Deliberately independent of `_render_chart` — no shared `Input`/`Output`
+    with it, and no `Input` on `app-parameters-from-date` or any attribute
+    toggle (FR-010): both widgets are a single-date snapshot as of the "To"
+    date only.
+    """
+    if not account_name or not to_date:
+        # `/speckit-analyze` finding G1: without this guard, the callback
+        # can be invoked with `to_date` still `None` while the
+        # account-change -> date-sync chain is still resolving (initial
+        # mount or account switch), raising on `date.fromisoformat(None)`.
+        raise PreventUpdate
+
+    client = _get_client()
+    try:
+        response = client.get_position_timeseries(
+            account_name=account_name,
+            positions=[],
+            attributes=["market_value", "pnl", "book_cost"],
+            start=date.fromisoformat(to_date),
+            end=date.fromisoformat(to_date),
+        )
+    except PortfolioAnalysisServiceError:
+        logger.error("overview_position_widgets_fetch_failed", account_name=account_name)
+        message = (
+            "Could not load position data from portfolio-analysis-service. "
+            "Please try again shortly."
+        )
+        return _error_state(message), _error_state(message)
+
+    entries = [entry.model_dump() for entry in response.entries]
+    if not entries:
+        message = "No position data is available for the selected account and date."
+        return _empty_state(message), _empty_state(message)
+
+    # No fixed `style` height here: _build_pie_figure() sets its own
+    # `layout.height`, growing with the number of positions so the legend
+    # (now below the chart, not to the right) always has room.
+    pie = dcc.Graph(id="overview-pie-chart", figure=_build_pie_figure(entries))
+    table = _build_winners_losers_table(entries)
+    return pie, html.Div(
+        [html.H5("Biggest winners and losers", className="mt-2"), table]
+    )

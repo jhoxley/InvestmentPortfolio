@@ -266,6 +266,21 @@ class MissingRequiredSourceError(Exception):
         super().__init__(self.message)
 
 
+class PositionLadderNotIngestedError(Exception):
+    """Raised when a known account has no ingested position ladder for this feature's endpoints."""
+
+    def __init__(self, account_name: str, message: str | None = None) -> None:
+        """Initialise with the account name that lacks a position ladder.
+
+        Args:
+            account_name: The account known to `/v1/accounts` but missing a ladder.
+            message: Optional override message.
+        """
+        self.account_name = account_name
+        self.message = message or f"Account '{account_name}' has no ingested position ladder."
+        super().__init__(self.message)
+
+
 class MarketDataServiceError(Exception):
     """Raised when a market-data-service request fails (network error, non-2xx, timeout)."""
 
