@@ -304,3 +304,104 @@ def test_list_account_positions_raises_on_timeout() -> None:
     client = _client(httpx.MockTransport(handler))
     with pytest.raises(PortfolioAnalysisServiceError):
         client.list_account_positions(account_name="HL-SIPP")
+
+
+def test_list_performance_attributes_success() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/performance/attributes"
+        return httpx.Response(
+            200,
+            json={
+                "attributes": [
+                    {
+                        "name": "ITD",
+                        "description": "Inception to Date return.",
+                        "source": "position_ladder",
+                    },
+                    {
+                        "name": "1Y",
+                        "description": "Trailing 1-year return.",
+                        "source": "position_ladder",
+                    },
+                ],
+                "_links": {"self": "/v1/performance/attributes"},
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    attributes = client.list_performance_attributes()
+
+    assert [a.name for a in attributes] == ["ITD", "1Y"]
+    assert attributes[0].description == "Inception to Date return."
+
+
+def test_get_performance_success_sends_repeated_attribute_params() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/accounts/HL-SIPP/performance"
+        params = httpx.QueryParams(request.url.query)
+        assert params.get_list("attribute") == ["ITD", "1Y"]
+        assert params.get("start") == "2024-01-02"
+        assert params.get("end") == "2024-01-10"
+        return httpx.Response(
+            200,
+            json={
+                "account_name": "HL-SIPP",
+                "attributes": ["ITD", "1Y"],
+                "from_date": "2024-01-02",
+                "to_date": "2024-01-10",
+                "entries": [
+                    {"date": "2024-01-02", "ITD": 0.183, "1Y": 0.071},
+                ],
+                "_links": {"self": "/v1/accounts/HL-SIPP/performance"},
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    response = client.get_performance(
+        account_name="HL-SIPP",
+        attributes=["ITD", "1Y"],
+        start=date(2024, 1, 2),
+        end=date(2024, 1, 10),
+    )
+
+    assert response.account_name == "HL-SIPP"
+    assert len(response.entries) == 1
+    assert response.entries[0].model_dump()["ITD"] == 0.183
+
+
+@pytest.mark.parametrize("status_code", [404, 422])
+def test_get_performance_raises_on_error_status(status_code: int) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status_code,
+            json={
+                "type": "about:blank",
+                "title": "Error",
+                "status": status_code,
+                "detail": "boom",
+                "instance": str(request.url),
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_performance(
+            account_name="HL-SIPP",
+            attributes=["ITD"],
+            start=date(2024, 1, 2),
+            end=date(2024, 1, 10),
+        )
+
+
+def test_get_performance_raises_on_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TimeoutException("timed out", request=request)
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_performance(
+            account_name="HL-SIPP",
+            attributes=["ITD"],
+            start=date(2024, 1, 2),
+            end=date(2024, 1, 10),
+        )

@@ -21,6 +21,7 @@ from src.components.sidebar import build_sidebar
 _CONTENT_WIDTH = 10  # out of 12 grid columns — the remainder of the sidebar's 2
 _OVERVIEW_PATH = "/"
 _POSITIONS_PATH = "/positions"
+_PERFORMANCE_PATH = "/performance"
 
 
 def _build_static_parameters_bar() -> list:
@@ -97,11 +98,25 @@ def _build_positions_parameters_bar() -> list:
     ]
 
 
+def _build_performance_parameters_bar() -> list:
+    """Real Account/From/To/shortcut controls only — no Performance-only controls (020).
+
+    Options/values are populated by callbacks in src/pages/performance.py
+    once the page has fetched /v1/accounts + /v1/performance/attributes —
+    this only builds the empty controls. The first shortcut button is
+    relabeled "ITD" (in place of "YtD") per spec Clarifications; no
+    stacked-area toggle or other chart-mode control is added (FR-005).
+    """
+    return build_account_date_controls(first_shortcut_label="ITD")
+
+
 def _render_parameters_bar(pathname: str | None) -> list:
     if pathname == _OVERVIEW_PATH:
         return _build_overview_parameters_bar()
     if pathname == _POSITIONS_PATH:
         return _build_positions_parameters_bar()
+    if pathname == _PERFORMANCE_PATH:
+        return _build_performance_parameters_bar()
     return _build_static_parameters_bar()
 
 

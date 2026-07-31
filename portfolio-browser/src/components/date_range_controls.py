@@ -126,27 +126,43 @@ def _shortcut_from_date(code: str, account: AccountSummary, today: date) -> date
     return max(computed, earliest)
 
 
-def _build_shortcut_buttons() -> dbc.Col:
+def _build_shortcut_buttons(first_shortcut_label: str) -> dbc.Col:
     """Five Reporting Period Shortcut buttons (017; FR-001).
 
     Click handling (which date range each computes, and disabling them
     during a refresh) lives in each page's own module — this only builds
     the buttons themselves.
+
+    Args:
+        first_shortcut_label: Visible text for the first button only (its
+            component id is always `overview-shortcut-ytd`, unchanged) —
+            "YtD" for Overview/Positions, "ITD" for Performance (specs/020-
+            performance-page-chart/research.md #3). No behavioral change:
+            which shortcut code a page maps that id to is that page's own
+            concern, not this component's.
     """
+    labels = dict(_SHORTCUT_BUTTONS)
+    labels[_SHORTCUT_BUTTONS[0][0]] = first_shortcut_label
     buttons = [
-        dbc.Button(label, id=button_id, size="sm", color="secondary", outline=True)
-        for button_id, label in _SHORTCUT_BUTTONS
+        dbc.Button(labels[button_id], id=button_id, size="sm", color="secondary", outline=True)
+        for button_id, _ in _SHORTCUT_BUTTONS
     ]
     return dbc.Col(dbc.ButtonGroup(buttons), width="auto")
 
 
-def build_account_date_controls() -> list:
-    """Real Account selector + From/To date pickers + shortcut buttons (016/017/018).
+def build_account_date_controls(first_shortcut_label: str = "YtD") -> list:
+    """Real Account selector + From/To date pickers + shortcut buttons (016/017/018/020).
 
-    Shared by both Overview's and Positions's parameters bars
+    Shared by Overview's, Positions's, and Performance's parameters bars
     (`src/layout/shell.py`) — options/values are populated by each page's
     own callbacks once it has fetched `/v1/accounts`; this only builds the
     empty controls.
+
+    Args:
+        first_shortcut_label: Visible text for the first shortcut button
+            (default "YtD", matching Overview/Positions unchanged; the
+            Performance page passes "ITD" — research.md #3 in specs/020-
+            performance-page-chart).
 
     Returns:
         A list of `dbc.Col` elements ready to splice into a `dbc.Row`.
@@ -175,5 +191,5 @@ def build_account_date_controls() -> list:
             width="auto",
         ),
         dbc.Col(to_date, width="auto"),
-        _build_shortcut_buttons(),
+        _build_shortcut_buttons(first_shortcut_label),
     ]

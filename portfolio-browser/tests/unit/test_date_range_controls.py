@@ -20,6 +20,7 @@ from src.components.date_range_controls import (
     _earliest_from_date,
     _last_business_day,
     _shortcut_from_date,
+    build_account_date_controls,
 )
 from src.models.portfolio_analysis import AccountResourceRange, AccountSummary
 
@@ -129,6 +130,23 @@ def test_shortcut_5y_clamps_to_accounts_earliest_from_date() -> None:
     # account's own earliest recorded date (FR-008), not requested as-is.
     today = date(2026, 7, 16)
     assert _shortcut_from_date(SHORTCUT_5Y, _SHORT_HISTORY_ACCOUNT, today) == date(2025, 1, 1)
+
+
+def _first_shortcut_button_label(controls: list) -> str:
+    shortcut_col = controls[-1]
+    button_group = shortcut_col.children
+    first_button = button_group.children[0]
+    return first_button.children
+
+
+def test_build_account_date_controls_defaults_first_shortcut_label_to_ytd() -> None:
+    controls = build_account_date_controls()
+    assert _first_shortcut_button_label(controls) == "YtD"
+
+
+def test_build_account_date_controls_overrides_first_shortcut_label() -> None:
+    controls = build_account_date_controls(first_shortcut_label="ITD")
+    assert _first_shortcut_button_label(controls) == "ITD"
 
 
 def test_shortcut_ytd_clamps_to_accounts_earliest_from_date() -> None:

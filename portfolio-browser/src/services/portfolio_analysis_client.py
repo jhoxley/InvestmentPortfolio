@@ -72,6 +72,34 @@ class PortfolioAnalysisClient(Protocol):
         """Return every chartable/tabulable position attribute."""
         ...
 
+    def list_performance_attributes(self) -> list[AttributeDefinition]:
+        """Return every chartable performance measure."""
+        ...
+
+    def get_performance(
+        self,
+        account_name: str,
+        attributes: list[str],
+        start: date,
+        end: date,
+    ) -> TimeSeriesResponse:
+        """Return the performance measure timeseries for an account over a date range.
+
+        Reuses `TimeSeriesResponse`/`TimeSeriesEntry` — the upstream response
+        shape is identical to the account timeseries endpoint's (specs/020-
+        performance-page-chart/research.md #1).
+
+        Args:
+            account_name: The account to request performance measures for.
+            attributes: One or more measure names to request (e.g. "ITD").
+            start: Start of the requested date range (inclusive).
+            end: End of the requested date range (inclusive).
+
+        Returns:
+            The parsed TimeSeriesResponse.
+        """
+        ...
+
     def get_position_timeseries(
         self,
         account_name: str,
@@ -207,6 +235,52 @@ class HttpPortfolioAnalysisClient:
         """
         payload = self._get("/v1/positions/attributes", params=None, log_context={})
         return [AttributeDefinition.model_validate(a) for a in payload.get("attributes", [])]
+
+    def list_performance_attributes(self) -> list[AttributeDefinition]:
+        """Return every chartable performance measure.
+
+        Returns:
+            List of AttributeDefinition parsed from the response.
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        payload = self._get("/v1/performance/attributes", params=None, log_context={})
+        return [AttributeDefinition.model_validate(a) for a in payload.get("attributes", [])]
+
+    def get_performance(
+        self,
+        account_name: str,
+        attributes: list[str],
+        start: date,
+        end: date,
+    ) -> TimeSeriesResponse:
+        """Return the performance measure timeseries for an account over a date range.
+
+        Args:
+            account_name: The account to request performance measures for.
+            attributes: One or more measure names to request (e.g. "ITD").
+            start: Start of the requested date range (inclusive).
+            end: End of the requested date range (inclusive).
+
+        Returns:
+            The parsed TimeSeriesResponse.
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        params: list[tuple[str, str | int | float | bool | None]] = [
+            ("attribute", a) for a in attributes
+        ]
+        params.extend([("start", str(start)), ("end", str(end))])
+        payload = self._get(
+            f"/v1/accounts/{account_name}/performance",
+            params=params,
+            log_context={"account_name": account_name},
+        )
+        return TimeSeriesResponse.model_validate(payload)
 
     def get_position_timeseries(
         self,

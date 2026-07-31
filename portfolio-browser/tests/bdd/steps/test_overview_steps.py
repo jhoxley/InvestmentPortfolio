@@ -608,6 +608,33 @@ def load_positions_page(dash_duo):
     return app_module.app
 
 
+@when("the browser loads the Performance page", target_fixture="dash_app")
+def load_performance_page(dash_duo):
+    """Navigate straight to /performance and wait only for the parameters bar.
+
+    Mirrors `load_positions_page` exactly (specs/020-performance-page-chart)
+    — deliberately does not stub `src.pages.performance._get_client`, since
+    this scenario only asserts on the shell-level parameters bar.
+    """
+    dash_duo.start_server(app_module.app)
+    dash_duo.driver.get(f"{dash_duo.server_url}/performance")
+    dash_duo.wait_for_element("#app-parameters-account", timeout=_TIMEOUT)
+    return app_module.app
+
+
+@then('no "Stacked area graph" toggle is shown')
+def no_stacked_area_toggle_shown(dash_duo):
+    """FR-005 (specs/020-performance-page-chart) — no chart-mode control at all.
+
+    Checks the parameters bar's own text content rather than a specific
+    element id, so a future accidental copy-paste of Positions' stacked-area
+    toggle onto another route's parameters bar is still caught regardless of
+    what id it's given (`/speckit-analyze` finding C1).
+    """
+    bar_text = dash_duo.find_element("#app-parameters-bar").text
+    assert "Stacked area graph" not in bar_text
+
+
 # --- 017: Date range shortcut buttons -------------------------------------
 
 _SHORTCUT_BUTTON_IDS = {
