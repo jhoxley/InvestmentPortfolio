@@ -20,7 +20,6 @@ _SECTION_KEYS = {
     "Overview": "overview",
     "Positions": "positions",
     "Performance": "performance",
-    "Income": "income",
 }
 
 _TABLET_WIDTH = 800
@@ -138,8 +137,7 @@ def click_nav_item(dash_duo, section):
 def content_area_updated(dash_duo):
     page_content = dash_duo.find_element("#app-page-content")
     assert any(
-        f"{label} placeholder" in page_content.text
-        for label in ("Positions", "Performance", "Income")
+        f"{label} placeholder" in page_content.text for label in ("Positions", "Performance")
     )
 
 

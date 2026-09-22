@@ -606,3 +606,157 @@ def test_no_warning_when_no_periodicity_was_requested() -> None:
         )
 
     assert [e for e in entries if e["log_level"] == "warning"] == []
+
+
+# --- get_projection (022) ---------------------------------------------------
+
+
+def _projection_body(periodicity: str | None) -> dict:
+    body: dict = {
+        "account_name": "HL-SIPP",
+        "attributes": ["market_value"],
+        "positions": ["Historical", "3Y", "5Y"],
+        "from_date": "2016-04-20",
+        "to_date": "2036-09-22",
+        "entries": [
+            {"date": "2026-09-22", "position": "Historical", "market_value": 48120.75},
+            {"date": "2036-09-22", "position": "3Y", "market_value": 71204.90},
+            {"date": "2036-09-22", "position": "5Y", "market_value": 78310.20},
+        ],
+        "_links": {"self": "/v1/accounts/HL-SIPP/projection"},
+    }
+    if periodicity is not None:
+        body["periodicity"] = periodicity
+    return body
+
+
+def test_get_projection_sends_projection_date_and_repeated_return_params() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/accounts/HL-SIPP/projection"
+        params = httpx.QueryParams(request.url.query)
+        assert params.get_list("return") == ["3y", "5y"]
+        assert params.get("projection_date") == "2036-09-22"
+        assert "start" not in params
+        assert "periodicity" not in params
+        return httpx.Response(200, json=_projection_body(None))
+
+    client = _client(httpx.MockTransport(handler))
+    response = client.get_projection(
+        account_name="HL-SIPP",
+        projection_date=date(2036, 9, 22),
+        returns=["3y", "5y"],
+    )
+
+    assert response.account_name == "HL-SIPP"
+    assert response.positions == ["Historical", "3Y", "5Y"]
+    assert {e.position for e in response.entries} == {"Historical", "3Y", "5Y"}
+
+
+def test_get_projection_sends_start_when_supplied() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = httpx.QueryParams(request.url.query)
+        assert params.get("start") == "2024-01-02"
+        return httpx.Response(200, json=_projection_body(None))
+
+    client = _client(httpx.MockTransport(handler))
+    client.get_projection(
+        account_name="HL-SIPP",
+        projection_date=date(2036, 9, 22),
+        returns=["3y"],
+        start=date(2024, 1, 2),
+    )
+
+
+def test_get_projection_omits_start_when_not_supplied() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = httpx.QueryParams(request.url.query)
+        assert "start" not in params
+        return httpx.Response(200, json=_projection_body(None))
+
+    client = _client(httpx.MockTransport(handler))
+    client.get_projection(
+        account_name="HL-SIPP",
+        projection_date=date(2036, 9, 22),
+        returns=["3y"],
+        start=None,
+    )
+
+
+def test_get_projection_sends_no_return_params_when_empty() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = httpx.QueryParams(request.url.query)
+        assert params.get_list("return") == []
+        return httpx.Response(
+            200,
+            json={
+                **_projection_body(None),
+                "positions": ["Historical"],
+                "entries": [
+                    {"date": "2026-09-22", "position": "Historical", "market_value": 48120.75}
+                ],
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    response = client.get_projection(
+        account_name="HL-SIPP",
+        projection_date=date(2036, 9, 22),
+        returns=[],
+    )
+    assert response.positions == ["Historical"]
+
+
+def test_get_projection_sends_periodicity_when_supplied() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = httpx.QueryParams(request.url.query)
+        assert params.get("periodicity") == "month"
+        return httpx.Response(200, json=_projection_body("month"))
+
+    client = _client(httpx.MockTransport(handler))
+    response = client.get_projection(
+        account_name="HL-SIPP",
+        projection_date=date(2036, 9, 22),
+        returns=["3y", "5y"],
+        periodicity="month",
+    )
+    assert response.periodicity == "month"
+
+
+@pytest.mark.parametrize("status_code", [404, 422])
+def test_get_projection_raises_on_error_status(status_code: int) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status_code,
+            json={
+                "type": "about:blank",
+                "title": "Error",
+                "status": status_code,
+                "detail": "boom",
+                "instance": str(request.url),
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_projection(
+            account_name="HL-SIPP",
+            projection_date=date(2036, 9, 22),
+            returns=["3y"],
+        )
+
+
+def test_get_projection_ignored_periodicity_is_logged_as_a_warning() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_projection_body(None))
+
+    with capture_logs() as entries:
+        _client(httpx.MockTransport(handler)).get_projection(
+            account_name="HL-SIPP",
+            projection_date=date(2036, 9, 22),
+            returns=["3y"],
+            periodicity="month",
+        )
+
+    warnings = [e for e in entries if e["log_level"] == "warning"]
+    assert len(warnings) == 1
+    assert warnings[0]["event"] == "periodicity_not_applied"

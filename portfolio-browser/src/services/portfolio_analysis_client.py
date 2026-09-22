@@ -164,6 +164,41 @@ class PortfolioAnalysisClient(Protocol):
         """
         ...
 
+    def get_projection(
+        self,
+        account_name: str,
+        projection_date: date,
+        returns: list[str],
+        start: date | None = None,
+        periodicity: str | None = None,
+    ) -> PositionTimeSeriesResponse:
+        """Return the historical-plus-projected market-value series for an account.
+
+        Reuses `PositionTimeSeriesResponse` (specs/022-projection-page/
+        research.md #1) — the response's `position` field carries a series
+        label ("Historical" or a requested return's label) rather than a
+        position name.
+
+        Args:
+            account_name: The account to project.
+            projection_date: The date to project forward to. Must be later
+                than the resolved start date (the service validates this).
+            returns: Zero or more return names to project
+                ("itd_ann"/"1y"/"3y"/"5y"). An empty list still returns the
+                "Historical" series alone.
+            start: The date historical data ends and every projection begins.
+                Omitted from the request entirely when None, which the
+                service defaults to the account's most recently recorded
+                date.
+            periodicity: Optional aggregation interval, applied to both the
+                historical and projected legs. Omitted from the request
+                entirely when None.
+
+        Returns:
+            The parsed PositionTimeSeriesResponse.
+        """
+        ...
+
 
 class HttpPortfolioAnalysisClient:
     """PortfolioAnalysisClient implementation backed by an HTTP call."""
@@ -363,6 +398,53 @@ class HttpPortfolioAnalysisClient:
         ]
         params.extend(("attribute", a) for a in attributes)
         params.extend([("start", str(start)), ("end", str(end))])
+        if periodicity is not None:
+            params.append(("periodicity", periodicity))
+        payload = self._get(
+            path,
+            params=params,
+            log_context={"account_name": account_name},
+        )
+        response = PositionTimeSeriesResponse.model_validate(payload)
+        _warn_if_periodicity_ignored(periodicity, response.periodicity, account_name, path)
+        return response
+
+    def get_projection(
+        self,
+        account_name: str,
+        projection_date: date,
+        returns: list[str],
+        start: date | None = None,
+        periodicity: str | None = None,
+    ) -> PositionTimeSeriesResponse:
+        """Return the historical-plus-projected market-value series for an account.
+
+        Args:
+            account_name: The account to project.
+            projection_date: The date to project forward to.
+            returns: Zero or more return names to project. Sent as one
+                `return` query param each; omitted entirely when empty.
+            start: Start date historical data ends and every projection
+                begins. Omitted from the request entirely when None.
+            periodicity: Optional aggregation interval. Omitted from the
+                request entirely when None.
+
+        Returns:
+            The parsed PositionTimeSeriesResponse (its `position` field
+            carries series labels, not position names — specs/022-
+            projection-page/research.md #1).
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        path = f"/v1/accounts/{account_name}/projection"
+        params: list[tuple[str, str | int | float | bool | None]] = [
+            ("return", r) for r in returns
+        ]
+        params.append(("projection_date", str(projection_date)))
+        if start is not None:
+            params.append(("start", str(start)))
         if periodicity is not None:
             params.append(("periodicity", periodicity))
         payload = self._get(

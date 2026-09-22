@@ -50,7 +50,6 @@ from src.models.portfolio_analysis import (
 from tests.bdd.steps import test_shell_steps  # noqa: F401
 
 scenarios("../features/overview_empty_and_error_states.feature")
-scenarios("../features/shell_parameters_bar_unchanged.feature")
 scenarios("../features/overview_default_chart.feature")
 scenarios("../features/overview_switch_account.feature")
 scenarios("../features/overview_date_range.feature")
@@ -678,14 +677,6 @@ def no_metric_toggle_panel(dash_duo):
     stores = dash_duo.find_elements("#overview-accounts-store")
     assert toggles_containers == []
     assert stores == []
-
-
-@then("the parameters bar shows the static, disabled Account and Date range placeholder controls")
-def static_placeholder_bar_shown(dash_duo):
-    account = dash_duo.find_element("#app-parameters-account")
-    date_range = dash_duo.find_element("#app-parameters-daterange")
-    assert account.get_attribute("disabled") is not None
-    assert date_range.get_attribute("disabled") is not None
 
 
 @then("the parameters bar shows real, enabled Account and date-range controls")

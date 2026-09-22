@@ -23,6 +23,7 @@ _CONTENT_WIDTH = 10  # out of 12 grid columns — the remainder of the sidebar's
 _OVERVIEW_PATH = "/"
 _POSITIONS_PATH = "/positions"
 _PERFORMANCE_PATH = "/performance"
+_PROJECTION_PATH = "/projection"
 
 
 def _build_static_parameters_bar() -> list:
@@ -124,6 +125,50 @@ def _build_performance_parameters_bar() -> list:
     return build_account_date_controls(first_shortcut_label="ITD")
 
 
+def _build_projection_parameters_bar() -> list:
+    """Account selector + start-date picker + horizon buttons + calendar picker (022).
+
+    Options/values are populated by callbacks in src/pages/projection.py
+    once the page has fetched /v1/accounts — this only builds the empty
+    controls. Unlike Overview/Positions/Performance, this page does not
+    reuse `build_account_date_controls()`: its date semantics are a single
+    "start date" plus a "projection target date" (set by either a horizon
+    button or the calendar picker), not a from/to range with shortcuts
+    (specs/022-projection-page/contracts/ui-contract.md). Return selection
+    (the toggle switches) lives in the page's own layout below the bar, not
+    here — mirroring where Performance's own measure toggles live.
+    """
+    projection_config = get_content_config().projection
+    account_selector = dbc.Select(id="app-parameters-account", options=[], value=None)
+    start_date = dcc.DatePickerSingle(id="projection-start-date", placeholder="Start date")
+    horizon_buttons = dbc.ButtonGroup(
+        [
+            dbc.Button(
+                horizon.label,
+                id=f"projection-horizon-{horizon.key}",
+                size="sm",
+                color="secondary",
+                outline=True,
+            )
+            for horizon in projection_config.horizons
+        ]
+    )
+    target_date = dcc.DatePickerSingle(id="projection-target-date", placeholder="Project to")
+    return [
+        dbc.Col(html.Label("Account", htmlFor="app-parameters-account"), width="auto"),
+        dbc.Col(account_selector, width=3),
+        dbc.Col(html.Label("Start date", htmlFor="projection-start-date"), width="auto"),
+        dbc.Col(start_date, width="auto"),
+        dbc.Col(horizon_buttons, width="auto"),
+        dbc.Col(html.Label("Project to", htmlFor="projection-target-date"), width="auto"),
+        dbc.Col(target_date, width="auto"),
+        dbc.Col(
+            dbc.FormText(id="projection-date-validation", color="danger"),
+            width="auto",
+        ),
+    ]
+
+
 def _render_parameters_bar(pathname: str | None) -> list:
     if pathname == _OVERVIEW_PATH:
         return _build_overview_parameters_bar()
@@ -131,6 +176,8 @@ def _render_parameters_bar(pathname: str | None) -> list:
         return _build_positions_parameters_bar()
     if pathname == _PERFORMANCE_PATH:
         return _build_performance_parameters_bar()
+    if pathname == _PROJECTION_PATH:
+        return _build_projection_parameters_bar()
     return _build_static_parameters_bar()
 
 

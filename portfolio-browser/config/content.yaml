@@ -15,8 +15,8 @@ nav_sections:
   - key: performance
     label: Performance
     order: 3
-  - key: income
-    label: Income
+  - key: projection
+    label: Projection
     order: 4
 
 periodicity:
@@ -34,3 +34,15 @@ periodicity:
     day_max_years: 1
     month_max_years: 3
     quarter_max_years: 5
+
+projection:
+  horizons:
+    - { key: 1y,  label: "1Y",  years: 1 }
+    - { key: 5y,  label: "5Y",  years: 5 }
+    - { key: 10y, label: "10Y", years: 10 }
+    - { key: 20y, label: "20Y", years: 20 }
+  returns:
+    - { key: itd_ann, label: "Ann. ITD" }
+    - { key: 1y,       label: "1Y" }
+    - { key: 3y,       label: "3Y" }
+    - { key: 5y,       label: "5Y" }

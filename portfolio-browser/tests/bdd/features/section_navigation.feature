@@ -15,7 +15,6 @@ Feature: Navigate between placeholder sections
       | section     |
       | Positions   |
       | Performance |
-      | Income      |
 
   Scenario: Shell chrome persists across navigation
     Given the app is loaded with "Overview" selected by default

@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at
-`specs/021-periodicity-controls/plan.md`.
+`specs/022-projection-page/plan.md`.
 <!-- SPECKIT END -->

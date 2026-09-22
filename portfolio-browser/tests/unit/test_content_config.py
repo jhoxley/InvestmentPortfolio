@@ -20,8 +20,8 @@ nav_sections:
   - key: performance
     label: Performance
     order: 3
-  - key: income
-    label: Income
+  - key: projection
+    label: Projection
     order: 4
 """
 
@@ -35,7 +35,8 @@ def write_yaml(tmp_path: Path, text: str) -> Path:
 def test_valid_config_loads(tmp_path: Path) -> None:
     # PERIODICITY_YAML is defined lower in this module (021); a fully valid
     # config requires it, since the periodicity section is mandatory.
-    config = load_content_config(write_yaml(tmp_path, VALID_YAML + PERIODICITY_YAML))
+    full_yaml = VALID_YAML + PERIODICITY_YAML + PROJECTION_YAML
+    config = load_content_config(write_yaml(tmp_path, full_yaml))
     assert config.app_name == "Investment Portfolio Browser"
     assert config.build_info.version == "0.1.0"
     assert config.build_info.published_date == "2026-07-13"
@@ -53,7 +54,8 @@ nav_sections:
     order: 1
     is_default: true
 """
-    config = load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML))
+    full_yaml = yaml_text + PERIODICITY_YAML + PROJECTION_YAML
+    config = load_content_config(write_yaml(tmp_path, full_yaml))
     assert config.build_info.version == "unknown"
     assert config.build_info.published_date == "unknown"
 
@@ -70,7 +72,8 @@ nav_sections:
     order: 1
     is_default: true
 """
-    config = load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML))
+    full_yaml = yaml_text + PERIODICITY_YAML + PROJECTION_YAML
+    config = load_content_config(write_yaml(tmp_path, full_yaml))
     assert config.build_info.version == "unknown"
     assert config.build_info.published_date == "unknown"
 
@@ -84,7 +87,7 @@ build_info:
 nav_sections: []
 """
     with pytest.raises(ValueError, match="at least one"):
-        load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML))
+        load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML + PROJECTION_YAML))
 
 
 def test_zero_default_sections_raises(tmp_path: Path) -> None:
@@ -102,7 +105,7 @@ nav_sections:
     order: 2
 """
     with pytest.raises(ValueError, match="exactly one"):
-        load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML))
+        load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML + PROJECTION_YAML))
 
 
 def test_two_default_sections_raises(tmp_path: Path) -> None:
@@ -122,7 +125,7 @@ nav_sections:
     is_default: true
 """
     with pytest.raises(ValueError, match="exactly one"):
-        load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML))
+        load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML + PROJECTION_YAML))
 
 
 def test_duplicate_key_raises(tmp_path: Path) -> None:
@@ -141,7 +144,7 @@ nav_sections:
     order: 2
 """
     with pytest.raises(ValueError, match="unique"):
-        load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML))
+        load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML + PROJECTION_YAML))
 
 
 def test_duplicate_order_raises(tmp_path: Path) -> None:
@@ -160,7 +163,7 @@ nav_sections:
     order: 1
 """
     with pytest.raises(ValueError, match="unique"):
-        load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML))
+        load_content_config(write_yaml(tmp_path, yaml_text + PERIODICITY_YAML + PROJECTION_YAML))
 
 
 def test_real_content_yaml_loads() -> None:
@@ -171,7 +174,7 @@ def test_real_content_yaml_loads() -> None:
         "overview",
         "positions",
         "performance",
-        "income",
+        "projection",
     }
 
 
@@ -194,8 +197,8 @@ periodicity:
 
 
 def _with_periodicity(body: str) -> str:
-    """Append a periodicity section to the otherwise-valid base config."""
-    return VALID_YAML + body
+    """Append a periodicity section (plus a valid projection section) to the base config."""
+    return VALID_YAML + body + PROJECTION_YAML
 
 
 def test_valid_periodicity_section_loads(tmp_path: Path) -> None:
@@ -296,3 +299,111 @@ def test_missing_periodicity_section_is_rejected(tmp_path: Path) -> None:
     """The section is mandatory — a config without it must fail fast, not default."""
     with pytest.raises(ValueError):
         load_content_config(write_yaml(tmp_path, VALID_YAML))
+
+
+# --- projection section (022) ----------------------------------------------
+
+PROJECTION_YAML = """
+projection:
+  horizons:
+    - { key: 1y,  label: "1Y",  years: 1 }
+    - { key: 5y,  label: "5Y",  years: 5 }
+    - { key: 10y, label: "10Y", years: 10 }
+    - { key: 20y, label: "20Y", years: 20 }
+  returns:
+    - { key: itd_ann, label: "Ann. ITD" }
+    - { key: 1y,       label: "1Y" }
+    - { key: 3y,       label: "3Y" }
+    - { key: 5y,       label: "5Y" }
+"""
+
+
+def _with_projection(body: str) -> str:
+    """Append a projection section (plus a valid periodicity section) to the base config."""
+    return VALID_YAML + PERIODICITY_YAML + body
+
+
+def test_valid_projection_section_loads(tmp_path: Path) -> None:
+    config = load_content_config(write_yaml(tmp_path, _with_projection(PROJECTION_YAML)))
+
+    assert [h.key for h in config.projection.horizons] == ["1y", "5y", "10y", "20y"]
+    assert [h.years for h in config.projection.horizons] == [1, 5, 10, 20]
+    assert [h.label for h in config.projection.horizons] == ["1Y", "5Y", "10Y", "20Y"]
+    assert [r.key for r in config.projection.returns] == ["itd_ann", "1y", "3y", "5y"]
+    assert [r.label for r in config.projection.returns] == ["Ann. ITD", "1Y", "3Y", "5Y"]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    [
+        (
+            PROJECTION_YAML.replace('    - { key: 20y, label: "20Y", years: 20 }\n', ""),
+            "only three horizons",
+        ),
+        (
+            PROJECTION_YAML.replace(
+                "  returns:",
+                '    - { key: 25y, label: "25Y", years: 25 }\n  returns:',
+            ),
+            "five horizons",
+        ),
+        (
+            PROJECTION_YAML.replace(
+                '- { key: 5y,  label: "5Y",  years: 5 }',
+                '- { key: 1y,  label: "5Y",  years: 5 }',
+            ),
+            "duplicate horizon key",
+        ),
+        (
+            PROJECTION_YAML.replace(
+                '- { key: 5y,  label: "5Y",  years: 5 }',
+                '- { key: 5y,  label: "1Y",  years: 5 }',
+            ),
+            "duplicate horizon label",
+        ),
+        (
+            PROJECTION_YAML.replace(
+                '- { key: 5y,  label: "5Y",  years: 5 }',
+                '- { key: 5y,  label: "5Y",  years: 1 }',
+            ),
+            "non-ascending horizon years",
+        ),
+        (
+            PROJECTION_YAML.replace('- { key: 5y,       label: "5Y" }\n', ""),
+            "only three returns",
+        ),
+        (
+            PROJECTION_YAML.replace(
+                '- { key: 5y,       label: "5Y" }',
+                '- { key: 5y,       label: "5Y" }\n    - { key: 10y,      label: "10Y" }',
+            ),
+            "five returns",
+        ),
+        (
+            PROJECTION_YAML.replace(
+                '- { key: 3y,       label: "3Y" }',
+                '- { key: 1y,       label: "3Y" }',
+            ),
+            "duplicate return key",
+        ),
+        (
+            PROJECTION_YAML.replace(
+                '- { key: 3y,       label: "3Y" }',
+                '- { key: 3y,       label: "1Y" }',
+            ),
+            "duplicate return label",
+        ),
+    ],
+)
+def test_invalid_projection_section_is_rejected(
+    tmp_path: Path, mutation: str, reason: str
+) -> None:
+    """Every malformed shape must fail fast at load (Principle IV)."""
+    with pytest.raises(ValueError):
+        load_content_config(write_yaml(tmp_path, _with_projection(mutation)))
+
+
+def test_missing_projection_section_is_rejected(tmp_path: Path) -> None:
+    """The section is mandatory — a config without it must fail fast, not default."""
+    with pytest.raises(ValueError):
+        load_content_config(write_yaml(tmp_path, VALID_YAML + PERIODICITY_YAML))

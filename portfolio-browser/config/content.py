@@ -163,6 +163,96 @@ class PeriodicityConfig(BaseModel):
         raise KeyError(f"Unknown periodicity key: {key!r}")
 
 
+_EXPECTED_PROJECTION_HORIZONS = 4
+_EXPECTED_PROJECTION_RETURNS = 4
+
+
+class ProjectionHorizon(BaseModel):
+    """One preset projection-horizon button (022; FR-004).
+
+    `key` is the stable identifier code branches on (and the DOM id suffix);
+    `label` is what the user sees on the button; `years` is how many years
+    past the current start date the button resolves to.
+    """
+
+    key: str
+    label: str
+    years: int
+
+    @field_validator("key", "label")
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("projection horizon key/label must not be blank")
+        return value
+
+    @field_validator("years")
+    @classmethod
+    def _reject_non_positive_years(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("projection horizon years must be positive")
+        return value
+
+
+class ProjectionReturn(BaseModel):
+    """One selectable projection return measure (022; FR-008).
+
+    `key` is the wire-format value sent to the analysis service's `return`
+    query parameter; `label` is what the user sees on its toggle switch —
+    e.g. `key="itd_ann"`, `label="Ann. ITD"` (the same annualized
+    inception-to-date return the Performance page labels "ITD (Ann.)"; the
+    shorter label is this page's own display concision, not a different
+    calculation — spec Assumptions).
+    """
+
+    key: str
+    label: str
+
+    @field_validator("key", "label")
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("projection return key/label must not be blank")
+        return value
+
+
+class ProjectionConfig(BaseModel):
+    """The Projection page's horizon buttons and selectable returns (022)."""
+
+    horizons: list[ProjectionHorizon]
+    returns: list[ProjectionReturn]
+
+    @model_validator(mode="after")
+    def _validate_horizons(self) -> ProjectionConfig:
+        if len(self.horizons) != _EXPECTED_PROJECTION_HORIZONS:
+            raise ValueError(
+                f"projection.horizons must contain exactly "
+                f"{_EXPECTED_PROJECTION_HORIZONS} entries, found {len(self.horizons)}"
+            )
+        for field in ("key", "label"):
+            values = [getattr(horizon, field) for horizon in self.horizons]
+            if len(values) != len(set(values)):
+                raise ValueError(f"projection.horizons {field} values must be unique")
+
+        years = [horizon.years for horizon in self.horizons]
+        if years != sorted(years) or len(years) != len(set(years)):
+            raise ValueError("projection.horizons years must be strictly ascending")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_returns(self) -> ProjectionConfig:
+        if len(self.returns) != _EXPECTED_PROJECTION_RETURNS:
+            raise ValueError(
+                f"projection.returns must contain exactly "
+                f"{_EXPECTED_PROJECTION_RETURNS} entries, found {len(self.returns)}"
+            )
+        for field in ("key", "label"):
+            values = [getattr(item, field) for item in self.returns]
+            if len(values) != len(set(values)):
+                raise ValueError(f"projection.returns {field} values must be unique")
+        return self
+
+
 class ContentConfig(BaseModel):
     app_name: str
     build_info: BuildInfo = BuildInfo()
@@ -170,6 +260,7 @@ class ContentConfig(BaseModel):
     # Mandatory: a missing section fails fast at startup rather than silently
     # defaulting to values hardcoded in application code (Principle IV).
     periodicity: PeriodicityConfig
+    projection: ProjectionConfig
 
     @model_validator(mode="after")
     def _validate_nav_sections(self) -> ContentConfig:
