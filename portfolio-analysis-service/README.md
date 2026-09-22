@@ -21,6 +21,7 @@ The service accepts an XLSX file describing the historical trading and income ac
 ### Key Behaviours
 
 - **Forward-fill:** Each sub-account's values (`book_cost`, `quantity`, `total_income`) are carried forward across business days with no activity record.
+- **Periodicity:** `GET /v1/accounts/{account}/timeseries` and `GET /v1/accounts/{account}/position` accept an optional `periodicity` of `day` (default), `week`, `month`, `quarter` or `annual`. Windows are aligned to the real calendar — Monday, the 1st of the month, 1 Jan/Apr/Jul/Oct, and 1 Jan respectively — not to the requested dates. Each entry is dated at its window's start business day (clamped to the resolved start for the first window) and carries the **last** observation of each attribute in that window, all from one source date. Omitting the parameter reproduces the per-business-day response exactly; `from_date`/`to_date` always describe the resolved daily range. Note that `position_return` and `weighted_position_return` therefore report the last *single-day* return in the window, not a compounded period return.
 - **Equity closure rule:** When a non-Cash sub-account's `quantity` reaches zero it is excluded from all subsequent dates. The date on which it reaches zero is its final row.
 - **Cash always persists:** The `Cash` sub-account is never subject to the closure rule; it appears on every business day regardless of balance.
 - **Idempotency:** Submitting the same file twice is a no-op (SHA-256 checksum match). The response indicates `status: unchanged` with HTTP 200.

@@ -298,3 +298,25 @@ class MarketDataServiceError(Exception):
             f"Market data service request failed for sub-account '{sub_account}': {detail}"
         )
         super().__init__(self.message)
+
+
+class UnsupportedPeriodicityError(Exception):
+    """Raised when a requested periodicity value isn't in the supported set."""
+
+    def __init__(
+        self, requested: str, supported: tuple[str, ...], message: str | None = None
+    ) -> None:
+        """Initialise with the rejected value and the supported set.
+
+        Args:
+            requested: The periodicity value that isn't supported.
+            supported: The full set of supported periodicity values.
+            message: Optional override message.
+        """
+        self.requested = requested
+        self.supported = supported
+        valid = ", ".join(supported)
+        self.message = message or (
+            f"Periodicity '{requested}' is not supported. Supported values: {valid}."
+        )
+        super().__init__(self.message)

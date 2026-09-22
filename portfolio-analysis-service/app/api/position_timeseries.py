@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.dependencies import get_capital_repository, get_ladder_repository
 from app.exceptions import AccountNotFoundError, PositionLadderNotIngestedError
+from app.models.periodicity import SUPPORTED_PERIODICITY_VALUES
 from app.models.position_timeseries import PositionsResponse, PositionTimeSeriesResponse
 from app.models.timeseries import AccountSummary, AttributeMetadataResponse
 from app.repositories.capital_repository import CapitalRepository
@@ -19,6 +20,7 @@ from app.services.position_timeseries_service import PositionTimeSeriesService
 from app.services.positions_service import PositionsService
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 from app.validators.account_name import validate_account_name
+from app.validators.periodicity import resolve_periodicity
 
 logger = structlog.get_logger(__name__)
 
@@ -101,8 +103,9 @@ def _get_position_timeseries_service(
             "description": (
                 "Validation failed — invalid account name, account known but no position "
                 "ladder ingested, no attribute supplied, an unsupported attribute name "
-                "(including 'capital'), an invalid date range, a future end date, or a "
-                "resolved start date before the position ladder's earliest recorded date"
+                "(including 'capital'), an unsupported periodicity value, an invalid date "
+                "range, a future end date, or a resolved start date before the position "
+                "ladder's earliest recorded date"
             )
         },
     },
@@ -118,6 +121,16 @@ async def get_position_timeseries(
     ),
     start: date | None = Query(default=None),
     end: date | None = Query(default=None),
+    periodicity: str | None = Query(
+        default=None,
+        description=(
+            "Optional aggregation interval: day, week, month, quarter, annual. Omitted or "
+            "'day' returns one entry per (business day, position). Any other value returns "
+            "one entry per (calendar-aligned window, position), valued at that position's "
+            "last observation in the window."
+        ),
+        json_schema_extra={"enum": list(SUPPORTED_PERIODICITY_VALUES)},
+    ),
     service: PositionTimeSeriesService = Depends(_get_position_timeseries_service),
 ) -> JSONResponse:
     """Return a per-position, forward-filled time series for the requested account.
@@ -128,6 +141,7 @@ async def get_position_timeseries(
         attribute: Repeated query parameter naming the requested attributes.
         start: Optional start date (defaults per FR-009).
         end: Optional end date (defaults per FR-009).
+        periodicity: Optional calendar aggregation interval (defaults to day).
         service: Injected PositionTimeSeriesService.
 
     Returns:
@@ -142,8 +156,10 @@ async def get_position_timeseries(
         MissingRequiredSourceError: Resolved start precedes the ladder's own earliest date.
         FutureEndDateError: end is later than today.
         InvalidDateRangeError: Resolved start is after resolved end.
+        UnsupportedPeriodicityError: The periodicity value isn't supported.
     """
     validate_account_name(account_name)
+    resolved_periodicity = resolve_periodicity(periodicity)
     response = service.get_series(
         account_name=account_name,
         positions=position,
@@ -151,6 +167,7 @@ async def get_position_timeseries(
         start=start,
         end=end,
         today=date.today(),
+        periodicity=resolved_periodicity,
     )
     return JSONResponse(
         status_code=200,

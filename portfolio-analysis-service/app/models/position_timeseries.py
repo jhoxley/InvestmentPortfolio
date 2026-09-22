@@ -4,6 +4,8 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.periodicity import Periodicity
+
 
 class PositionSummary(BaseModel):
     """One entry in the positions-enumeration endpoint's response."""
@@ -49,7 +51,17 @@ class PositionTimeSeriesResponse(BaseModel):
     positions: list[str] = Field(description="Positions actually represented in entries, sorted")
     from_date: date = Field(description="Resolved start date of the time series")
     to_date: date = Field(description="Resolved end date of the time series")
+    periodicity: Periodicity = Field(
+        default=Periodicity.DAY,
+        description=(
+            "The periodicity actually applied, including 'day' when it was defaulted. "
+            "Additive and optional — clients predating this field are unaffected."
+        ),
+    )
     entries: list[PositionTimeSeriesEntry] = Field(
-        description="One entry per (date, position) combination that has data"
+        description=(
+            "One entry per (date, position) combination that has data — per business day, "
+            "or per calendar window when aggregated"
+        )
     )
     links: dict[str, str] = Field(alias="_links", description="HATEOAS navigation links")

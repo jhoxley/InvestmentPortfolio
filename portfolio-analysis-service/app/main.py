@@ -36,6 +36,7 @@ from app.exceptions import (
     PriceCoverageError,
     SchemaValidationError,
     UnsupportedAttributeError,
+    UnsupportedPeriodicityError,
 )
 from app.logging_config import setup_logging
 from app.models.ladder import ProblemDetail
@@ -323,6 +324,23 @@ async def unsupported_attribute_handler(
     """
     logger.warning("unsupported_attribute", requested=exc.requested, detail=exc.message)
     return _problem(request, 422, "unsupported-attribute", "Unsupported Attribute", exc.message)
+
+
+@app.exception_handler(UnsupportedPeriodicityError)
+async def unsupported_periodicity_handler(
+    request: Request, exc: UnsupportedPeriodicityError
+) -> JSONResponse:
+    """Handle UnsupportedPeriodicityError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning("unsupported_periodicity", requested=exc.requested, detail=exc.message)
+    return _problem(request, 422, "unsupported-periodicity", "Unsupported Periodicity", exc.message)
 
 
 @app.exception_handler(FutureEndDateError)

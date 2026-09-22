@@ -1,0 +1,411 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Locally hosted API for portfolio analysis features. This version adds an optional
+    `periodicity` query parameter to the account time series and position time series
+    endpoints, and an additive `periodicity` field to both response bodies. Omitting the
+    parameter reproduces the previous per-business-day behaviour exactly; supplying
+    week/month/quarter/annual divides the resolved date range into calendar-aligned windows
+    and returns the last observation of each window.
+  version: "0.8.0"
+
+servers:
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+paths:
+  /accounts/{account_name}/timeseries:
+
+    get:
+      operationId: get_account_timeseries
+      summary: >
+        Retrieve a time series of requested attributes for an account, per business day or per
+        calendar period
+      description: >
+        Returns one entry per business day by default. When `periodicity` is week, month,
+        quarter or annual, the resolved date range is divided into calendar-aligned windows
+        (weeks begin Monday; months on the 1st; quarters on 1 Jan/Apr/Jul/Oct; years on 1 Jan)
+        and one entry is returned per window. Each entry is dated at its window's start —
+        rolled forward to the next business day, and clamped to the resolved start date for the
+        first window — and carries the LAST observation of every requested attribute within
+        that window, all taken from the same source date. A window containing no observation in
+        range is omitted rather than returned with nulls. `from_date` and `to_date` always
+        describe the resolved daily range and are unaffected by `periodicity`.
+      tags: [Timeseries]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+          description: >
+            Case-sensitive account identifier. Restricted to alphanumeric
+            characters, hyphens, and underscores; 1–64 characters.
+        - name: attribute
+          in: query
+          required: true
+          description: Repeated parameter; at least one required.
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [capital, income, book_cost, market_value, pnl]
+            minItems: 1
+          style: form
+          explode: true
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the earliest recorded date of the source(s) required by the requested
+            attributes. Adjusted forward to the next business day if it falls on a weekend.
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the business day before today. Must not be later than today.
+            Adjusted forward to the next business day if it falls on a weekend (capped at
+            today).
+        - name: periodicity
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Periodicity"
+          description: >
+            Optional aggregation interval. Omitted or `day` returns one entry per business day
+            (identical behaviour). Any other value returns one entry per calendar-aligned
+            window, valued at the last observation in that window. Matched case-sensitively;
+            any other value is rejected with 422 unsupported-periodicity.
+      responses:
+        "200":
+          description: Time series returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeSeriesResponse"
+              example:
+                account_name: HL-SIPP
+                attributes: [capital, market_value]
+                from_date: "2025-01-02"
+                to_date: "2025-12-31"
+                periodicity: quarter
+                entries:
+                  - date: "2025-01-02"
+                    capital: 100000.0
+                    market_value: 104120.55
+                  - date: "2025-04-01"
+                    capital: 105000.0
+                    market_value: 109880.10
+                  - date: "2025-07-01"
+                    capital: 105000.0
+                    market_value: 112640.00
+                  - date: "2025-10-01"
+                    capital: 110000.0
+                    market_value: 121305.75
+                _links:
+                  self: "/v1/accounts/HL-SIPP/timeseries"
+                  attributes: "/v1/timeseries/attributes"
+                  accounts: "/v1/accounts"
+        "404":
+          description: No capital ledger or position ladder found for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: >
+            Validation failed — invalid account name, no attribute supplied, an unsupported
+            attribute name, an unsupported periodicity value, an invalid date range, a future
+            end date, or a required source missing/insufficient for a requested attribute
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              example:
+                type: "https://portfolio-analysis/errors/unsupported-periodicity"
+                title: "Unsupported Periodicity"
+                status: 422
+                detail: >-
+                  Periodicity 'fortnight' is not supported. Supported values: day, week,
+                  month, quarter, annual.
+                instance: "/v1/accounts/HL-SIPP/timeseries"
+
+  /accounts/{account_name}/position:
+
+    get:
+      operationId: get_position_timeseries
+      summary: >
+        Retrieve a time series of requested attributes for one or more positions, per business
+        day or per calendar period
+      description: >
+        Returns one entry per (business day, position) pair by default. `periodicity` behaves
+        exactly as on the account time series endpoint, applied independently to each position:
+        one entry per (window, position) pair that has data, dated at the window start and
+        valued at that position's last observation within the window. Because a window's date
+        is derived from the calendar period and the resolved start date only — never from a
+        position's own data — every position in a given window shares the same entry date, so
+        per-position series can be aligned with each other and with the account-level series. A
+        position with no data in a window produces no entry for that window.
+      tags: [Position Timeseries]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+          description: >
+            Case-sensitive account identifier. Restricted to alphanumeric
+            characters, hyphens, and underscores; 1–64 characters.
+        - name: position
+          in: query
+          required: false
+          description: >
+            Repeated parameter; zero or more. Defaults to every position in the ladder.
+            Unmatched values are silently dropped.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: attribute
+          in: query
+          required: true
+          description: Repeated parameter; at least one required.
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - market_value
+                - income
+                - book_cost
+                - pnl
+                - close_price
+                - quantity
+                - position_return
+                - weighted_position_return
+            minItems: 1
+          style: form
+          explode: true
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the account's own earliest recorded position-ladder date. Adjusted
+            forward to the next business day if it falls on a weekend.
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the business day before today. Must not be later than today.
+            Adjusted forward to the next business day if it falls on a weekend (capped at
+            today).
+        - name: periodicity
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Periodicity"
+          description: >
+            Optional aggregation interval, applied independently per position. Omitted or
+            `day` returns one entry per (business day, position) pair (identical behaviour).
+            Matched case-sensitively; any other value is rejected with 422
+            unsupported-periodicity.
+      responses:
+        "200":
+          description: Position time series returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionTimeSeriesResponse"
+              example:
+                account_name: HL-SIPP
+                attributes: [market_value]
+                positions: [Blackrock_Consensus_85, Scottish_Widows_Pension]
+                from_date: "2025-01-02"
+                to_date: "2025-06-30"
+                periodicity: quarter
+                entries:
+                  - date: "2025-01-02"
+                    position: Blackrock_Consensus_85
+                    market_value: 41200.55
+                  - date: "2025-01-02"
+                    position: Scottish_Widows_Pension
+                    market_value: 62920.00
+                  - date: "2025-04-01"
+                    position: Blackrock_Consensus_85
+                    market_value: 43880.10
+                  - date: "2025-04-01"
+                    position: Scottish_Widows_Pension
+                    market_value: 66000.00
+                _links:
+                  self: "/v1/accounts/HL-SIPP/position"
+                  positions: "/v1/accounts/HL-SIPP/positions"
+                  attributes: "/v1/positions/attributes"
+                  accounts: "/v1/accounts"
+        "404":
+          description: No resource of any kind has been ingested for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: >
+            Validation failed — invalid account name, account known but no position ladder
+            ingested, no attribute supplied, an unsupported attribute name (including
+            'capital'), an unsupported periodicity value, an invalid date range, a future end
+            date, or a resolved start date before the position ladder's earliest recorded date
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+components:
+  schemas:
+
+    Periodicity:
+      type: string
+      enum: [day, week, month, quarter, annual]
+      default: day
+      description: >
+        Calendar aggregation interval. `day` = one entry per business day (the default and the
+        pre-existing behaviour). `week` = calendar weeks beginning Monday. `month` = calendar
+        months beginning on the 1st. `quarter` = calendar quarters beginning 1 Jan/Apr/Jul/Oct.
+        `annual` = calendar years beginning 1 Jan. Matched case-sensitively — `Annual`,
+        `yearly` and `daily` are all rejected.
+
+    TimeSeriesEntry:
+      type: object
+      required: [date]
+      properties:
+        date:
+          type: string
+          format: date
+          description: >
+            The business day (day periodicity) or the window's start business day, clamped to
+            `from_date` for the first window.
+      additionalProperties:
+        type: number
+        format: float
+      description: >
+        Additional properties are the requested attribute values; attributes that were not
+        requested are absent rather than null. Under a non-day periodicity every value on one
+        entry comes from the same source date — the last observation in that window.
+
+    TimeSeriesResponse:
+      type: object
+      required: [account_name, attributes, from_date, to_date, entries, _links]
+      properties:
+        account_name:
+          type: string
+        attributes:
+          type: array
+          items:
+            type: string
+        from_date:
+          type: string
+          format: date
+          description: Resolved daily range start — unaffected by periodicity.
+        to_date:
+          type: string
+          format: date
+          description: Resolved daily range end — unaffected by periodicity.
+        periodicity:
+          allOf:
+            - $ref: "#/components/schemas/Periodicity"
+          description: >
+            The periodicity actually applied, including `day` when it was defaulted. Additive
+            and optional — clients written before this field existed are unaffected.
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSeriesEntry"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    PositionTimeSeriesEntry:
+      type: object
+      required: [date, position]
+      properties:
+        date:
+          type: string
+          format: date
+        position:
+          type: string
+      additionalProperties:
+        type: number
+        format: float
+      description: >
+        Additional properties are the requested attribute values. Note that under a non-day
+        periodicity, `position_return` and `weighted_position_return` report the LAST
+        single-day return in the window — they are not compounded period returns.
+
+    PositionTimeSeriesResponse:
+      type: object
+      required: [account_name, attributes, positions, from_date, to_date, entries, _links]
+      properties:
+        account_name:
+          type: string
+        attributes:
+          type: array
+          items:
+            type: string
+        positions:
+          type: array
+          items:
+            type: string
+        from_date:
+          type: string
+          format: date
+          description: Resolved daily range start — unaffected by periodicity.
+        to_date:
+          type: string
+          format: date
+          description: Resolved daily range end — unaffected by periodicity.
+        periodicity:
+          allOf:
+            - $ref: "#/components/schemas/Periodicity"
+          description: >
+            The periodicity actually applied, including `day` when it was defaulted.
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/PositionTimeSeriesEntry"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string

@@ -13,11 +13,13 @@ from app.exceptions import (
     MissingRequiredSourceError,
     PositionLadderNotIngestedError,
 )
+from app.models.periodicity import Periodicity
 from app.models.position_timeseries import PositionTimeSeriesEntry, PositionTimeSeriesResponse
 from app.repositories.ladder_repository import LadderRepository
 from app.services import position_attributes
 from app.services.accounts_service import AccountsService
 from app.services.business_day_expansion import expand_business_days
+from app.services.periodicity_aggregation import aggregate_last_observation
 from app.services.positions_service import PositionsService
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 
@@ -57,6 +59,7 @@ class PositionTimeSeriesService:
         start: date | None,
         end: date | None,
         today: date,
+        periodicity: Periodicity = Periodicity.DAY,
     ) -> PositionTimeSeriesResponse:
         """Build the requested per-position time series for an account.
 
@@ -67,6 +70,8 @@ class PositionTimeSeriesService:
             start: Caller-supplied start date, or None to default.
             end: Caller-supplied end date, or None to default.
             today: The current date.
+            periodicity: Calendar aggregation interval, applied independently per
+                position. The default reproduces the per-business-day series exactly.
 
         Returns:
             Populated PositionTimeSeriesResponse.
@@ -146,6 +151,10 @@ class PositionTimeSeriesService:
                     expanded["total_income"] + expanded["market_value"] - expanded["book_cost"]
                 )
 
+            # Clamped against the *global* resolved start, not this position's own
+            # expand_start, so every position in a window reports the same date.
+            expanded = aggregate_last_observation(expanded, periodicity, resolved_start)
+
             for _, row in expanded.iterrows():
                 entries.append(
                     PositionTimeSeriesEntry(
@@ -168,6 +177,7 @@ class PositionTimeSeriesService:
             effective_positions=effective_positions,
             from_date=str(resolved_start),
             to_date=str(resolved_end),
+            periodicity=periodicity.value,
             row_count=len(entries),
         )
 
@@ -177,6 +187,7 @@ class PositionTimeSeriesService:
             positions=response_positions,
             from_date=resolved_start,
             to_date=resolved_end,
+            periodicity=periodicity,
             entries=entries,
             _links={
                 "self": f"/v1/accounts/{account_name}/position",

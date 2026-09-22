@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from app.api.dependencies import get_capital_repository, get_ladder_repository
+from app.models.periodicity import SUPPORTED_PERIODICITY_VALUES
 from app.models.timeseries import AttributeMetadataResponse, TimeSeriesResponse
 from app.repositories.capital_repository import CapitalRepository
 from app.repositories.ladder_repository import LadderRepository
@@ -15,6 +16,7 @@ from app.services.accounts_service import AccountsService
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 from app.services.timeseries_service import TimeSeriesService
 from app.validators.account_name import validate_account_name
+from app.validators.periodicity import resolve_periodicity
 
 logger = structlog.get_logger(__name__)
 
@@ -52,8 +54,9 @@ def _get_timeseries_service(
         422: {
             "description": (
                 "Validation failed — invalid account name, no attribute supplied, an "
-                "unsupported attribute name, an invalid date range, a future end date, or "
-                "a required source missing/insufficient for a requested attribute"
+                "unsupported attribute name, an unsupported periodicity value, an invalid "
+                "date range, a future end date, or a required source missing/insufficient "
+                "for a requested attribute"
             )
         },
     },
@@ -65,6 +68,15 @@ async def get_account_timeseries(
     ),
     start: date | None = Query(default=None),
     end: date | None = Query(default=None),
+    periodicity: str | None = Query(
+        default=None,
+        description=(
+            "Optional aggregation interval: day, week, month, quarter, annual. Omitted or "
+            "'day' returns one entry per business day. Any other value returns one entry "
+            "per calendar-aligned window, valued at the last observation in that window."
+        ),
+        json_schema_extra={"enum": list(SUPPORTED_PERIODICITY_VALUES)},
+    ),
     service: TimeSeriesService = Depends(_get_timeseries_service),
 ) -> JSONResponse:
     """Return a joined, forward-filled time series for the requested account/attributes.
@@ -74,6 +86,7 @@ async def get_account_timeseries(
         attribute: Repeated query parameter naming the requested attributes.
         start: Optional start date (defaults per FR-006).
         end: Optional end date (defaults per FR-007).
+        periodicity: Optional calendar aggregation interval (defaults to day).
         service: Injected TimeSeriesService.
 
     Returns:
@@ -87,14 +100,17 @@ async def get_account_timeseries(
         MissingRequiredSourceError: A required source is missing/insufficient.
         FutureEndDateError: end is later than today.
         InvalidDateRangeError: Resolved start is after resolved end.
+        UnsupportedPeriodicityError: The periodicity value isn't supported.
     """
     validate_account_name(account_name)
+    resolved_periodicity = resolve_periodicity(periodicity)
     response = service.get_series(
         account_name=account_name,
         attributes=attribute,
         start=start,
         end=end,
         today=date.today(),
+        periodicity=resolved_periodicity,
     )
     return JSONResponse(
         status_code=200,
