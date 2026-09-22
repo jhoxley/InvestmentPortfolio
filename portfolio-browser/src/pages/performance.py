@@ -63,6 +63,21 @@ logger = structlog.get_logger(__name__)
 
 _TOGGLE_ID_TYPE = "performance-attribute-toggle"
 
+# This page's own mount-trigger, used as a page-local scoping Input on every
+# callback whose Output is one of the *shared* parameters-bar controls.
+#
+# Dash derives an `allow_duplicate=True` Output's unique callback id by hashing
+# ONLY the callback's Inputs (`dash/_utils.py::create_callback_id`). Overview,
+# Positions and this page all drive the same shared Outputs from the same shared
+# Inputs, so without a page-local Input all three collapse to one callback id
+# and the last page imported silently overwrites the others — which is how this
+# page's "ITD" shortcut previously ran Positions' year-to-date mapping. Adding a
+# component that exists only in this page's layout makes the id unique AND stops
+# the callback firing on any other route. `max_intervals` is a static prop that
+# never changes, so it never triggers a refresh of its own.
+# Guarded by tests/unit/test_callback_registration.py.
+_PAGE_SCOPE_INPUT = "performance-mount-trigger"
+
 # Must match src/layout/shell.py's shared shortcut button ids (reused
 # verbatim from Overview/Positions; research.md #3). The button labeled
 # "ITD" on this page shares the same DOM id as Overview's/Positions' own
@@ -223,13 +238,16 @@ def _fetch_accounts_and_attributes(_n_intervals: int) -> tuple[Any, ...]:
 
 
 @callback(
-    Output("app-parameters-account", "value"),
+    Output("app-parameters-account", "value", allow_duplicate=True),
     Input("performance-accounts-store", "data"),
     Input("performance-attributes-store", "data"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     prevent_initial_call=True,
 )
 def _apply_default_account(
-    accounts_data: list[dict[str, Any]] | None, attributes_data: list[dict[str, Any]] | None
+    accounts_data: list[dict[str, Any]] | None,
+    attributes_data: list[dict[str, Any]] | None,
+    _page_scope: int | None,
 ) -> str:
     """Auto-select the alphabetically-first account once accounts are loaded (FR-008)."""
     if not accounts_data:
@@ -242,11 +260,14 @@ def _apply_default_account(
     Output("app-parameters-from-date", "date", allow_duplicate=True),
     Output("app-parameters-to-date", "date", allow_duplicate=True),
     Input("app-parameters-account", "value"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     State("performance-accounts-store", "data"),
     prevent_initial_call=True,
 )
 def _sync_date_range_to_selected_account(
-    account_name: str | None, accounts_data: list[dict[str, Any]] | None
+    account_name: str | None,
+    _page_scope: int | None,
+    accounts_data: list[dict[str, Any]] | None,
 ) -> tuple[Any, Any]:
     """Reset from/to dates to the selected account's own full history (FR-008, FR-009).
 
@@ -268,11 +289,12 @@ def _sync_date_range_to_selected_account(
 
 
 @callback(
-    Output("app-parameters-from-date", "max_date_allowed"),
+    Output("app-parameters-from-date", "max_date_allowed", allow_duplicate=True),
     Input("app-parameters-to-date", "date"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     prevent_initial_call=True,
 )
-def _sync_from_date_max_to_to_date(to_date: str | None) -> Any:
+def _sync_from_date_max_to_to_date(to_date: str | None, _page_scope: int | None) -> Any:
     """Keep "from" from ever exceeding the current "to" value (FR-015)."""
     if not to_date:
         raise PreventUpdate
@@ -326,6 +348,7 @@ def _render_chart(
     Input("overview-shortcut-3y", "n_clicks"),
     Input("overview-shortcut-5y", "n_clicks"),
     Input("overview-shortcut-all", "n_clicks"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     State("app-parameters-account", "value"),
     State("performance-accounts-store", "data"),
     prevent_initial_call=True,
@@ -336,6 +359,7 @@ def _apply_date_range_shortcut(
     _3y: int | None,
     _5y: int | None,
     _all: int | None,
+    _page_scope: int | None,
     account_name: str | None,
     accounts_data: list[dict[str, Any]] | None,
 ) -> tuple[Any, Any]:

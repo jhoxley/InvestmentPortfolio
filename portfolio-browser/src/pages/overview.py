@@ -73,6 +73,15 @@ logger = structlog.get_logger(__name__)
 _DEFAULT_METRIC = "market_value"
 _TOGGLE_ID_TYPE = "overview-attribute-toggle"
 
+# This page's own mount-trigger, used as a page-local scoping Input on every
+# callback whose Output is one of the *shared* parameters-bar controls. Dash
+# derives an `allow_duplicate=True` Output's callback id by hashing ONLY the
+# Inputs (`dash/_utils.py::create_callback_id`), so without a page-local Input
+# this page's handlers collide with Positions'/Performance's identical
+# Output+Input pairs and are silently overwritten at import time.
+# Guarded by tests/unit/test_callback_registration.py.
+_PAGE_SCOPE_INPUT = "overview-mount-trigger"
+
 # Must match src/layout/shell.py's _SHORTCUT_BUTTONS ids.
 _SHORTCUT_CODE_BY_BUTTON_ID = {
     "overview-shortcut-ytd": SHORTCUT_YTD,
@@ -254,13 +263,16 @@ def _fetch_accounts_and_attributes(_n_intervals: int) -> tuple[Any, ...]:
 
 
 @callback(
-    Output("app-parameters-account", "value"),
+    Output("app-parameters-account", "value", allow_duplicate=True),
     Input("overview-accounts-store", "data"),
     Input("overview-attributes-store", "data"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     prevent_initial_call=True,
 )
 def _apply_default_account(
-    accounts_data: list[dict[str, Any]] | None, attributes_data: list[dict[str, Any]] | None
+    accounts_data: list[dict[str, Any]] | None,
+    attributes_data: list[dict[str, Any]] | None,
+    _page_scope: int | None,
 ) -> str:
     """Auto-select the alphabetically-first account once accounts are loaded (FR-001a)."""
     if not accounts_data:
@@ -273,11 +285,14 @@ def _apply_default_account(
     Output("app-parameters-from-date", "date", allow_duplicate=True),
     Output("app-parameters-to-date", "date", allow_duplicate=True),
     Input("app-parameters-account", "value"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     State("overview-accounts-store", "data"),
     prevent_initial_call=True,
 )
 def _sync_date_range_to_selected_account(
-    account_name: str | None, accounts_data: list[dict[str, Any]] | None
+    account_name: str | None,
+    _page_scope: int | None,
+    accounts_data: list[dict[str, Any]] | None,
 ) -> tuple[Any, Any]:
     """Reset from/to dates to the selected account's own range (FR-003, FR-004).
 
@@ -297,11 +312,12 @@ def _sync_date_range_to_selected_account(
 
 
 @callback(
-    Output("app-parameters-from-date", "max_date_allowed"),
+    Output("app-parameters-from-date", "max_date_allowed", allow_duplicate=True),
     Input("app-parameters-to-date", "date"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     prevent_initial_call=True,
 )
-def _sync_from_date_max_to_to_date(to_date: str | None) -> Any:
+def _sync_from_date_max_to_to_date(to_date: str | None, _page_scope: int | None) -> Any:
     """Keep "from" from ever exceeding the current "to" value (FR-015)."""
     if not to_date:
         raise PreventUpdate
@@ -359,6 +375,7 @@ def _render_chart(
     Input("overview-shortcut-3y", "n_clicks"),
     Input("overview-shortcut-5y", "n_clicks"),
     Input("overview-shortcut-all", "n_clicks"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     State("app-parameters-account", "value"),
     State("overview-accounts-store", "data"),
     prevent_initial_call=True,
@@ -369,6 +386,7 @@ def _apply_date_range_shortcut(
     _3y: int | None,
     _5y: int | None,
     _all: int | None,
+    _page_scope: int | None,
     account_name: str | None,
     accounts_data: list[dict[str, Any]] | None,
 ) -> tuple[Any, Any]:

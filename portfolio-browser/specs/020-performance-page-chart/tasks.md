@@ -146,7 +146,7 @@ the fully-wired feature.
 
 - [X] T020 [P] Run `.venv/Scripts/python -m ruff check .` and `.venv/Scripts/python -m mypy .`; fix any issues in all new/modified files (`src/components/date_range_controls.py`, `src/pages/_performance_chart.py`, `src/pages/performance.py`, `src/layout/shell.py`, `src/services/portfolio_analysis_client.py`). **Verified**: both commands report zero issues across the full project (46 source files).
 - [X] T021 [P] Run `.venv/Scripts/python -m pytest tests/unit tests/bdd` in full and confirm all pass — including 015's/016's/017's/018's/019's pre-existing scenarios (regression risk: `shell_parameters_bar_unchanged.feature` and `date_range_controls.py` are shared/modified files). **`tests/unit`**: all 104 tests pass (18 client tests incl. 6 new, 19 date-range-controls tests incl. 2 new, 7 new in `test_performance_chart_shaping.py`, plus every pre-existing 015/016/017/018/019 unit test unchanged and green). **`tests/bdd`**: all 88 scenarios (67 pre-existing + 21 new: 11 Performance-specific + the updated `shell_parameters_bar_unchanged.feature`'s 4) collect successfully with zero step-binding/import errors — confirming no wiring defects across the whole suite. Actually running them hits `selenium.common.exceptions.SessionNotCreatedException: cannot find Chrome binary` — this sandbox has no Chrome/chromedriver installed, identical to the limitation already documented in `specs/017-chart-date-range-shortcuts/tasks.md`'s T014 and `specs/018-positions-page/tasks.md`'s T032. **Not executed to a pass/fail verdict** — needs a machine with Chrome.
-- [ ] T022 Perform the full manual walkthrough in `quickstart.md` against a real running `portfolio-analysis-service` instance (all 3 user stories, the "ITD"/"All" redundancy check, percentage formatting, and the missing-measure-history gap check). **Not done** — no running `portfolio-analysis-service` instance or browser in this session; requires a manual pass by whoever has both runnable locally.
+- [X] T022 Perform the full manual walkthrough in `quickstart.md` against a real running `portfolio-analysis-service` instance (all 3 user stories, the "ITD"/"All" redundancy check, percentage formatting, and the missing-measure-history gap check). **Done** — see the T022 Verification Record and Resolution below.
 
 ---
 
@@ -257,3 +257,120 @@ Task: "Update shell_parameters_bar_unchanged.feature for the Performance route"
   contract documentation in `specs/*/contracts/portfolio-analysis-api.md`
   (prose, verified against the upstream OpenAPI source) rather than
   executable contract tests, consistent with `016`/`018`'s precedent
+
+---
+
+## T022 Verification Record (2026-09-22)
+
+**Method**: Chrome is not installed on this machine, so the Selenium/`dash[testing]` BDD
+suite and a literal browser click-through were both impossible. Instead the walkthrough was
+replayed over the **live Dash callback HTTP API** (`POST /_dash-update-component`) against a
+freshly started `portfolio-browser` instance (port 8051, current source) talking to the
+**running** `portfolio-analysis-service` (port 8000) with real ingested accounts
+(`HL-ISA` 2018-07-12→, `HL-SIPP` 2016-04-20→). This is the same entry point a browser uses;
+only DOM/CSS rendering is not covered.
+
+**Result: 30 of 32 checks PASS.** `tests/unit` also passes in full (104 tests).
+
+Verified passing:
+
+- **US1** — accounts + measures fetched live (`['ITD','ITD (Ann.)','1Y','3Y','5Y']`); dropdown
+  populated; one switch per API measure; **exactly the first API-returned measure defaults ON**
+  (not hard-coded); first account auto-selected (`HL-ISA`); date range defaults to that
+  account's own full history (`2018-07-12` → `2026-09-21`); a single-line chart renders with no
+  further action.
+- **Formatting** — y-axis `tickformat='.1%'`; hover `'%{x|%Y-%m-%d}<br>ITD: %{y:.1%}'`; no
+  currency symbol anywhere in the figure.
+- **No stacked-area / no table** — no `DataTable` in the rendered page; no "stacked" control
+  anywhere in the layout.
+- **US2 (partial)** — switching to `HL-SIPP` resets the range to its own history
+  (`2016-04-20`); the chart re-renders; each of the five shortcuts updates the dates and
+  re-renders.
+- **US3** — toggling a second measure adds a second trace with the first trace's data
+  byte-identical; deselecting every measure yields `performance-empty-state`
+  ("Select at least one measure…") and **no** Graph.
+- **Missing history** — with ITD+5Y over full history, `5Y` renders alongside ITD with fewer
+  points (839 vs 2138) and starts partway in, no error, chart intact.
+
+### ❌ FAILING: the "ITD" shortcut does not resolve to inception
+
+Clicking the shortcut labelled **"ITD"** sets From = `2026-01-01` (year-to-date) instead of the
+account's earliest recorded date. quickstart.md requires "clicking 'ITD' and clicking 'All'
+should produce the identical 'From' date"; "All" correctly gives `2018-07-12`.
+
+**This is NOT stale code** — a fresh process from current source reproduces it, while the
+mapping in `src/pages/performance.py` is provably correct in isolation
+(`overview-shortcut-ytd -> 'all' -> 2018-07-12`).
+
+**Root cause**: `dash/_utils.py::create_callback_id` makes an `allow_duplicate=True` output
+unique by hashing **only the callback's Inputs**. `overview.py`, `positions.py` and
+`performance.py` each register a shortcut callback with *identical* Outputs **and** *identical*
+Inputs (the five shared `overview-shortcut-*` `n_clicks`), so all three collapse to one
+callback id and the last page imported silently overwrites the others in
+`dash._callback.GLOBAL_CALLBACK_MAP`. Page import is alphabetical, so **`positions` wins every
+collision** — and its mapping sends the "ytd" button to `SHORTCUT_YTD`, not `SHORTCUT_ALL`.
+The three pages' store shapes are compatible, so nothing errors; it just does the wrong thing.
+
+**Blast radius — this is wider than 020.** Instrumenting `GLOBAL_CALLBACK_MAP` during startup
+shows **7 of 20 callback registrations are silently discarded**:
+
+| Colliding callback id | Registrations lost |
+|---|---|
+| `app-parameters-account.value` (default account) | 2 |
+| `..from-date.date@2b98…to-date.date@2b98..` (account-switch date sync) | 1 |
+| `app-parameters-from-date.max_date_allowed` (from-max sync) | 2 |
+| `..from-date.date@5309…to-date.date@5309..` (shortcuts) | 2 |
+
+Only `src.pages.positions`' implementation of each survives. The collision predates 020 — it
+began when the second page copied the shared-control pattern (018) — but 020 is the feature
+whose documented behaviour it makes unreachable. It was never caught because the BDD suite that
+covers shortcuts needs Chrome, which this machine lacks.
+
+**Resolved — see "T022 Resolution" below.**
+
+## T022 Resolution (2026-09-22)
+
+**Decision**: fix all four callback-id collisions (not just the shortcut one), restoring every
+silently-dropped registration.
+
+**Fix**: each page now passes its own mount-trigger `dcc.Interval` as a **page-local scoping
+Input** on every callback whose Output is a *shared* parameters-bar control, and any such Output
+that lacked `allow_duplicate=True` now carries it (Dash only hashes the callback id for duplicate
+outputs). `max_intervals` is a static prop that never changes, so it adds no refresh of its own,
+and because the component exists only in that page's layout the callback can no longer fire on
+another route.
+
+| File | Callbacks scoped |
+|---|---|
+| `src/pages/performance.py` | `_apply_default_account`, `_sync_date_range_to_selected_account`, `_sync_from_date_max_to_to_date`, `_apply_date_range_shortcut` |
+| `src/pages/overview.py` | the same four |
+| `src/pages/positions.py` | `_apply_default_account`, `_sync_from_date_max_to_to_date`, `_apply_date_range_shortcut` (its `_sync_account_change` already had a unique id — extra Outputs) |
+
+`src/pages/positions.py::_sync_account_change` was left alone deliberately: its Output set is
+already unique, so it never collided.
+
+**New regression guard**: `tests/unit/test_callback_registration.py` imports the app in a
+subprocess with `dash._callback.GLOBAL_CALLBACK_MAP` instrumented and asserts **zero** callback
+registrations are overwritten. It needs no browser, so it runs in the ordinary unit suite —
+closing the gap that let this ship (the only coverage was Chrome-dependent BDD). Verified
+red-before-green: it reported all 7 collisions before the fix and passes after.
+
+**Verification after the fix** (same live-service method as the record above):
+
+- **T022 walkthrough: 32/32 checks pass**, including the previously failing
+  `'ITD' and 'All' resolve to the IDENTICAL from-date` — both now `2018-07-12` for `HL-ISA`.
+- **Overview and Positions re-verified** — each of the three pages now resolves its *own* handler
+  with its *own* documented semantics: Overview "YtD" → `2026-01-01` with a full-history default
+  range; Positions "YtD" → `2026-01-01` with a YtD default range (per 018 research #1a);
+  Performance "ITD" → `2018-07-12` (inception) with a full-history default range.
+- `tests/unit`: **105 passed** (104 pre-existing + the new guard). `ruff check .` clean.
+  `mypy config src app.py` clean (28 files).
+
+**Still not covered on this machine**: Chrome is not installed, so the Selenium/`dash[testing]`
+BDD suite (`tests/bdd/`, incl. `performance_*.feature`) could not be run, and no pixels were
+inspected. Everything asserted above went through the real Dash callback HTTP endpoint against a
+live `portfolio-analysis-service`, so only DOM/CSS rendering remains unverified. **Recommend one
+human pass in a browser, plus `pytest tests/bdd --headless` on a machine with Chrome.**
+
+**Note on the long-running dev server**: the instance on port 8050 started before this session
+predates the fix. Restart it (or re-run `run_end_to_end.ps1`) to pick up the change.

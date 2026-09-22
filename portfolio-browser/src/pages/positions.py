@@ -64,6 +64,16 @@ logger = structlog.get_logger(__name__)
 _DEFAULT_ATTRIBUTE = "market_value"
 _TOGGLE_ID_TYPE = "positions-attribute-toggle"
 
+# This page's own mount-trigger, used as a page-local scoping Input on every
+# callback whose Output is one of the *shared* parameters-bar controls. Dash
+# derives an `allow_duplicate=True` Output's callback id by hashing ONLY the
+# Inputs (`dash/_utils.py::create_callback_id`), so without a page-local Input
+# this page's handlers collide with Overview's/Performance's identical
+# Output+Input pairs — and, being imported last, this page used to silently
+# overwrite both of theirs.
+# Guarded by tests/unit/test_callback_registration.py.
+_PAGE_SCOPE_INPUT = "positions-mount-trigger"
+
 # Must match src/layout/shell.py's shared shortcut button ids (reused
 # verbatim from Overview; research.md #1).
 _SHORTCUT_CODE_BY_BUTTON_ID = {
@@ -183,13 +193,16 @@ def _fetch_accounts_and_attributes(_n_intervals: int) -> tuple[Any, ...]:
 
 
 @callback(
-    Output("app-parameters-account", "value"),
+    Output("app-parameters-account", "value", allow_duplicate=True),
     Input("positions-accounts-store", "data"),
     Input("positions-attributes-store", "data"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     prevent_initial_call=True,
 )
 def _apply_default_account(
-    accounts_data: list[dict[str, Any]] | None, attributes_data: list[dict[str, Any]] | None
+    accounts_data: list[dict[str, Any]] | None,
+    attributes_data: list[dict[str, Any]] | None,
+    _page_scope: int | None,
 ) -> str:
     """Auto-select the alphabetically-first account once accounts are loaded (FR-012)."""
     if not accounts_data:
@@ -248,11 +261,12 @@ def _sync_account_change(
 
 
 @callback(
-    Output("app-parameters-from-date", "max_date_allowed"),
+    Output("app-parameters-from-date", "max_date_allowed", allow_duplicate=True),
     Input("app-parameters-to-date", "date"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     prevent_initial_call=True,
 )
-def _sync_from_date_max_to_to_date(to_date: str | None) -> Any:
+def _sync_from_date_max_to_to_date(to_date: str | None, _page_scope: int | None) -> Any:
     """Keep "from" from ever exceeding the current "to" value (mirrors Overview's FR-015)."""
     if not to_date:
         raise PreventUpdate
@@ -267,6 +281,7 @@ def _sync_from_date_max_to_to_date(to_date: str | None) -> Any:
     Input("overview-shortcut-3y", "n_clicks"),
     Input("overview-shortcut-5y", "n_clicks"),
     Input("overview-shortcut-all", "n_clicks"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     State("app-parameters-account", "value"),
     State("positions-accounts-store", "data"),
     prevent_initial_call=True,
@@ -277,6 +292,7 @@ def _apply_date_range_shortcut(
     _3y: int | None,
     _5y: int | None,
     _all: int | None,
+    _page_scope: int | None,
     account_name: str | None,
     accounts_data: list[dict[str, Any]] | None,
 ) -> tuple[Any, Any]:
