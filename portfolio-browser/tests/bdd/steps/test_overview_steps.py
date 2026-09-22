@@ -58,6 +58,8 @@ scenarios("../features/overview_metric_toggles.feature")
 scenarios("../features/overview_date_range_shortcuts.feature")
 scenarios("../features/overview_position_pie_chart.feature")
 scenarios("../features/overview_winners_losers_table.feature")
+scenarios("../features/overview_periodicity.feature")
+scenarios("../features/overview_periodicity_defaults.feature")
 
 _ATTRIBUTES = [
     AttributeDefinition(
@@ -94,6 +96,97 @@ _ACCOUNTS = [
 
 _TIMEOUT = 10
 
+# --- periodicity fixtures (021) -------------------------------------------
+# A single account spanning 2016-01-04..2026-09-21 with one entry per
+# business day, used by overview_periodicity.feature. The explicit request
+# window 2016-01-04..2025-12-31 in that feature's Background is the exact
+# range verified in portfolio-analysis-service's own 008 research.md:
+# 2608 business days -> 522 weekly / 120 monthly / 40 quarterly / 10 annual
+# windows. Verified independently here by direct computation, not assumed.
+
+
+def _business_days(start: date, end: date) -> list[date]:
+    days: list[date] = []
+    current = start
+    while current <= end:
+        if current.weekday() < 5:
+            days.append(current)
+        current += timedelta(days=1)
+    return days
+
+
+def _ten_year_entries() -> list[dict[str, Any]]:
+    days = _business_days(date(2016, 1, 4), date(2026, 9, 21))
+    return [
+        {
+            "date": d,
+            "capital": 50000.0 + i * 10,
+            "market_value": 51000.0 + i * 11,
+        }
+        for i, d in enumerate(days)
+    ]
+
+
+def _ten_year_account() -> AccountSummary:
+    return AccountSummary(
+        account_name="TEN-YEAR-PORTFOLIO",
+        capital_ledger=AccountResourceRange(from_date=date(2016, 1, 4), to_date=date(2026, 9, 21)),
+        position_ladder=AccountResourceRange(from_date=date(2016, 1, 4), to_date=date(2026, 9, 21)),
+    )
+
+
+def _short_history_account() -> AccountSummary:
+    """A ~1-year-history account (021, US3) — the alphabetically-first of the
+    two-account fixture, so it is the default on mount without any extra
+    account-select step, and its own full history derives 'day'."""
+    return AccountSummary(
+        account_name="SHORT-HISTORY-PORTFOLIO",
+        capital_ledger=AccountResourceRange(from_date=date(2025, 9, 21), to_date=date(2026, 9, 21)),
+        position_ladder=AccountResourceRange(
+            from_date=date(2025, 9, 21), to_date=date(2026, 9, 21)
+        ),
+    )
+
+
+def _period_key_and_start(d: date, periodicity: str) -> tuple[Any, date]:
+    """Return a calendar-period grouping key and that period's calendar start.
+
+    Mirrors the aggregation rules of portfolio-analysis-service's own feature
+    008 (week=Monday, month=1st, quarter=Jan/Apr/Jul/Oct, annual=1 Jan) — this
+    fake stands in for that service's response, so it must group identically.
+    """
+    if periodicity == "week":
+        monday = d - timedelta(days=d.weekday())
+        return d.isocalendar()[:2], monday
+    if periodicity == "month":
+        return (d.year, d.month), date(d.year, d.month, 1)
+    if periodicity == "quarter":
+        quarter_start_month = ((d.month - 1) // 3) * 3 + 1
+        return (d.year, quarter_start_month), date(d.year, quarter_start_month, 1)
+    if periodicity == "annual":
+        return d.year, date(d.year, 1, 1)
+    raise ValueError(f"Unsupported periodicity: {periodicity!r}")
+
+
+def _aggregate_entries(
+    entries: list[dict[str, Any]], periodicity: str | None, start: date
+) -> list[dict[str, Any]]:
+    """Reduce entries to one per calendar window — day/None is the identity.
+
+    The last entry of each window (by date) is kept and re-dated to the
+    window's start, clamped to `start` for the first window (008's FR-006),
+    matching the real service's own last-observation-per-window contract.
+    """
+    if periodicity in (None, "day"):
+        return entries
+    buckets: dict[Any, tuple[date, dict[str, Any]]] = {}
+    for entry in sorted(entries, key=lambda e: e["date"]):
+        key, period_start = _period_key_and_start(entry["date"], periodicity)
+        period_start = max(period_start, start)
+        buckets[key] = (period_start, entry)
+    ordered = sorted(buckets.values(), key=lambda pair: pair[0])
+    return [{**entry, "date": period_start} for period_start, entry in ordered]
+
 
 class _FakeClient:
     """In-memory PortfolioAnalysisClient double used by every scenario here."""
@@ -106,6 +199,7 @@ class _FakeClient:
         raise_error: bool = False,
         delay_seconds: float = 0.0,
         position_entries: list[dict[str, Any]] | None = None,
+        apply_date_filter: bool = False,
     ) -> None:
         self._accounts = accounts
         self._attributes = attributes
@@ -115,6 +209,11 @@ class _FakeClient:
         self._position_entries = (
             position_entries if position_entries is not None else self._default_position_entries()
         )
+        # Only opt-in fixtures (021's ten-year-history account) filter/aggregate
+        # by [start, end] + periodicity — the original 5-entry default fixture
+        # keeps its pre-021 unfiltered behaviour so no existing scenario changes.
+        self._apply_date_filter = apply_date_filter
+        self.last_periodicity: str | None = None
 
     @staticmethod
     def _default_position_entries() -> list[dict[str, Any]]:
@@ -199,21 +298,32 @@ class _FakeClient:
         return self._attributes
 
     def get_timeseries(
-        self, account_name: str, attributes: list[str], start: date, end: date
+        self,
+        account_name: str,
+        attributes: list[str],
+        start: date,
+        end: date,
+        periodicity: str | None = None,
     ) -> TimeSeriesResponse:
         if self._delay_seconds:
             time.sleep(self._delay_seconds)
         if self._raise_error:
             raise PortfolioAnalysisServiceError("stubbed failure")
+        self.last_periodicity = periodicity
+        source_entries = self._entries
+        if self._apply_date_filter:
+            source_entries = [e for e in source_entries if start <= e["date"] <= end]
+            source_entries = _aggregate_entries(source_entries, periodicity, start)
         entries = [
             TimeSeriesEntry.model_validate({"date": e["date"], **{a: e[a] for a in attributes}})
-            for e in self._entries
+            for e in source_entries
         ]
         return TimeSeriesResponse(
             account_name=account_name,
             attributes=attributes,
             from_date=start,
             to_date=end,
+            periodicity=periodicity,
             entries=entries,
         )
 
@@ -302,9 +412,7 @@ def load_overview_page(dash_duo, monkeypatch):
     return app_module.app
 
 
-@given(
-    "the Overview page has finished loading its default chart", target_fixture="dash_app"
-)
+@given("the Overview page has finished loading its default chart", target_fixture="dash_app")
 def overview_finished_loading(dash_duo, monkeypatch):
     app = load_overview_page(dash_duo, monkeypatch)
     dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
@@ -401,7 +509,7 @@ def chart_updates_for_account(dash_duo):
     dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
 
 
-@then("the \"from\" date defaults to that account's earliest recorded date")
+@then('the "from" date defaults to that account\'s earliest recorded date')
 def from_date_matches_account(dash_duo):
     from_date_value = dash_duo.driver.execute_script(
         "return document.querySelector('#app-parameters-from-date input').value;"
@@ -442,7 +550,7 @@ def chart_reflects_new_range(dash_duo):
     dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
 
 
-@then("the \"to\" date picker does not allow a date later than today")
+@then('the "to" date picker does not allow a date later than today')
 def to_date_capped_at_today(dash_duo):
     dash_duo.find_element("#app-parameters-to-date input").click()
     dash_duo.wait_for_element(".DayPicker", timeout=_TIMEOUT)
@@ -504,11 +612,7 @@ def tooltip_describes_metric(dash_duo, metric):
     dash_duo.wait_for_element(f"#overview-attribute-tooltip-{metric}", timeout=_TIMEOUT)
 
 
-@then(
-    parsers.parse(
-        'the chart shows a line for "{second}" in a distinct color from "{first}"'
-    )
-)
+@then(parsers.parse('the chart shows a line for "{second}" in a distinct color from "{first}"'))
 def chart_shows_distinct_colors(dash_duo, second, first):
     colors = dash_duo.driver.execute_script(
         "var gd = document.querySelector('#overview-chart .js-plotly-plot');"
@@ -674,7 +778,7 @@ def click_shortcut_button(dash_duo, label):
     dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
 
 
-@then("the \"from\" date is set to 1 January of the current year")
+@then('the "from" date is set to 1 January of the current year')
 def from_date_is_start_of_year(dash_duo):
     from_date_value = dash_duo.driver.execute_script(
         "return document.querySelector('#app-parameters-from-date input').value;"
@@ -682,7 +786,7 @@ def from_date_is_start_of_year(dash_duo):
     assert from_date_value == date(date.today().year, 1, 1).isoformat()
 
 
-@then("the \"to\" date is set to the most recently completed business day")
+@then('the "to" date is set to the most recently completed business day')
 def to_date_is_set_to_last_business_day(dash_duo):
     to_date_value = dash_duo.driver.execute_script(
         "return document.querySelector('#app-parameters-to-date input').value;"
@@ -715,7 +819,7 @@ def from_to_fields_match_charted_dates(dash_duo):
     assert to_date_value == _last_business_day(date.today()).isoformat()
 
 
-@then("the \"from\" date is set to that account's earliest recorded date")
+@then('the "from" date is set to that account\'s earliest recorded date')
 def from_date_matches_account_earliest(dash_duo, stub_client):
     account_select = Select(dash_duo.find_element("#app-parameters-account"))
     selected_name = account_select.first_selected_option.get_attribute("value")
@@ -741,8 +845,7 @@ def stub_client_with_delay(monkeypatch):
 
 @when(
     parsers.parse(
-        'the user clicks the "{label}" shortcut button without waiting for the refresh '
-        "to finish"
+        'the user clicks the "{label}" shortcut button without waiting for the refresh to finish'
     )
 )
 def click_shortcut_button_no_wait(dash_duo, label):
@@ -806,8 +909,7 @@ def pie_chart_has_no_callout_labels(dash_duo):
 def pie_chart_legend_below_lists_every_position(dash_duo):
     pie = _pie_data(dash_duo)
     legend_entries = dash_duo.driver.execute_script(
-        "return document.querySelectorAll("
-        "'#overview-pie-container .legend .traces').length;"
+        "return document.querySelectorAll('#overview-pie-container .legend .traces').length;"
     )
     assert legend_entries == len(pie["labels"])
     gd = dash_duo.driver.execute_script(
@@ -941,8 +1043,7 @@ def rows_6_and_10_blue_gradient(dash_duo):
 
 
 @then(
-    "each row of the winners/losers table shows a position name, its profit/loss, "
-    "and its book cost"
+    "each row of the winners/losers table shows a position name, its profit/loss, and its book cost"
 )
 def table_row_shows_all_columns(dash_duo):
     dash_duo.wait_for_element(
@@ -976,3 +1077,145 @@ def table_refreshes_for_account(dash_duo):
     )
     rows = _table_rows(dash_duo)
     assert len(rows) > 0
+
+
+# --- periodicity control steps (021, overview_periodicity.feature) --------
+
+
+@given(
+    "portfolio-analysis-service has an account with ten years of daily-priced history",
+    target_fixture="stub_client",
+)
+def stub_client_with_ten_year_history(monkeypatch):
+    client = _FakeClient(
+        [_ten_year_account()],
+        _ATTRIBUTES,
+        entries=_ten_year_entries(),
+        apply_date_filter=True,
+    )
+    _install_stub_client(monkeypatch, client)
+    return client
+
+
+@when(parsers.parse("the user sets the date range to {start} through {end}"))
+def set_date_range(dash_duo, start, end):
+    dash_duo.driver.execute_script(
+        "var f = document.querySelector('#app-parameters-from-date input');"
+        "f.value = arguments[0];"
+        "f.dispatchEvent(new Event('change', {bubbles: true}));"
+        "var t = document.querySelector('#app-parameters-to-date input');"
+        "t.value = arguments[1];"
+        "t.dispatchEvent(new Event('change', {bubbles: true}));",
+        start,
+        end,
+    )
+    dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
+
+
+@when(parsers.parse('the user selects periodicity "{option}"'))
+def select_periodicity(dash_duo, option):
+    dash_duo.find_element(f"#overview-parameters-periodicity-{option}").click()
+    dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
+
+
+@then('a control labelled "Periodicity" is shown in the parameters bar')
+def periodicity_control_labelled(dash_duo):
+    # Attribute-ends-with selector, not a hardcoded page prefix: only one
+    # route's parameters bar is ever mounted at a time (the same reasoning
+    # src/components/date_range_controls.py documents for its own shared
+    # ids), so this step is reusable verbatim by any page with the control
+    # (021) — Overview here, Positions via positions_periodicity.feature.
+    label_text = dash_duo.driver.execute_script(
+        "var el = document.querySelector('[id$=\"-parameters-periodicity-label\"]');"
+        "return el ? el.textContent : '';"
+    )
+    assert label_text == "Periodicity"
+
+
+@then(
+    parsers.parse(
+        'its options are exactly "{opt1}", "{opt2}", "{opt3}", "{opt4}" and "{opt5}", in that order'
+    )
+)
+def periodicity_options_in_order(dash_duo, opt1, opt2, opt3, opt4, opt5):
+    # Same page-agnostic selector reasoning as periodicity_control_labelled.
+    labels = dash_duo.driver.execute_script(
+        "var els = document.querySelectorAll('[id$=\"-parameters-periodicity-group\"] button');"
+        "return Array.prototype.map.call(els, function(b) { return b.textContent; });"
+    )
+    assert labels == [opt1, opt2, opt3, opt4, opt5]
+
+
+@then(parsers.parse("the chart shows exactly {n:d} points"))
+def chart_shows_exact_points(dash_duo, n):
+    length = dash_duo.driver.execute_script(
+        "var gd = document.querySelector('#overview-chart .js-plotly-plot');"
+        "return gd && gd.data && gd.data[0] ? gd.data[0].x.length : -1;"
+    )
+    assert length == n
+
+
+@then("the selected account, date range and metrics are unchanged")
+def periodicity_selection_unchanged(dash_duo):
+    account_value = Select(
+        dash_duo.find_element("#app-parameters-account")
+    ).first_selected_option.get_attribute("value")
+    assert account_value == "TEN-YEAR-PORTFOLIO"
+    from_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#app-parameters-from-date input').value;"
+    )
+    to_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#app-parameters-to-date input').value;"
+    )
+    assert from_value == "2016-01-04"
+    assert to_value == "2025-12-31"
+    toggle = dash_duo.find_element("#overview-attribute-toggle-market_value input")
+    assert toggle.is_selected()
+
+
+# --- duration-derived periodicity defaults (021, overview_periodicity_defaults.feature) --
+
+
+@given(
+    "portfolio-analysis-service has a short-history account and a ten-year-history account",
+    target_fixture="stub_client",
+)
+def stub_client_with_short_and_long_accounts(monkeypatch):
+    # SHORT-HISTORY-PORTFOLIO sorts alphabetically before TEN-YEAR-PORTFOLIO,
+    # so it is the default account on mount, and its own ~1-year history
+    # derives "day" without any account-select step.
+    client = _FakeClient(
+        [_short_history_account(), _ten_year_account()],
+        _ATTRIBUTES,
+        entries=_ten_year_entries(),
+        apply_date_filter=True,
+    )
+    _install_stub_client(monkeypatch, client)
+    return client
+
+
+@when(parsers.parse('the user selects account "{name}"'))
+def select_named_account(dash_duo, name):
+    select = Select(dash_duo.find_element("#app-parameters-account"))
+    select.select_by_value(name)
+    dash_duo.wait_for_element("#overview-chart", timeout=_TIMEOUT)
+
+
+@then(parsers.parse('the active periodicity button is "{interval}"'))
+def active_periodicity_button_is(dash_duo, interval):
+    text = dash_duo.driver.execute_script(
+        "var btn = document.querySelector("
+        "'[id$=\"-parameters-periodicity-group\"] button.active');"
+        "return btn ? btn.textContent : null;"
+    )
+    assert text == interval, f"expected active button {interval!r}, got {text!r}"
+
+
+@then(parsers.parse('the active periodicity button is not "{interval}"'))
+def active_periodicity_button_is_not(dash_duo, interval):
+    text = dash_duo.driver.execute_script(
+        "var btn = document.querySelector("
+        "'[id$=\"-parameters-periodicity-group\"] button.active');"
+        "return btn ? btn.textContent : null;"
+    )
+    assert text != interval, f"expected active button not to be {interval!r}"

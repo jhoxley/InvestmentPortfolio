@@ -66,9 +66,7 @@ def _build_pie_figure(entries: list[dict[str, Any]]) -> go.Figure:
     labels = [position for position, _ in qualifying]
     values = [value for _, value in qualifying]
 
-    figure_height = max(
-        _MIN_FIGURE_HEIGHT, _PIE_AREA_HEIGHT + len(labels) * _LEGEND_ROW_HEIGHT
-    )
+    figure_height = max(_MIN_FIGURE_HEIGHT, _PIE_AREA_HEIGHT + len(labels) * _LEGEND_ROW_HEIGHT)
     pie_fraction = _PIE_AREA_HEIGHT / figure_height
 
     pie = go.Pie(
@@ -225,9 +223,7 @@ def _build_winners_losers_table(entries: list[dict[str, Any]]) -> Any:
             color = _gradient_color(row["rank_index"], winner_count, _WINNER_BRIGHT, _WINNER_PALE)
         else:
             color = _gradient_color(row["rank_index"], loser_count, _LOSER_BRIGHT, _LOSER_PALE)
-        style_data_conditional.append(
-            {"if": {"row_index": row_index}, "backgroundColor": color}
-        )
+        style_data_conditional.append({"if": {"row_index": row_index}, "backgroundColor": color})
 
     return dash_table.DataTable(  # type: ignore[attr-defined]
         id="overview-winners-losers-table",

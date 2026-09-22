@@ -45,12 +45,8 @@ def test_last_business_day_from_sunday_is_friday() -> None:
 def test_earliest_from_date_uses_min_of_both_ranges() -> None:
     account = AccountSummary(
         account_name="HL-SIPP",
-        capital_ledger=AccountResourceRange(
-            from_date=date(2016, 4, 20), to_date=date(2026, 6, 1)
-        ),
-        position_ladder=AccountResourceRange(
-            from_date=date(2015, 1, 1), to_date=date(2026, 7, 8)
-        ),
+        capital_ledger=AccountResourceRange(from_date=date(2016, 4, 20), to_date=date(2026, 6, 1)),
+        position_ladder=AccountResourceRange(from_date=date(2015, 1, 1), to_date=date(2026, 7, 8)),
     )
     assert _earliest_from_date(account) == date(2015, 1, 1)
 
@@ -58,9 +54,7 @@ def test_earliest_from_date_uses_min_of_both_ranges() -> None:
 def test_earliest_from_date_with_only_capital_ledger() -> None:
     account = AccountSummary(
         account_name="capital-only-portfolio",
-        capital_ledger=AccountResourceRange(
-            from_date=date(2020, 1, 2), to_date=date(2020, 6, 1)
-        ),
+        capital_ledger=AccountResourceRange(from_date=date(2020, 1, 2), to_date=date(2020, 6, 1)),
         position_ladder=None,
     )
     assert _earliest_from_date(account) == date(2020, 1, 2)
@@ -70,9 +64,7 @@ def test_earliest_from_date_with_only_position_ladder() -> None:
     account = AccountSummary(
         account_name="ladder-only-portfolio",
         capital_ledger=None,
-        position_ladder=AccountResourceRange(
-            from_date=date(2019, 3, 4), to_date=date(2020, 6, 1)
-        ),
+        position_ladder=AccountResourceRange(from_date=date(2019, 3, 4), to_date=date(2020, 6, 1)),
     )
     assert _earliest_from_date(account) == date(2019, 3, 4)
 
@@ -119,9 +111,9 @@ def test_shortcut_1y_handles_leap_day_safely() -> None:
 
 def test_shortcut_all_is_the_accounts_earliest_from_date() -> None:
     today = date(2026, 7, 16)
-    assert _shortcut_from_date(
-        SHORTCUT_ALL, _LONG_HISTORY_ACCOUNT, today
-    ) == _earliest_from_date(_LONG_HISTORY_ACCOUNT)
+    assert _shortcut_from_date(SHORTCUT_ALL, _LONG_HISTORY_ACCOUNT, today) == _earliest_from_date(
+        _LONG_HISTORY_ACCOUNT
+    )
 
 
 def test_shortcut_5y_clamps_to_accounts_earliest_from_date() -> None:
@@ -154,9 +146,7 @@ def test_shortcut_ytd_clamps_to_accounts_earliest_from_date() -> None:
     today = date(2026, 7, 16)
     mid_year_account = AccountSummary(
         account_name="mid-year-portfolio",
-        capital_ledger=AccountResourceRange(
-            from_date=date(2026, 6, 1), to_date=date(2026, 7, 1)
-        ),
+        capital_ledger=AccountResourceRange(from_date=date(2026, 6, 1), to_date=date(2026, 7, 1)),
         position_ladder=None,
     )
     assert _shortcut_from_date(SHORTCUT_YTD, mid_year_account, today) == date(2026, 6, 1)

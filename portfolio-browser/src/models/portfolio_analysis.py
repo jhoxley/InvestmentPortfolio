@@ -55,6 +55,10 @@ class TimeSeriesResponse(BaseModel):
     attributes: list[str]
     from_date: date
     to_date: date
+    # Echoed by the service from its feature 008 onward. Optional so a response
+    # from an older service still validates — the client warns when it is absent
+    # or differs from what was requested (021 research.md #6).
+    periodicity: str | None = None
     entries: list[TimeSeriesEntry]
     links: dict[str, str] = Field(default_factory=dict)
 
@@ -97,5 +101,7 @@ class PositionTimeSeriesResponse(BaseModel):
     positions: list[str]
     from_date: date
     to_date: date
+    # See TimeSeriesResponse.periodicity.
+    periodicity: str | None = None
     entries: list[PositionTimeSeriesEntry]
     links: dict[str, str] = Field(default_factory=dict)

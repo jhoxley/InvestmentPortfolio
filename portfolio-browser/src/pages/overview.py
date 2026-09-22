@@ -45,6 +45,7 @@ import structlog
 from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
+from config.content import get_content_config
 from config.settings import Settings
 from src.components.attribute_toggles import build_attribute_toggles
 from src.components.date_range_controls import (
@@ -56,6 +57,11 @@ from src.components.date_range_controls import (
     _earliest_from_date,
     _last_business_day,
     _shortcut_from_date,
+)
+from src.components.periodicity_controls import (
+    derive_periodicity,
+    periodicity_button_states,
+    periodicity_component_id,
 )
 from src.exceptions import PortfolioAnalysisServiceError
 from src.models.portfolio_analysis import AccountSummary
@@ -91,6 +97,16 @@ _SHORTCUT_CODE_BY_BUTTON_ID = {
     "overview-shortcut-all": SHORTCUT_ALL,
 }
 
+_PAGE_PREFIX = "overview"
+
+# Loaded once at import time (021) — a broken periodicity config fails fast
+# here, at module import, rather than surfacing later inside a callback.
+_PERIODICITY_CONFIG = get_content_config().periodicity
+_PERIODICITY_STORE_ID = "overview-periodicity-store"
+_PERIODICITY_BUTTON_IDS = [
+    periodicity_component_id(_PAGE_PREFIX, option.key) for option in _PERIODICITY_CONFIG.options
+]
+
 
 def _get_client() -> PortfolioAnalysisClient:
     """Factory for the outbound client.
@@ -121,6 +137,7 @@ def _render_timeseries(
     attributes: list[str],
     from_date: str,
     to_date: str,
+    periodicity: str,
 ) -> html.Div | dcc.Graph:
     """Fetch and shape a chart, or an empty/error state — the shared render path.
 
@@ -132,6 +149,8 @@ def _render_timeseries(
             zero-metric case).
         from_date: ISO start date.
         to_date: ISO end date.
+        periodicity: The service-side aggregation interval currently in
+            effect (021) — e.g. "day" or "annual".
 
     Returns:
         A `dcc.Graph` on success with data, or an empty/error-state `Div`.
@@ -142,6 +161,7 @@ def _render_timeseries(
             attributes=attributes,
             start=date.fromisoformat(from_date),
             end=date.fromisoformat(to_date),
+            periodicity=periodicity,
         )
     except PortfolioAnalysisServiceError:
         logger.error("overview_timeseries_fetch_failed", account_name=account_name)
@@ -170,6 +190,11 @@ layout = html.Div(
         dcc.Interval(id="overview-mount-trigger", interval=200, max_intervals=1),
         dcc.Store(id="overview-accounts-store"),
         dcc.Store(id="overview-attributes-store"),
+        # Effective periodicity: {"value": <service-side value>, "explicit": bool}.
+        # Starts empty — `_derive_periodicity_from_range` populates it as soon
+        # as the default account's date range resolves (FR-008), so no chart
+        # request fires before an interval is known.
+        dcc.Store(id=_PERIODICITY_STORE_ID, data=None),
         html.Div(id="overview-attribute-toggles", className="mb-3"),
         dcc.Loading(
             id="overview-chart-loading",
@@ -325,15 +350,99 @@ def _sync_from_date_max_to_to_date(to_date: str | None, _page_scope: int | None)
 
 
 @callback(
+    Output(_PERIODICITY_STORE_ID, "data", allow_duplicate=True),
+    *[Input(button_id, "n_clicks") for button_id in _PERIODICITY_BUTTON_IDS],
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
+    prevent_initial_call=True,
+)
+def _apply_periodicity_click(*_args: int | None) -> dict[str, Any]:
+    """Latch the clicked interval as the user's own explicit choice (FR-012).
+
+    `n_clicks` only ever increments on a real click — never on a callback
+    writing a prop — so this is the only place `explicit` is ever set to
+    `True`. The date-range derive callback (US3, T027) never sets it, which
+    is what makes an explicit choice survive a later date-range change
+    regardless of callback ordering.
+    """
+    triggered = ctx.triggered_id
+    if triggered is None or triggered not in _PERIODICITY_BUTTON_IDS:
+        # Guards the mount-time fire from the page-scope Input.
+        raise PreventUpdate
+    option_key = triggered.rsplit("-", 1)[-1]
+    return {"value": _PERIODICITY_CONFIG.value_for_key(option_key), "explicit": True}
+
+
+@callback(
+    Output(_PERIODICITY_STORE_ID, "data", allow_duplicate=True),
+    Input("app-parameters-from-date", "date"),
+    Input("app-parameters-to-date", "date"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
+    State(_PERIODICITY_STORE_ID, "data"),
+    prevent_initial_call=True,
+)
+def _derive_periodicity_from_range(
+    from_date: str | None,
+    to_date: str | None,
+    _page_scope: int | None,
+    store_data: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Derive the interval from the date-range span, unless the user has
+    already chosen one explicitly (FR-008, FR-012).
+
+    This callback must NEVER set `explicit` — only `_apply_periodicity_click`
+    ever does that, which is what makes an explicit choice sticky across any
+    later date-range change regardless of callback ordering (US3).
+    """
+    if store_data and store_data.get("explicit"):
+        raise PreventUpdate
+    if not from_date or not to_date:
+        raise PreventUpdate
+    derived_key = derive_periodicity(
+        date.fromisoformat(from_date),
+        date.fromisoformat(to_date),
+        _PERIODICITY_CONFIG.thresholds,
+    )
+    return {"value": _PERIODICITY_CONFIG.value_for_key(derived_key), "explicit": False}
+
+
+_PERIODICITY_STYLE_OUTPUTS = [
+    output
+    for button_id in _PERIODICITY_BUTTON_IDS
+    for output in (Output(button_id, "active"), Output(button_id, "outline"))
+]
+
+
+@callback(
+    *_PERIODICITY_STYLE_OUTPUTS,
+    Input(_PERIODICITY_STORE_ID, "data"),
+    prevent_initial_call=True,
+)
+def _style_periodicity_buttons(store_data: dict[str, Any] | None) -> tuple[bool, ...]:
+    """Highlight exactly the button matching the effective interval (FR-011).
+
+    The chart and the buttons both read the same store, so the control can
+    never show an interval other than the one actually plotted.
+    """
+    effective = store_data.get("value") if store_data else None
+    states = periodicity_button_states(effective, _PERIODICITY_CONFIG)
+    flattened: list[bool] = []
+    for state in states:
+        flattened.append(state["active"])
+        flattened.append(state["outline"])
+    return tuple(flattened)
+
+
+@callback(
     Output("overview-chart-container", "children"),
     Input("app-parameters-account", "value"),
     Input("app-parameters-from-date", "date"),
     Input("app-parameters-to-date", "date"),
     Input({"type": _TOGGLE_ID_TYPE, "name": ALL}, "value"),
+    Input(_PERIODICITY_STORE_ID, "data"),
     State({"type": _TOGGLE_ID_TYPE, "name": ALL}, "id"),
     running=[
         (Output(button_id, "disabled"), True, False)
-        for button_id in _SHORTCUT_CODE_BY_BUTTON_ID
+        for button_id in (*_SHORTCUT_CODE_BY_BUTTON_ID, *_PERIODICITY_BUTTON_IDS)
     ],
     prevent_initial_call=True,
 )
@@ -342,17 +451,18 @@ def _render_chart(
     from_date: str | None,
     to_date: str | None,
     toggle_values: list[bool],
+    periodicity_data: dict[str, Any] | None,
     toggle_ids: list[dict[str, str]],
 ) -> html.Div | dcc.Graph:
-    """Re-fetch and re-render whenever account/date/metric selection changes.
+    """Re-fetch and re-render whenever account/date/metric/periodicity selection changes.
 
     One callback for all of US1's initial render, US2's account switch,
-    US3's date-range change, and US4's metric toggles (FR-008, FR-009,
-    FR-013) — Dash does not allow multiple callbacks to target the same
-    Output, so this consolidates what tasks.md lists as four separate
-    "wire a callback" tasks into one shared implementation.
+    US3's date-range change, US4's metric toggles, and 021's periodicity
+    selection (FR-008, FR-009, FR-013) — Dash does not allow multiple
+    callbacks to target the same Output, so this consolidates what tasks.md
+    lists as separate "wire a callback" tasks into one shared implementation.
     """
-    if not account_name or not from_date or not to_date:
+    if not account_name or not from_date or not to_date or not periodicity_data:
         raise PreventUpdate
 
     toggled_attributes = [
@@ -364,7 +474,9 @@ def _render_chart(
         return _empty_state("Select at least one metric to display a chart.")
 
     client = _get_client()
-    return _render_timeseries(client, account_name, toggled_attributes, from_date, to_date)
+    return _render_timeseries(
+        client, account_name, toggled_attributes, from_date, to_date, periodicity_data["value"]
+    )
 
 
 @callback(
@@ -419,9 +531,7 @@ def _apply_date_range_shortcut(
     Input("app-parameters-to-date", "date"),
     prevent_initial_call=True,
 )
-def _render_position_widgets(
-    account_name: str | None, to_date: str | None
-) -> tuple[Any, Any]:
+def _render_position_widgets(account_name: str | None, to_date: str | None) -> tuple[Any, Any]:
     """Render the position-weight pie chart and "Biggest winners and losers"
 
     table together, from one fetch (019; FR-002-FR-014).
@@ -465,6 +575,4 @@ def _render_position_widgets(
     # (now below the chart, not to the right) always has room.
     pie = dcc.Graph(id="overview-pie-chart", figure=_build_pie_figure(entries))
     table = _build_winners_losers_table(entries)
-    return pie, html.Div(
-        [html.H5("Biggest winners and losers", className="mt-2"), table]
-    )
+    return pie, html.Div([html.H5("Biggest winners and losers", className="mt-2"), table])

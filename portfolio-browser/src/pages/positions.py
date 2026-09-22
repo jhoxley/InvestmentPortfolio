@@ -38,6 +38,7 @@ import structlog
 from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
+from config.content import get_content_config
 from config.settings import Settings
 from src.components.attribute_toggles import build_attribute_toggles
 from src.components.date_range_controls import (
@@ -48,6 +49,11 @@ from src.components.date_range_controls import (
     SHORTCUT_YTD,
     _last_business_day,
     _shortcut_from_date,
+)
+from src.components.periodicity_controls import (
+    derive_periodicity,
+    periodicity_button_states,
+    periodicity_component_id,
 )
 from src.exceptions import PortfolioAnalysisServiceError
 from src.models.portfolio_analysis import AccountSummary
@@ -83,6 +89,16 @@ _SHORTCUT_CODE_BY_BUTTON_ID = {
     "overview-shortcut-5y": SHORTCUT_5Y,
     "overview-shortcut-all": SHORTCUT_ALL,
 }
+
+_PAGE_PREFIX = "positions"
+
+# Loaded once at import time (021) — a broken periodicity config fails fast
+# here, at module import, rather than surfacing later inside a callback.
+_PERIODICITY_CONFIG = get_content_config().periodicity
+_PERIODICITY_STORE_ID = "positions-periodicity-store"
+_PERIODICITY_BUTTON_IDS = [
+    periodicity_component_id(_PAGE_PREFIX, option.key) for option in _PERIODICITY_CONFIG.options
+]
 
 # Every control FR-023 requires disabled during an in-flight refresh, except
 # the attribute-toggle switches and the "Stacked area graph" toggle: the
@@ -132,6 +148,11 @@ layout = html.Div(
         dcc.Store(id="positions-accounts-store"),
         dcc.Store(id="positions-attributes-store"),
         dcc.Store(id="positions-list-store"),
+        # Effective periodicity: {"value": <service-side value>, "explicit": bool}.
+        # Starts empty — `_derive_periodicity_from_range` populates it as soon
+        # as the default account's date range resolves (FR-008), so no chart
+        # request fires before an interval is known.
+        dcc.Store(id=_PERIODICITY_STORE_ID, data=None),
         html.Div(id="positions-attribute-toggles", className="mb-3"),
         dcc.Loading(
             id="positions-chart-loading",
@@ -341,6 +362,92 @@ def _apply_stacked_area_validation(
 
 
 @callback(
+    Output(_PERIODICITY_STORE_ID, "data", allow_duplicate=True),
+    *[Input(button_id, "n_clicks") for button_id in _PERIODICITY_BUTTON_IDS],
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
+    prevent_initial_call=True,
+)
+def _apply_periodicity_click(*_args: int | None) -> dict[str, Any]:
+    """Latch the clicked interval as the user's own explicit choice (FR-012).
+
+    `n_clicks` only ever increments on a real click — never on a callback
+    writing a prop — so this is the only place `explicit` is ever set to
+    `True`. The date-range derive callback (US3, T028) never sets it, which
+    is what makes an explicit choice survive a later date-range change
+    regardless of callback ordering. Mirrors overview.py's own
+    `_apply_periodicity_click` exactly, reading from this page's own
+    `_PERIODICITY_BUTTON_IDS`/`_PERIODICITY_CONFIG`.
+    """
+    triggered = ctx.triggered_id
+    if triggered is None or triggered not in _PERIODICITY_BUTTON_IDS:
+        # Guards the mount-time fire from the page-scope Input.
+        raise PreventUpdate
+    option_key = triggered.rsplit("-", 1)[-1]
+    return {"value": _PERIODICITY_CONFIG.value_for_key(option_key), "explicit": True}
+
+
+@callback(
+    Output(_PERIODICITY_STORE_ID, "data", allow_duplicate=True),
+    Input("app-parameters-from-date", "date"),
+    Input("app-parameters-to-date", "date"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
+    State(_PERIODICITY_STORE_ID, "data"),
+    prevent_initial_call=True,
+)
+def _derive_periodicity_from_range(
+    from_date: str | None,
+    to_date: str | None,
+    _page_scope: int | None,
+    store_data: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Derive the interval from the date-range span, unless the user has
+    already chosen one explicitly (FR-008, FR-012).
+
+    Mirrors overview.py's own `_derive_periodicity_from_range` exactly. This
+    callback must NEVER set `explicit` — only `_apply_periodicity_click` ever
+    does that, which is what makes an explicit choice sticky across any later
+    date-range change regardless of callback ordering (US3).
+    """
+    if store_data and store_data.get("explicit"):
+        raise PreventUpdate
+    if not from_date or not to_date:
+        raise PreventUpdate
+    derived_key = derive_periodicity(
+        date.fromisoformat(from_date),
+        date.fromisoformat(to_date),
+        _PERIODICITY_CONFIG.thresholds,
+    )
+    return {"value": _PERIODICITY_CONFIG.value_for_key(derived_key), "explicit": False}
+
+
+_PERIODICITY_STYLE_OUTPUTS = [
+    output
+    for button_id in _PERIODICITY_BUTTON_IDS
+    for output in (Output(button_id, "active"), Output(button_id, "outline"))
+]
+
+
+@callback(
+    *_PERIODICITY_STYLE_OUTPUTS,
+    Input(_PERIODICITY_STORE_ID, "data"),
+    prevent_initial_call=True,
+)
+def _style_periodicity_buttons(store_data: dict[str, Any] | None) -> tuple[bool, ...]:
+    """Highlight exactly the button matching the effective interval (FR-011).
+
+    The chart and the buttons both read the same store, so the control can
+    never show an interval other than the one actually plotted.
+    """
+    effective = store_data.get("value") if store_data else None
+    states = periodicity_button_states(effective, _PERIODICITY_CONFIG)
+    flattened: list[bool] = []
+    for state in states:
+        flattened.append(state["active"])
+        flattened.append(state["outline"])
+    return tuple(flattened)
+
+
+@callback(
     Output("positions-chart-container", "children"),
     Output("positions-table-container", "children"),
     Input("app-parameters-account", "value"),
@@ -349,9 +456,11 @@ def _apply_stacked_area_validation(
     Input({"type": _TOGGLE_ID_TYPE, "name": ALL}, "value"),
     Input("positions-parameters-position-filter", "value"),
     Input("positions-parameters-stacked-toggle", "value"),
+    Input(_PERIODICITY_STORE_ID, "data"),
     State({"type": _TOGGLE_ID_TYPE, "name": ALL}, "id"),
     running=[
-        (Output(component_id, "disabled"), True, False) for component_id in _REFRESH_DISABLED_IDS
+        (Output(component_id, "disabled"), True, False)
+        for component_id in (*_REFRESH_DISABLED_IDS, *_PERIODICITY_BUTTON_IDS)
     ],
     prevent_initial_call=True,
 )
@@ -362,17 +471,19 @@ def _render_positions(
     toggle_values: list[bool],
     selected_positions: list[str] | None,
     stacked: bool | None,
+    periodicity_data: dict[str, Any] | None,
     toggle_ids: list[dict[str, str]],
 ) -> tuple[Any, Any]:
     """Re-fetch and re-render the chart + table whenever any selection changes.
 
     One callback for the default view (US1), account/date exploration
     (US2), attribute/position filtering (US3), the comparison table (US4),
-    and the stacked-area toggle (US5) — Dash does not allow multiple
-    callbacks to target the same Output, and FR-013/SC-006 require the
-    chart and table to always refresh atomically together.
+    the stacked-area toggle (US5), and 021's periodicity selection — Dash
+    does not allow multiple callbacks to target the same Output, and
+    FR-013/SC-006 require the chart and table to always refresh atomically
+    together.
     """
-    if not account_name or not from_date or not to_date:
+    if not account_name or not from_date or not to_date or not periodicity_data:
         raise PreventUpdate
 
     toggled_attributes = [
@@ -400,6 +511,7 @@ def _render_positions(
             attributes=toggled_attributes,
             start=date.fromisoformat(from_date),
             end=date.fromisoformat(to_date),
+            periodicity=periodicity_data["value"],
         )
     except PortfolioAnalysisServiceError:
         logger.error("positions_timeseries_fetch_failed", account_name=account_name)

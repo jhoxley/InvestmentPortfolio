@@ -194,9 +194,7 @@ def load_performance_page_with_data(dash_duo, monkeypatch):
     return app_module.app
 
 
-@given(
-    "the Performance page has finished loading its default chart", target_fixture="dash_app"
-)
+@given("the Performance page has finished loading its default chart", target_fixture="dash_app")
 def performance_finished_loading(dash_duo, monkeypatch):
     app = load_performance_page_with_data(dash_duo, monkeypatch)
     dash_duo.wait_for_element("#performance-chart", timeout=_TIMEOUT)
@@ -252,7 +250,7 @@ def chart_updates_for_account(dash_duo):
     dash_duo.wait_for_element("#performance-chart", timeout=_TIMEOUT)
 
 
-@then("the \"from\" date defaults to that account's earliest recorded date")
+@then('the "from" date defaults to that account\'s earliest recorded date')
 def from_date_defaults_to_account_earliest(dash_duo, stub_client):
     account_select = Select(dash_duo.find_element("#app-parameters-account"))
     selected_name = account_select.first_selected_option.get_attribute("value")
@@ -279,7 +277,7 @@ def click_shortcut_button(dash_duo, label):
     dash_duo.wait_for_element("#performance-chart", timeout=_TIMEOUT)
 
 
-@then("the \"from\" date is set to that account's earliest recorded date")
+@then('the "from" date is set to that account\'s earliest recorded date')
 def from_date_matches_account_earliest(dash_duo, stub_client):
     account_select = Select(dash_duo.find_element("#app-parameters-account"))
     selected_name = account_select.first_selected_option.get_attribute("value")
@@ -298,7 +296,7 @@ def from_date_is_years_before_today(dash_duo, years):
     assert from_date_value == _years_before(date.today(), years).isoformat()
 
 
-@then("the \"to\" date is set to the most recently completed business day")
+@then('the "to" date is set to the most recently completed business day')
 def to_date_is_set_to_last_business_day(dash_duo):
     to_date_value = dash_duo.driver.execute_script(
         "return document.querySelector('#app-parameters-to-date input').value;"
@@ -323,8 +321,7 @@ def stub_client_with_delay(monkeypatch):
 
 @when(
     parsers.parse(
-        'the user clicks the "{label}" shortcut button without waiting for the refresh '
-        "to finish"
+        'the user clicks the "{label}" shortcut button without waiting for the refresh to finish'
     )
 )
 def click_shortcut_button_no_wait(dash_duo, label):
@@ -371,17 +368,13 @@ def turn_off_measure(dash_duo, measure):
 
 @when("the user turns off every measure toggle")
 def turn_off_every_measure(dash_duo):
-    for switch in dash_duo.find_elements(
-        "#performance-attribute-toggles input[type='checkbox']"
-    ):
+    for switch in dash_duo.find_elements("#performance-attribute-toggles input[type='checkbox']"):
         if switch.is_selected():
             switch.click()
     dash_duo.wait_for_element("#performance-empty-state", timeout=_TIMEOUT)
 
 
-@then(
-    parsers.parse('the chart shows a line for "{second}" in a distinct color from "{first}"')
-)
+@then(parsers.parse('the chart shows a line for "{second}" in a distinct color from "{first}"'))
 def chart_shows_distinct_colors(dash_duo, second, first):
     colors = dash_duo.driver.execute_script(
         "var gd = document.querySelector('#performance-chart .js-plotly-plot');"

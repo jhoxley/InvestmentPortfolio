@@ -104,9 +104,7 @@ def _trace_name(position: str, attribute: str, multi_attribute: bool) -> str:
     return position
 
 
-def _build_figure(
-    entries: list[dict[str, Any]], attributes: list[str], stacked: bool
-) -> go.Figure:
+def _build_figure(entries: list[dict[str, Any]], attributes: list[str], stacked: bool) -> go.Figure:
     """Build a Plotly Figure with one line per (position, attribute) pair (FR-007, FR-008).
 
     Args:

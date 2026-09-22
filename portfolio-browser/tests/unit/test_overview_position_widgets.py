@@ -274,9 +274,7 @@ def test_gradient_color_single_row_group_is_bright() -> None:
 
 def test_build_winners_losers_table_columns_and_row_count() -> None:
     pnls = {f"P{i}": float(i) for i in range(1, 13)}
-    entries = [
-        {"position": name, "pnl": pnl, "book_cost": 100.0} for name, pnl in pnls.items()
-    ]
+    entries = [{"position": name, "pnl": pnl, "book_cost": 100.0} for name, pnl in pnls.items()]
     table = _build_winners_losers_table(entries)
 
     column_ids = {c["id"] for c in table.columns}
@@ -286,8 +284,6 @@ def test_build_winners_losers_table_columns_and_row_count() -> None:
 
 def test_build_winners_losers_table_style_conditional_covers_every_row() -> None:
     pnls = {f"P{i}": float(i) for i in range(1, 13)}
-    entries = [
-        {"position": name, "pnl": pnl, "book_cost": 100.0} for name, pnl in pnls.items()
-    ]
+    entries = [{"position": name, "pnl": pnl, "book_cost": 100.0} for name, pnl in pnls.items()]
     table = _build_winners_losers_table(entries)
     assert len(table.style_data_conditional) == 10

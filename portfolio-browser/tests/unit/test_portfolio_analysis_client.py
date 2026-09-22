@@ -11,6 +11,7 @@ from datetime import date
 
 import httpx
 import pytest
+from structlog.testing import capture_logs
 
 from src.exceptions import PortfolioAnalysisServiceError
 from src.services.portfolio_analysis_client import HttpPortfolioAnalysisClient
@@ -19,9 +20,7 @@ BASE_URL = "http://testserver"
 
 
 def _client(transport: httpx.MockTransport) -> HttpPortfolioAnalysisClient:
-    return HttpPortfolioAnalysisClient(
-        base_url=BASE_URL, timeout_seconds=5.0, transport=transport
-    )
+    return HttpPortfolioAnalysisClient(base_url=BASE_URL, timeout_seconds=5.0, transport=transport)
 
 
 def test_list_accounts_success() -> None:
@@ -405,3 +404,205 @@ def test_get_performance_raises_on_timeout() -> None:
             start=date(2024, 1, 2),
             end=date(2024, 1, 10),
         )
+
+
+# --- periodicity parameter (021) ------------------------------------------
+
+
+def _timeseries_body(periodicity: str | None) -> dict:
+    """Build a minimal timeseries payload, optionally echoing a periodicity."""
+    body: dict = {
+        "account_name": "HL-SIPP",
+        "attributes": ["capital"],
+        "from_date": "2016-04-20",
+        "to_date": "2025-12-31",
+        "entries": [{"date": "2016-04-20", "capital": 1.0}],
+        "_links": {"self": "/v1/accounts/HL-SIPP/timeseries"},
+    }
+    if periodicity is not None:
+        body["periodicity"] = periodicity
+    return body
+
+
+def _position_body(periodicity: str | None) -> dict:
+    """Build a minimal position-timeseries payload, optionally echoing a periodicity."""
+    body: dict = {
+        "account_name": "HL-SIPP",
+        "attributes": ["market_value"],
+        "positions": ["Cash"],
+        "from_date": "2016-04-20",
+        "to_date": "2025-12-31",
+        "entries": [{"date": "2016-04-20", "position": "Cash", "market_value": 1.0}],
+        "_links": {"self": "/v1/accounts/HL-SIPP/position"},
+    }
+    if periodicity is not None:
+        body["periodicity"] = periodicity
+    return body
+
+
+def test_get_timeseries_sends_periodicity_when_supplied() -> None:
+    seen: dict[str, list[str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["periodicity"] = request.url.params.get_list("periodicity")
+        return httpx.Response(200, json=_timeseries_body("annual"))
+
+    response = _client(httpx.MockTransport(handler)).get_timeseries(
+        account_name="HL-SIPP",
+        attributes=["capital"],
+        start=date(2016, 4, 20),
+        end=date(2025, 12, 31),
+        periodicity="annual",
+    )
+
+    assert seen["periodicity"] == ["annual"]
+    assert response.periodicity == "annual"
+
+
+def test_get_timeseries_omits_periodicity_when_not_supplied() -> None:
+    """Backward compatibility: an unset interval must not appear in the query string."""
+    seen: dict[str, list[str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["periodicity"] = request.url.params.get_list("periodicity")
+        return httpx.Response(200, json=_timeseries_body("day"))
+
+    _client(httpx.MockTransport(handler)).get_timeseries(
+        account_name="HL-SIPP",
+        attributes=["capital"],
+        start=date(2016, 4, 20),
+        end=date(2025, 12, 31),
+    )
+
+    assert seen["periodicity"] == []
+
+
+def test_get_position_timeseries_sends_periodicity_when_supplied() -> None:
+    seen: dict[str, list[str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["periodicity"] = request.url.params.get_list("periodicity")
+        return httpx.Response(200, json=_position_body("quarter"))
+
+    response = _client(httpx.MockTransport(handler)).get_position_timeseries(
+        account_name="HL-SIPP",
+        positions=["Cash"],
+        attributes=["market_value"],
+        start=date(2016, 4, 20),
+        end=date(2025, 12, 31),
+        periodicity="quarter",
+    )
+
+    assert seen["periodicity"] == ["quarter"]
+    assert response.periodicity == "quarter"
+
+
+def test_get_position_timeseries_omits_periodicity_when_not_supplied() -> None:
+    seen: dict[str, list[str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["periodicity"] = request.url.params.get_list("periodicity")
+        return httpx.Response(200, json=_position_body(None))
+
+    _client(httpx.MockTransport(handler)).get_position_timeseries(
+        account_name="HL-SIPP",
+        positions=["Cash"],
+        attributes=["market_value"],
+        start=date(2016, 4, 20),
+        end=date(2025, 12, 31),
+    )
+
+    assert seen["periodicity"] == []
+
+
+def test_response_without_periodicity_still_parses() -> None:
+    """A pre-008 service omits the field entirely; that must not be an error."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_timeseries_body(None))
+
+    response = _client(httpx.MockTransport(handler)).get_timeseries(
+        account_name="HL-SIPP",
+        attributes=["capital"],
+        start=date(2016, 4, 20),
+        end=date(2025, 12, 31),
+        periodicity="annual",
+    )
+
+    assert response.periodicity is None
+
+
+def test_ignored_periodicity_is_logged_as_a_warning() -> None:
+    """A service that ignores the parameter must be diagnosable, not silent."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_timeseries_body(None))
+
+    with capture_logs() as entries:
+        _client(httpx.MockTransport(handler)).get_timeseries(
+            account_name="HL-SIPP",
+            attributes=["capital"],
+            start=date(2016, 4, 20),
+            end=date(2025, 12, 31),
+            periodicity="annual",
+        )
+
+    warnings = [e for e in entries if e["log_level"] == "warning"]
+    assert [e["event"] for e in warnings] == ["periodicity_not_applied"]
+    assert warnings[0]["requested_periodicity"] == "annual"
+    assert warnings[0]["echoed_periodicity"] is None
+
+
+def test_mismatched_periodicity_echo_is_logged_as_a_warning() -> None:
+    """An echo that differs from the request is just as wrong as a missing one."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_timeseries_body("day"))
+
+    with capture_logs() as entries:
+        _client(httpx.MockTransport(handler)).get_timeseries(
+            account_name="HL-SIPP",
+            attributes=["capital"],
+            start=date(2016, 4, 20),
+            end=date(2025, 12, 31),
+            periodicity="annual",
+        )
+
+    warnings = [e for e in entries if e["log_level"] == "warning"]
+    assert [e["event"] for e in warnings] == ["periodicity_not_applied"]
+    assert warnings[0]["echoed_periodicity"] == "day"
+
+
+def test_matching_periodicity_echo_logs_no_warning() -> None:
+    """The happy path must stay quiet, or the warning is noise."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_timeseries_body("annual"))
+
+    with capture_logs() as entries:
+        _client(httpx.MockTransport(handler)).get_timeseries(
+            account_name="HL-SIPP",
+            attributes=["capital"],
+            start=date(2016, 4, 20),
+            end=date(2025, 12, 31),
+            periodicity="annual",
+        )
+
+    assert [e for e in entries if e["log_level"] == "warning"] == []
+
+
+def test_no_warning_when_no_periodicity_was_requested() -> None:
+    """Callers that never ask for an interval must not be warned at."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_timeseries_body(None))
+
+    with capture_logs() as entries:
+        _client(httpx.MockTransport(handler)).get_timeseries(
+            account_name="HL-SIPP",
+            attributes=["capital"],
+            start=date(2016, 4, 20),
+            end=date(2025, 12, 31),
+        )
+
+    assert [e for e in entries if e["log_level"] == "warning"] == []

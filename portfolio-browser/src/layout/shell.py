@@ -12,10 +12,11 @@ import dash
 import dash_bootstrap_components as dbc
 from dash import Dash, Input, Output, dcc, html
 
-from config.content import ContentConfig
+from config.content import ContentConfig, get_content_config
 from src.components.date_range_controls import build_account_date_controls
 from src.components.footer import build_footer
 from src.components.header import build_header
+from src.components.periodicity_controls import build_periodicity_control
 from src.components.sidebar import build_sidebar
 
 _CONTENT_WIDTH = 10  # out of 12 grid columns — the remainder of the sidebar's 2
@@ -56,22 +57,33 @@ def _build_static_parameters_bar() -> list:
 
 
 def _build_overview_parameters_bar() -> list:
-    """Real Account selector + From/To date pickers + shortcut buttons (016/017).
+    """Real Account selector + From/To date pickers + shortcut buttons (016/017)
+    plus the shared Periodicity control (021).
 
     Options/values are populated by a callback in src/pages/overview.py once
     the page has fetched /v1/accounts — this only builds the empty controls.
     Shared with the Positions page (018) via
-    src/components/date_range_controls.py.
+    src/components/date_range_controls.py; the Periodicity control is shared
+    the same way via src/components/periodicity_controls.py, but with
+    Overview's own component ids (see that module's docstring for why ids
+    are page-scoped, not shared, unlike the account/date controls).
     """
-    return build_account_date_controls()
+    periodicity_config = get_content_config().periodicity
+    return [
+        *build_account_date_controls(),
+        *build_periodicity_control("overview", periodicity_config),
+    ]
 
 
 def _build_positions_parameters_bar() -> list:
-    """Real Account/From/To/shortcut controls (shared) + Positions-only controls (018).
+    """Real Account/From/To/shortcut controls (shared) + the Periodicity control
+    (021) + Positions-only controls (018).
 
     Options/values are populated by callbacks in src/pages/positions.py once
     the page has fetched /v1/accounts, /v1/positions/attributes, and
     /v1/accounts/{account}/positions — this only builds the empty controls.
+    The Periodicity control uses this page's own component ids (see
+    src/components/periodicity_controls.py's docstring for why).
     """
     stacked_toggle = dbc.Switch(
         id="positions-parameters-stacked-toggle",
@@ -87,8 +99,10 @@ def _build_positions_parameters_bar() -> list:
         searchable=True,
         placeholder="All positions",
     )
+    periodicity_config = get_content_config().periodicity
     return [
         *build_account_date_controls(),
+        *build_periodicity_control("positions", periodicity_config),
         dbc.Col(stacked_toggle, width="auto"),
         dbc.Col(
             html.Label("Positions", htmlFor="positions-parameters-position-filter"),

@@ -18,3 +18,19 @@ nav_sections:
   - key: income
     label: Income
     order: 4
+
+periodicity:
+  label: "Periodicity"
+  options:
+    - { key: day,     label: day,     value: day }
+    - { key: week,    label: week,    value: week }
+    - { key: month,   label: month,   value: month }
+    - { key: quarter, label: quarter, value: quarter }
+    # The UI reads "year" beside day/week/month/quarter; the analysis service
+    # calls this interval "annual". This is the only place the two vocabularies
+    # differ, kept in data rather than code so it stays visible.
+    - { key: year,    label: year,    value: annual }
+  thresholds:
+    day_max_years: 1
+    month_max_years: 3
+    quarter_max_years: 5

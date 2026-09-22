@@ -26,6 +26,38 @@ from src.models.portfolio_analysis import (
 logger = structlog.get_logger(__name__)
 
 
+def _warn_if_periodicity_ignored(
+    requested: str | None, echoed: str | None, account_name: str, path: str
+) -> None:
+    """Log a warning when the service did not apply the interval we asked for.
+
+    From its feature 008 onward the service echoes the applied `periodicity` on
+    every response. An older service silently ignores the parameter and returns
+    daily data with no field at all — which would otherwise leave the UI showing
+    one interval while plotting another, with nothing to diagnose it by.
+
+    Args:
+        requested: The interval this client asked for, if any.
+        echoed: The interval the response reported, if any.
+        account_name: Account being queried (log context).
+        path: Endpoint path (log context).
+    """
+    if requested is None or echoed == requested:
+        return
+    logger.warning(
+        "periodicity_not_applied",
+        account_name=account_name,
+        path=path,
+        requested_periodicity=requested,
+        echoed_periodicity=echoed,
+        detail=(
+            "The analysis service did not report applying the requested periodicity. "
+            "A response with no periodicity field means the service predates its "
+            "feature 008 and is ignoring the parameter; restart it with the current build."
+        ),
+    )
+
+
 class PortfolioAnalysisClient(Protocol):
     """Abstraction over the outbound portfolio-analysis-service calls."""
 
@@ -43,6 +75,7 @@ class PortfolioAnalysisClient(Protocol):
         attributes: list[str],
         start: date,
         end: date,
+        periodicity: str | None = None,
     ) -> TimeSeriesResponse:
         """Return the timeseries for an account over a date range.
 
@@ -51,6 +84,9 @@ class PortfolioAnalysisClient(Protocol):
             attributes: One or more attribute names to request.
             start: Start of the requested date range (inclusive).
             end: End of the requested date range (inclusive).
+            periodicity: Optional aggregation interval (the service's own value,
+                e.g. "annual"). Omitted from the request entirely when None,
+                which the service treats as per-business-day.
 
         Returns:
             The parsed TimeSeriesResponse.
@@ -107,6 +143,7 @@ class PortfolioAnalysisClient(Protocol):
         attributes: list[str],
         start: date,
         end: date,
+        periodicity: str | None = None,
     ) -> PositionTimeSeriesResponse:
         """Return the per-position timeseries for an account over a date range.
 
@@ -119,6 +156,8 @@ class PortfolioAnalysisClient(Protocol):
             attributes: One or more attribute names to request.
             start: Start of the requested date range (inclusive).
             end: End of the requested date range (inclusive).
+            periodicity: Optional aggregation interval, applied independently
+                per position. Omitted from the request entirely when None.
 
         Returns:
             The parsed PositionTimeSeriesResponse.
@@ -176,6 +215,7 @@ class HttpPortfolioAnalysisClient:
         attributes: list[str],
         start: date,
         end: date,
+        periodicity: str | None = None,
     ) -> TimeSeriesResponse:
         """Return the timeseries for an account over a date range.
 
@@ -184,6 +224,8 @@ class HttpPortfolioAnalysisClient:
             attributes: One or more attribute names to request.
             start: Start of the requested date range (inclusive).
             end: End of the requested date range (inclusive).
+            periodicity: Optional aggregation interval (the service's own value,
+                e.g. "annual"). Omitted from the request entirely when None.
 
         Returns:
             The parsed TimeSeriesResponse.
@@ -192,16 +234,21 @@ class HttpPortfolioAnalysisClient:
             PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
                 connection error.
         """
+        path = f"/v1/accounts/{account_name}/timeseries"
         params: list[tuple[str, str | int | float | bool | None]] = [
             ("attribute", a) for a in attributes
         ]
         params.extend([("start", str(start)), ("end", str(end))])
+        if periodicity is not None:
+            params.append(("periodicity", periodicity))
         payload = self._get(
-            f"/v1/accounts/{account_name}/timeseries",
+            path,
             params=params,
             log_context={"account_name": account_name},
         )
-        return TimeSeriesResponse.model_validate(payload)
+        response = TimeSeriesResponse.model_validate(payload)
+        _warn_if_periodicity_ignored(periodicity, response.periodicity, account_name, path)
+        return response
 
     def list_account_positions(self, account_name: str) -> list[PositionSummary]:
         """Return every position recorded for an account.
@@ -289,6 +336,7 @@ class HttpPortfolioAnalysisClient:
         attributes: list[str],
         start: date,
         end: date,
+        periodicity: str | None = None,
     ) -> PositionTimeSeriesResponse:
         """Return the per-position timeseries for an account over a date range.
 
@@ -299,6 +347,8 @@ class HttpPortfolioAnalysisClient:
             attributes: One or more attribute names to request.
             start: Start of the requested date range (inclusive).
             end: End of the requested date range (inclusive).
+            periodicity: Optional aggregation interval, applied independently
+                per position. Omitted from the request entirely when None.
 
         Returns:
             The parsed PositionTimeSeriesResponse.
@@ -307,17 +357,22 @@ class HttpPortfolioAnalysisClient:
             PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
                 connection error.
         """
+        path = f"/v1/accounts/{account_name}/position"
         params: list[tuple[str, str | int | float | bool | None]] = [
             ("position", p) for p in positions
         ]
         params.extend(("attribute", a) for a in attributes)
         params.extend([("start", str(start)), ("end", str(end))])
+        if periodicity is not None:
+            params.append(("periodicity", periodicity))
         payload = self._get(
-            f"/v1/accounts/{account_name}/position",
+            path,
             params=params,
             log_context={"account_name": account_name},
         )
-        return PositionTimeSeriesResponse.model_validate(payload)
+        response = PositionTimeSeriesResponse.model_validate(payload)
+        _warn_if_periodicity_ignored(periodicity, response.periodicity, account_name, path)
+        return response
 
     def _get(
         self,
