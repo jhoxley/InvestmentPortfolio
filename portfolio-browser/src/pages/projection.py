@@ -24,13 +24,19 @@ Callback graph (see specs/022-projection-page/contracts/ui-contract.md):
 7. `_sync_target_display` — keeps the calendar control's own `date` in sync
    with whatever is currently in `projection-target-store`, however it got
    there (FR-006).
-8. `_render_chart` — (re-)fetches and renders whenever the account, start
-   date, target date, or any return toggle changes. Derives a periodicity
-   from the full historical-plus-projected span before fetching (FR-016,
-   via `_derive_projection_periodicity`, reusing 021's `derive_periodicity`)
-   so a long combined span stays readable instead of returning one point
-   per business day — this page has no visible periodicity control of its
-   own; the interval is chosen automatically, not user-selectable.
+8. `_apply_periodicity_click` — the Periodicity buttons (023); latches the
+   clicked interval into `projection-periodicity-store` as the user's own
+   explicit choice. The only writer of `explicit: True`.
+9. `_derive_periodicity` — whenever the target date, account or accounts data
+   changes, writes the store: an explicit choice is rewritten unchanged, and
+   otherwise an interval is derived from the full historical-plus-projected
+   span via `_projection_periodicity.next_periodicity_state` (reusing 021's
+   `derive_periodicity`). Always writing is what makes `_render_chart` fire
+   once, at the final interval, per target change (research.md #2).
+10. `_style_periodicity_buttons` — highlights the button matching the store.
+11. `_render_chart` — (re-)fetches and renders whenever the account, start
+    date, periodicity store or any return toggle changes; the target date is
+    read as State because every target change reaches it through the store.
 """
 
 from __future__ import annotations
@@ -46,10 +52,15 @@ from dash.exceptions import PreventUpdate
 from config.content import get_content_config
 from config.settings import Settings
 from src.components.attribute_toggles import build_attribute_toggles
-from src.components.periodicity_controls import derive_periodicity
+from src.components.periodicity_controls import (
+    periodicity_button_states,
+    periodicity_component_id,
+    periodicity_store_id,
+)
 from src.exceptions import PortfolioAnalysisServiceError
 from src.models.portfolio_analysis import AttributeDefinition
 from src.pages._projection_chart import _build_figure, _years_after
+from src.pages._projection_periodicity import explicit_state_for_click, next_periodicity_state
 from src.services.portfolio_analysis_client import (
     HttpPortfolioAnalysisClient,
     PortfolioAnalysisClient,
@@ -66,6 +77,14 @@ _TOGGLE_ID_TYPE = "projection-attribute-toggle"
 # same collision-avoidance pattern documented at length in performance.py
 # (specs/020-performance-page-chart) and reused unmodified here.
 _PAGE_SCOPE_INPUT = "projection-mount-trigger"
+
+# Loaded once at import time (023) — a broken periodicity config fails fast.
+_PERIODICITY_CONFIG = get_content_config().periodicity
+_PAGE_PREFIX = "projection"
+_PERIODICITY_STORE_ID = periodicity_store_id(_PAGE_PREFIX)
+_PERIODICITY_BUTTON_IDS = [
+    periodicity_component_id(_PAGE_PREFIX, option.key) for option in _PERIODICITY_CONFIG.options
+]
 
 # The four selectable returns are fixed and page-local (research.md #5) — the
 # labels come from config/content.yaml's `projection.returns` list, sourced
@@ -124,6 +143,9 @@ layout = html.Div(
         dcc.Interval(id=_PAGE_SCOPE_INPUT, interval=200, max_intervals=1),
         dcc.Store(id="projection-accounts-store"),
         dcc.Store(id="projection-target-store"),
+        # Effective periodicity: {"value": <service-side value or None>, "explicit": bool}.
+        # Starts empty; `_derive_periodicity` populates it once a target is chosen.
+        dcc.Store(id=_PERIODICITY_STORE_ID, data=None),
         html.Div(
             build_attribute_toggles(
                 _projection_return_definitions(), _TOGGLE_ID_TYPE, frozenset()
@@ -301,60 +323,109 @@ def _sync_target_display(target_date: str | None, start_date_value: str | None) 
     return (target_date if target_date else dash.no_update), min_allowed
 
 
-def _derive_projection_periodicity(
-    accounts_data: list[dict[str, Any]] | None,
-    account_name: str,
-    target_date: date,
-) -> str | None:
-    """Derive the wire-format periodicity for the full historical-plus-projected span (FR-016).
+@callback(
+    Output(_PERIODICITY_STORE_ID, "data", allow_duplicate=True),
+    *[Input(button_id, "n_clicks") for button_id in _PERIODICITY_BUTTON_IDS],
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
+    prevent_initial_call=True,
+)
+def _apply_periodicity_click(*_args: int | None) -> dict[str, Any]:
+    """Latch the clicked interval as the user's own explicit choice (FR-009).
 
-    Uses the account's own earliest recorded date (not just the start date) through the
-    projection target date, since that is the full span actually plotted — the historical
-    line runs from the account's true earliest record, not from the start date. Reuses the
-    exact same duration-derived rule (021) already applied to Overview/Positions, so a
-    long combined span collapses the same way a long historical-only range already does.
-
-    Args:
-        accounts_data: The fetched accounts store's data.
-        account_name: The currently selected account.
-        target_date: The current projection target date.
-
-    Returns:
-        The service-side periodicity value (e.g. "annual"), or None if the account's own
-        earliest date can't be determined (falls back to the service's own day default).
+    `n_clicks` only ever increments on a real click, so this is the only place
+    `explicit` is set to True.
     """
-    if not accounts_data:
-        return None
-    account = next((a for a in accounts_data if a["account_name"] == account_name), None)
-    if account is None:
-        return None
-    resource = account.get("position_ladder")
-    if resource is None:
-        return None
-    earliest = date.fromisoformat(resource["from_date"])
-    periodicity_config = get_content_config().periodicity
-    key = derive_periodicity(earliest, target_date, periodicity_config.thresholds)
-    return periodicity_config.value_for_key(key)
+    triggered = ctx.triggered_id
+    if triggered is None or triggered not in _PERIODICITY_BUTTON_IDS:
+        # Guards the mount-time fire from the page-scope Input.
+        raise PreventUpdate
+    option_key = triggered.rsplit("-", 1)[-1]
+    return explicit_state_for_click(option_key, _PERIODICITY_CONFIG)
+
+
+@callback(
+    Output(_PERIODICITY_STORE_ID, "data", allow_duplicate=True),
+    Input("projection-target-store", "data"),
+    Input("app-parameters-account", "value"),
+    Input("projection-accounts-store", "data"),
+    Input(_PAGE_SCOPE_INPUT, "max_intervals"),
+    State(_PERIODICITY_STORE_ID, "data"),
+    prevent_initial_call=True,
+)
+def _derive_periodicity(
+    target_date_value: str | None,
+    account_name: str | None,
+    accounts_data: list[dict[str, Any]] | None,
+    _page_scope: int | None,
+    store_data: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Derive the interval from the plotted span unless the user chose one (FR-005, FR-009).
+
+    Always writes when there is a target, even to rewrite an explicit choice
+    unchanged, so the chart callback (downstream of the store) runs exactly once
+    per target change. Must never set `explicit` — only `_apply_periodicity_click` does.
+    """
+    if not account_name or not accounts_data or not target_date_value:
+        raise PreventUpdate
+    return next_periodicity_state(
+        store_data,
+        accounts_data,
+        account_name,
+        date.fromisoformat(target_date_value),
+        _PERIODICITY_CONFIG,
+    )
+
+
+_PERIODICITY_STYLE_OUTPUTS = [
+    output
+    for button_id in _PERIODICITY_BUTTON_IDS
+    for output in (Output(button_id, "active"), Output(button_id, "outline"))
+]
+
+
+@callback(
+    *_PERIODICITY_STYLE_OUTPUTS,
+    Input(_PERIODICITY_STORE_ID, "data"),
+    prevent_initial_call=True,
+)
+def _style_periodicity_buttons(store_data: dict[str, Any] | None) -> tuple[bool, ...]:
+    """Highlight exactly the button matching the effective interval (FR-008).
+
+    The chart and the buttons both read the same store, so the control can never
+    show an interval other than the one actually plotted.
+    """
+    effective = store_data.get("value") if store_data else None
+    flattened: list[bool] = []
+    for state in periodicity_button_states(effective, _PERIODICITY_CONFIG):
+        flattened.append(state["active"])
+        flattened.append(state["outline"])
+    return tuple(flattened)
 
 
 @callback(
     Output("projection-chart-container", "children"),
     Input("app-parameters-account", "value"),
     Input("projection-start-date", "date"),
-    Input("projection-target-store", "data"),
+    Input(_PERIODICITY_STORE_ID, "data"),
     Input({"type": _TOGGLE_ID_TYPE, "name": ALL}, "value"),
+    State("projection-target-store", "data"),
     State({"type": _TOGGLE_ID_TYPE, "name": ALL}, "id"),
-    State("projection-accounts-store", "data"),
+    running=[(Output(button_id, "disabled"), True, False) for button_id in _PERIODICITY_BUTTON_IDS],
+    prevent_initial_call=True,
 )
 def _render_chart(
     account_name: str | None,
     start_date_value: str | None,
-    target_date_value: str | None,
+    periodicity_data: dict[str, Any] | None,
     toggle_values: list[bool],
+    target_date_value: str | None,
     toggle_ids: list[dict[str, str]],
-    accounts_data: list[dict[str, Any]] | None,
 ) -> html.Div | dcc.Graph:
-    """Fetch and render the projection chart, or an empty/error state (FR-009-FR-014, FR-017)."""
+    """Fetch and render the projection chart, or an empty/error state (FR-009-FR-014, FR-017).
+
+    The interval comes from the periodicity store (023); the target date is read
+    as State because every change to it reaches this callback via the store.
+    """
     if not account_name or not start_date_value or not target_date_value:
         return _empty_state("Select an account and a projection target date.")
 
@@ -365,7 +436,7 @@ def _render_chart(
     ]
     returns = [_return_key_for_label(label) for label in selected_labels]
     target_date = date.fromisoformat(target_date_value)
-    periodicity = _derive_projection_periodicity(accounts_data, account_name, target_date)
+    periodicity = periodicity_data.get("value") if periodicity_data else None
 
     client = _get_client()
     try:

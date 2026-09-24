@@ -126,7 +126,8 @@ def _build_performance_parameters_bar() -> list:
 
 
 def _build_projection_parameters_bar() -> list:
-    """Account selector + start-date picker + horizon buttons + calendar picker (022).
+    """Account selector + start-date picker + horizon buttons + calendar picker (022)
+    plus the shared Periodicity control (023).
 
     Options/values are populated by callbacks in src/pages/projection.py
     once the page has fetched /v1/accounts — this only builds the empty
@@ -136,9 +137,12 @@ def _build_projection_parameters_bar() -> list:
     button or the calendar picker), not a from/to range with shortcuts
     (specs/022-projection-page/contracts/ui-contract.md). Return selection
     (the toggle switches) lives in the page's own layout below the bar, not
-    here — mirroring where Performance's own measure toggles live.
+    here — mirroring where Performance's own measure toggles live. The
+    Periodicity control uses this page's own component ids (see
+    src/components/periodicity_controls.py's docstring for why).
     """
     projection_config = get_content_config().projection
+    periodicity_config = get_content_config().periodicity
     account_selector = dbc.Select(id="app-parameters-account", options=[], value=None)
     start_date = dcc.DatePickerSingle(id="projection-start-date", placeholder="Start date")
     horizon_buttons = dbc.ButtonGroup(
@@ -162,6 +166,7 @@ def _build_projection_parameters_bar() -> list:
         dbc.Col(horizon_buttons, width="auto"),
         dbc.Col(html.Label("Project to", htmlFor="projection-target-date"), width="auto"),
         dbc.Col(target_date, width="auto"),
+        *build_periodicity_control("projection", periodicity_config),
         dbc.Col(
             dbc.FormText(id="projection-date-validation", color="danger"),
             width="auto",

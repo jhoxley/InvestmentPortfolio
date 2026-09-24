@@ -10,11 +10,13 @@ tests/bdd/steps/test_performance_steps.py's own `_FakeClient` pattern.
 
 from __future__ import annotations
 
+import time
 from datetime import date, timedelta
 from typing import Any
 
 from pytest_bdd import given, parsers, scenarios, then, when
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import Select, WebDriverWait
 
 # Imported at module level, before any step imports `src.pages.projection`
 # directly — `app`'s own import constructs the Dash app via
@@ -33,6 +35,8 @@ from src.models.portfolio_analysis import (
 scenarios("../features/projection_default_view.feature")
 scenarios("../features/projection_calendar_picker.feature")
 scenarios("../features/projection_multiple_returns.feature")
+scenarios("../features/projection_periodicity.feature")
+scenarios("../features/projection_periodicity_defaults.feature")
 
 _TIMEOUT = 10
 
@@ -67,6 +71,33 @@ _ACCOUNTS = [
 _START_MARKET_VALUE = 48000.0
 
 
+def _period_starts(first: date, last: date, periodicity: str) -> list[date]:
+    """Calendar-period start dates for periods overlapping [first, last] (023).
+
+    Mirrors the service's bucketing: week = Monday, month/quarter/annual = first
+    day of the period. A period whose start precedes `first` is dated at its own
+    start, as the service does.
+    """
+    if periodicity == "week":
+        cursor = first - timedelta(days=first.weekday())
+        step_days = 7
+        starts = []
+        while cursor <= last:
+            starts.append(cursor)
+            cursor += timedelta(days=step_days)
+        return starts
+    months_per_period = {"month": 1, "quarter": 3, "annual": 12}[periodicity]
+    period_start_month = (first.month - 1) // months_per_period * months_per_period
+    month_index = first.year * 12 + period_start_month
+    starts = []
+    while True:
+        current = date(month_index // 12, month_index % 12 + 1, 1)
+        if current > last:
+            return starts
+        starts.append(current)
+        month_index += months_per_period
+
+
 class _FakeProjectionClient:
     """In-memory PortfolioAnalysisClient double implementing the pinned projection contract."""
 
@@ -81,6 +112,10 @@ class _FakeProjectionClient:
         self._supported_return_keys = supported_return_keys
         self._raise_on_mount = raise_on_mount
         self._raise_on_chart = raise_on_chart
+        # Every get_projection call, so scenarios can assert the interval requested (023).
+        self.calls: list[dict[str, Any]] = []
+        # When > 0, get_projection sleeps this long so "disabled while refreshing" is observable.
+        self.delay_seconds: float = 0.0
 
     def list_accounts(self) -> list[AccountSummary]:
         if self._raise_on_mount:
@@ -95,26 +130,48 @@ class _FakeProjectionClient:
         start: date | None = None,
         periodicity: str | None = None,
     ) -> PositionTimeSeriesResponse:
+        self.calls.append(
+            {
+                "account_name": account_name,
+                "projection_date": projection_date,
+                "returns": list(returns),
+                "start": start,
+                "periodicity": periodicity,
+            }
+        )
+        if self.delay_seconds:
+            time.sleep(self.delay_seconds)
         if self._raise_on_chart:
             raise PortfolioAnalysisServiceError("stubbed failure")
         account = next(a for a in self._accounts if a.account_name == account_name)
+        assert account.position_ladder is not None
         resolved_start = start if start is not None else account.position_ladder.to_date
+        first_date = account.position_ladder.from_date
+
+        # `None`/"day" keeps the original two-point-per-series output so the 022
+        # scenarios are unaffected; any coarser interval yields one point per
+        # calendar period, dated at the period start (023).
+        if periodicity in (None, "day"):
+            historical_dates = [first_date, resolved_start]
+            projected_dates = [resolved_start, projection_date]
+        else:
+            historical_dates = _period_starts(first_date, resolved_start, periodicity)
+            projected_dates = [
+                resolved_start,
+                *_period_starts(resolved_start + timedelta(days=1), projection_date, periodicity),
+            ]
 
         entries = [
             PositionTimeSeriesEntry.model_validate(
                 {
-                    "date": account.position_ladder.from_date,
+                    "date": d,
                     "position": "Historical",
-                    "market_value": _START_MARKET_VALUE / 4,
+                    "market_value": _START_MARKET_VALUE / 4
+                    if d == first_date
+                    else _START_MARKET_VALUE,
                 }
-            ),
-            PositionTimeSeriesEntry.model_validate(
-                {
-                    "date": resolved_start,
-                    "position": "Historical",
-                    "market_value": _START_MARKET_VALUE,
-                }
-            ),
+            )
+            for d in historical_dates
         ]
         positions = ["Historical"]
         for return_key in returns:
@@ -122,18 +179,17 @@ class _FakeProjectionClient:
                 continue  # silently omitted (FR-012)
             label = _LABEL_BY_RETURN_KEY[return_key]
             positions.append(label)
-            years = (projection_date - resolved_start).days / 365.25
-            projected_value = _START_MARKET_VALUE * (1.03 ** max(years, 0))
-            entries.append(
-                PositionTimeSeriesEntry.model_validate(
-                    {"date": resolved_start, "position": label, "market_value": _START_MARKET_VALUE}
+            for d in projected_dates:
+                years = (d - resolved_start).days / 365.25
+                entries.append(
+                    PositionTimeSeriesEntry.model_validate(
+                        {
+                            "date": d,
+                            "position": label,
+                            "market_value": _START_MARKET_VALUE * (1.03 ** max(years, 0)),
+                        }
+                    )
                 )
-            )
-            entries.append(
-                PositionTimeSeriesEntry.model_validate(
-                    {"date": projection_date, "position": label, "market_value": projected_value}
-                )
-            )
 
         return PositionTimeSeriesResponse(
             account_name=account_name,
@@ -472,3 +528,213 @@ def other_lines_unchanged(dash_duo, first, second):
     assert first in names and second in names
 
 
+
+
+# --- 023: periodicity control ------------------------------------------------
+# Self-contained (not shared with Overview's identically-worded steps): pytest-bdd
+# resolves steps per module, and these must also read this page's own ids.
+
+_PERIODICITY_GROUP_SELECTOR = "#projection-parameters-periodicity-group"
+
+# Option label (as shown in the control) -> service-side value; mirrors config/content.yaml.
+_WIRE_VALUE_BY_LABEL = {
+    "day": "day",
+    "week": "week",
+    "month": "month",
+    "quarter": "quarter",
+    "year": "annual",
+}
+
+
+def _wait_until(dash_duo, predicate, message: str) -> None:
+    WebDriverWait(dash_duo.driver, _TIMEOUT).until(lambda _d: predicate(), message)
+
+
+@given(
+    parsers.parse("portfolio-analysis-service has an account whose history starts on {earliest}"),
+    target_fixture="stub_client",
+)
+def stub_client_with_history_starting_on(monkeypatch, earliest):
+    account = AccountSummary(
+        account_name="SPAN-ISA",
+        capital_ledger=AccountResourceRange(
+            from_date=date.fromisoformat(earliest), to_date=date(2026, 9, 22)
+        ),
+        position_ladder=AccountResourceRange(
+            from_date=date.fromisoformat(earliest), to_date=date(2026, 9, 22)
+        ),
+    )
+    client = _FakeProjectionClient([account])
+    _install_stub_client(monkeypatch, client)
+    return client
+
+
+@given(parsers.parse("the backing service now takes {seconds:d} seconds to answer chart requests"))
+def service_now_slow(stub_client, seconds):
+    stub_client.delay_seconds = float(seconds)
+
+
+@then('a control labelled "Periodicity" is shown in the parameters bar')
+def periodicity_control_labelled(dash_duo):
+    label_text = dash_duo.driver.execute_script(
+        "var el = document.getElementById('projection-parameters-periodicity-label');"
+        "return el ? el.textContent : '';"
+    )
+    assert label_text == "Periodicity"
+
+
+@then(
+    parsers.parse(
+        'its options are exactly "{opt1}", "{opt2}", "{opt3}", "{opt4}" and "{opt5}", in that order'
+    )
+)
+def periodicity_options_in_order(dash_duo, opt1, opt2, opt3, opt4, opt5):
+    labels = dash_duo.driver.execute_script(
+        "var els = document.querySelectorAll(arguments[0] + ' button');"
+        "return Array.prototype.map.call(els, function(b) { return b.textContent; });",
+        _PERIODICITY_GROUP_SELECTOR,
+    )
+    assert labels == [opt1, opt2, opt3, opt4, opt5]
+
+
+@given(parsers.parse('the user selects periodicity "{option}" on Projection'))
+@when(parsers.parse('the user selects periodicity "{option}" on Projection'))
+def select_periodicity(dash_duo, option):
+    dash_duo.find_element(f"#projection-parameters-periodicity-{option}").click()
+    dash_duo.wait_for_element(
+        "#projection-chart, #projection-empty-state, #projection-error-state", timeout=_TIMEOUT
+    )
+
+
+@when(parsers.parse("the user picks the projection date {iso_date} using the calendar control"))
+def pick_projection_date(dash_duo, iso_date):
+    _set_calendar_date(dash_duo, iso_date)
+
+
+@when(parsers.parse('the user switches to the account "{name}"'))
+def switch_account(dash_duo, name):
+    Select(dash_duo.find_element("#app-parameters-account")).select_by_value(name)
+
+
+@when(parsers.parse('the user clicks the "{label}" horizon button without waiting for the chart'))
+def click_horizon_without_waiting(dash_duo, label):
+    key = _HORIZON_BUTTON_IDS[label]
+    dash_duo.find_element(f"#projection-horizon-{key}").click()
+
+
+def _periodicity_buttons_disabled(dash_duo) -> list[bool]:
+    return dash_duo.driver.execute_script(
+        "var els = document.querySelectorAll(arguments[0] + ' button');"
+        "return Array.prototype.map.call(els, function(b) { return b.disabled; });",
+        _PERIODICITY_GROUP_SELECTOR,
+    )
+
+
+@then("the Periodicity buttons are disabled")
+def periodicity_buttons_disabled(dash_duo):
+    def all_disabled() -> bool:
+        states = _periodicity_buttons_disabled(dash_duo)
+        return bool(states) and all(states)
+
+    _wait_until(dash_duo, all_disabled, "Periodicity buttons were never disabled while refreshing")
+
+
+@then("the Periodicity buttons become enabled once the chart has loaded")
+def periodicity_buttons_enabled(dash_duo):
+    def none_disabled() -> bool:
+        states = _periodicity_buttons_disabled(dash_duo)
+        return bool(states) and not any(states)
+
+    _wait_until(dash_duo, none_disabled, "Periodicity buttons stayed disabled after the refresh")
+
+
+def _active_periodicity_label(dash_duo) -> str | None:
+    return dash_duo.driver.execute_script(
+        "var btn = document.querySelector(arguments[0] + ' button.active');"
+        "return btn ? btn.textContent : null;",
+        _PERIODICITY_GROUP_SELECTOR,
+    )
+
+
+@given(parsers.parse('the active periodicity button is "{interval}"'))
+@then(parsers.parse('the active periodicity button is "{interval}"'))
+def active_periodicity_button_is(dash_duo, interval):
+    _wait_until(
+        dash_duo,
+        lambda: _active_periodicity_label(dash_duo) == interval,
+        f"expected active periodicity button {interval!r}",
+    )
+
+
+@then(parsers.parse('the active periodicity button is not "{interval}"'))
+def active_periodicity_button_is_not(dash_duo, interval):
+    assert _active_periodicity_label(dash_duo) != interval
+
+
+@then(parsers.parse('the chart is requested at the "{interval}" interval'))
+def chart_requested_at(dash_duo, stub_client, interval):
+    expected = _WIRE_VALUE_BY_LABEL[interval]
+    _wait_until(
+        dash_duo,
+        lambda: bool(stub_client.calls) and stub_client.calls[-1]["periodicity"] == expected,
+        f"expected the last chart request at {expected!r}",
+    )
+
+
+@then(
+    parsers.parse('the chart is requested at the "{interval}" interval for account "{account}"')
+)
+def chart_requested_at_for_account(dash_duo, stub_client, interval, account):
+    chart_requested_at(dash_duo, stub_client, interval)
+    assert stub_client.calls[-1]["account_name"] == account
+
+
+def _all_points_on_quarter_starts(dash_duo) -> bool:
+    traces = _chart_trace_names_and_dates(dash_duo)
+    if len(traces) < 2:
+        return False
+    for trace in traces:
+        dates = [date.fromisoformat(str(x)[:10]) for x in trace["x"]]
+        if len(set(dates)) != len(dates):
+            return False
+        # A projected line's first point is the start date itself (the point it
+        # continues from); every other point is dated at a calendar-quarter start.
+        checked = dates if trace["name"] == "Historical" else dates[1:]
+        if len(checked) < 2:
+            return False
+        if any(d.day != 1 or d.month not in (1, 4, 7, 10) for d in checked):
+            return False
+    return True
+
+
+@then(
+    "the historical series and every projected series are plotted at one point per "
+    "calendar quarter"
+)
+def series_plotted_per_quarter(dash_duo, stub_client):
+    chart_requested_at(dash_duo, stub_client, "quarter")
+    _wait_until(
+        dash_duo,
+        lambda: _all_points_on_quarter_starts(dash_duo),
+        "series were not plotted at one point per calendar quarter",
+    )
+
+
+@then("the account, start date, target date and selected returns are unchanged")
+def projection_selection_unchanged(dash_duo, stub_client):
+    account_value = Select(
+        dash_duo.find_element("#app-parameters-account")
+    ).first_selected_option.get_attribute("value")
+    assert account_value == "AAA-ISA"
+    start_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#projection-start-date input').value;"
+    )
+    target_value = dash_duo.driver.execute_script(
+        "return document.querySelector('#projection-target-date input').value;"
+    )
+    call = stub_client.calls[-1]
+    assert start_value == "2026-09-22"
+    assert date.fromisoformat(target_value) == call["projection_date"]
+    assert call["projection_date"].year == 2036  # the "10Y" horizon from the scenario
+    assert call["returns"] == ["5Y"]
+    assert _find_toggle(dash_duo, "5Y").is_selected()
