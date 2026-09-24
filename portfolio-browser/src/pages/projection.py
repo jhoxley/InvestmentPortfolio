@@ -25,7 +25,12 @@ Callback graph (see specs/022-projection-page/contracts/ui-contract.md):
    with whatever is currently in `projection-target-store`, however it got
    there (FR-006).
 8. `_render_chart` — (re-)fetches and renders whenever the account, start
-   date, target date, or any return toggle changes.
+   date, target date, or any return toggle changes. Derives a periodicity
+   from the full historical-plus-projected span before fetching (FR-016,
+   via `_derive_projection_periodicity`, reusing 021's `derive_periodicity`)
+   so a long combined span stays readable instead of returning one point
+   per business day — this page has no visible periodicity control of its
+   own; the interval is chosen automatically, not user-selectable.
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from dash.exceptions import PreventUpdate
 from config.content import get_content_config
 from config.settings import Settings
 from src.components.attribute_toggles import build_attribute_toggles
+from src.components.periodicity_controls import derive_periodicity
 from src.exceptions import PortfolioAnalysisServiceError
 from src.models.portfolio_analysis import AttributeDefinition
 from src.pages._projection_chart import _build_figure, _years_after
@@ -95,7 +101,7 @@ def _projection_return_definitions() -> list[AttributeDefinition]:
 
 
 def _return_key_for_label(label: str) -> str:
-    """Resolve a return's display label (e.g. "Ann. ITD") to its wire value (e.g. "itd_ann")."""
+    """Resolve a return's display label (e.g. "Ann. ITD") to its wire value (e.g. "ITD (Ann.)")."""
     for item in get_content_config().projection.returns:
         if item.label == label:
             return item.key
@@ -295,6 +301,42 @@ def _sync_target_display(target_date: str | None, start_date_value: str | None) 
     return (target_date if target_date else dash.no_update), min_allowed
 
 
+def _derive_projection_periodicity(
+    accounts_data: list[dict[str, Any]] | None,
+    account_name: str,
+    target_date: date,
+) -> str | None:
+    """Derive the wire-format periodicity for the full historical-plus-projected span (FR-016).
+
+    Uses the account's own earliest recorded date (not just the start date) through the
+    projection target date, since that is the full span actually plotted — the historical
+    line runs from the account's true earliest record, not from the start date. Reuses the
+    exact same duration-derived rule (021) already applied to Overview/Positions, so a
+    long combined span collapses the same way a long historical-only range already does.
+
+    Args:
+        accounts_data: The fetched accounts store's data.
+        account_name: The currently selected account.
+        target_date: The current projection target date.
+
+    Returns:
+        The service-side periodicity value (e.g. "annual"), or None if the account's own
+        earliest date can't be determined (falls back to the service's own day default).
+    """
+    if not accounts_data:
+        return None
+    account = next((a for a in accounts_data if a["account_name"] == account_name), None)
+    if account is None:
+        return None
+    resource = account.get("position_ladder")
+    if resource is None:
+        return None
+    earliest = date.fromisoformat(resource["from_date"])
+    periodicity_config = get_content_config().periodicity
+    key = derive_periodicity(earliest, target_date, periodicity_config.thresholds)
+    return periodicity_config.value_for_key(key)
+
+
 @callback(
     Output("projection-chart-container", "children"),
     Input("app-parameters-account", "value"),
@@ -302,6 +344,7 @@ def _sync_target_display(target_date: str | None, start_date_value: str | None) 
     Input("projection-target-store", "data"),
     Input({"type": _TOGGLE_ID_TYPE, "name": ALL}, "value"),
     State({"type": _TOGGLE_ID_TYPE, "name": ALL}, "id"),
+    State("projection-accounts-store", "data"),
 )
 def _render_chart(
     account_name: str | None,
@@ -309,6 +352,7 @@ def _render_chart(
     target_date_value: str | None,
     toggle_values: list[bool],
     toggle_ids: list[dict[str, str]],
+    accounts_data: list[dict[str, Any]] | None,
 ) -> html.Div | dcc.Graph:
     """Fetch and render the projection chart, or an empty/error state (FR-009-FR-014, FR-017)."""
     if not account_name or not start_date_value or not target_date_value:
@@ -320,14 +364,17 @@ def _render_chart(
         if selected
     ]
     returns = [_return_key_for_label(label) for label in selected_labels]
+    target_date = date.fromisoformat(target_date_value)
+    periodicity = _derive_projection_periodicity(accounts_data, account_name, target_date)
 
     client = _get_client()
     try:
         response = client.get_projection(
             account_name=account_name,
-            projection_date=date.fromisoformat(target_date_value),
+            projection_date=target_date,
             returns=returns,
             start=date.fromisoformat(start_date_value),
+            periodicity=periodicity,
         )
     except PortfolioAnalysisServiceError:
         logger.error("projection_fetch_failed", account_name=account_name)

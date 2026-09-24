@@ -311,10 +311,10 @@ projection:
     - { key: 10y, label: "10Y", years: 10 }
     - { key: 20y, label: "20Y", years: 20 }
   returns:
-    - { key: itd_ann, label: "Ann. ITD" }
-    - { key: 1y,       label: "1Y" }
-    - { key: 3y,       label: "3Y" }
-    - { key: 5y,       label: "5Y" }
+    - { key: "ITD (Ann.)", label: "Ann. ITD" }
+    - { key: "1Y",         label: "1Y" }
+    - { key: "3Y",         label: "3Y" }
+    - { key: "5Y",         label: "5Y" }
 """
 
 
@@ -329,7 +329,12 @@ def test_valid_projection_section_loads(tmp_path: Path) -> None:
     assert [h.key for h in config.projection.horizons] == ["1y", "5y", "10y", "20y"]
     assert [h.years for h in config.projection.horizons] == [1, 5, 10, 20]
     assert [h.label for h in config.projection.horizons] == ["1Y", "5Y", "10Y", "20Y"]
-    assert [r.key for r in config.projection.returns] == ["itd_ann", "1y", "3y", "5y"]
+    assert [r.key for r in config.projection.returns] == [
+        "ITD (Ann.)",
+        "1Y",
+        "3Y",
+        "5Y",
+    ]
     assert [r.label for r in config.projection.returns] == ["Ann. ITD", "1Y", "3Y", "5Y"]
 
 
@@ -369,27 +374,27 @@ def test_valid_projection_section_loads(tmp_path: Path) -> None:
             "non-ascending horizon years",
         ),
         (
-            PROJECTION_YAML.replace('- { key: 5y,       label: "5Y" }\n', ""),
+            PROJECTION_YAML.replace('- { key: "5Y",         label: "5Y" }\n', ""),
             "only three returns",
         ),
         (
             PROJECTION_YAML.replace(
-                '- { key: 5y,       label: "5Y" }',
-                '- { key: 5y,       label: "5Y" }\n    - { key: 10y,      label: "10Y" }',
+                '- { key: "5Y",         label: "5Y" }',
+                '- { key: "5Y",         label: "5Y" }\n    - { key: "10Y",        label: "10Y" }',
             ),
             "five returns",
         ),
         (
             PROJECTION_YAML.replace(
-                '- { key: 3y,       label: "3Y" }',
-                '- { key: 1y,       label: "3Y" }',
+                '- { key: "3Y",         label: "3Y" }',
+                '- { key: "1Y",         label: "3Y" }',
             ),
             "duplicate return key",
         ),
         (
             PROJECTION_YAML.replace(
-                '- { key: 3y,       label: "3Y" }',
-                '- { key: 3y,       label: "1Y" }',
+                '- { key: "3Y",         label: "3Y" }',
+                '- { key: "3Y",         label: "1Y" }',
             ),
             "duplicate return label",
         ),

@@ -17,6 +17,7 @@ from app.api import (
     ladder,
     performance,
     position_timeseries,
+    projection,
     timeseries,
 )
 from app.config import get_settings
@@ -28,6 +29,7 @@ from app.exceptions import (
     IdentifierMappingError,
     InvalidAccountNameError,
     InvalidDateRangeError,
+    InvalidProjectionRangeError,
     MarketDataServiceError,
     MergeNotSupportedError,
     MissingRequiredSourceError,
@@ -75,6 +77,7 @@ app.include_router(timeseries.router)
 app.include_router(accounts.router)
 app.include_router(position_timeseries.router)
 app.include_router(performance.router)
+app.include_router(projection.router)
 app.include_router(health.router)
 
 
@@ -371,6 +374,30 @@ async def invalid_date_range_handler(request: Request, exc: InvalidDateRangeErro
     """
     logger.warning("invalid_date_range", start=str(exc.start), end=str(exc.end), detail=exc.message)
     return _problem(request, 422, "invalid-date-range", "Invalid Date Range", exc.message)
+
+
+@app.exception_handler(InvalidProjectionRangeError)
+async def invalid_projection_range_handler(
+    request: Request, exc: InvalidProjectionRangeError
+) -> JSONResponse:
+    """Handle InvalidProjectionRangeError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning(
+        "invalid_projection_range",
+        start=str(exc.start),
+        projection_date=str(exc.projection_date),
+        detail=exc.message,
+    )
+    return _problem(
+        request, 422, "invalid-projection-range", "Invalid Projection Range", exc.message
+    )
 
 
 @app.exception_handler(MissingRequiredSourceError)

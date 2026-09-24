@@ -242,6 +242,26 @@ class InvalidDateRangeError(Exception):
         super().__init__(self.message)
 
 
+class InvalidProjectionRangeError(Exception):
+    """Raised when a projection_date is not strictly later than the resolved start date."""
+
+    def __init__(self, start: date, projection_date: date, message: str | None = None) -> None:
+        """Initialise with the resolved start date and the requested projection date.
+
+        Args:
+            start: The resolved start date.
+            projection_date: The requested projection target date.
+            message: Optional override message.
+        """
+        self.start = start
+        self.projection_date = projection_date
+        self.message = message or (
+            f"Projection date {projection_date} is not later than the resolved start "
+            f"date {start}. A projection must run forward in time."
+        )
+        super().__init__(self.message)
+
+
 class MissingRequiredSourceError(Exception):
     """Raised when a requested attribute's required source is missing or insufficient."""
 

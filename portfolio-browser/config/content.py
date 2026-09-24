@@ -198,11 +198,11 @@ class ProjectionReturn(BaseModel):
     """One selectable projection return measure (022; FR-008).
 
     `key` is the wire-format value sent to the analysis service's `return`
-    query parameter; `label` is what the user sees on its toggle switch —
-    e.g. `key="itd_ann"`, `label="Ann. ITD"` (the same annualized
-    inception-to-date return the Performance page labels "ITD (Ann.)"; the
-    shorter label is this page's own display concision, not a different
-    calculation — spec Assumptions).
+    query parameter — the exact same measure name its performance endpoint
+    already uses; `label` is what the user sees on its toggle switch —
+    e.g. `key="ITD (Ann.)"`, `label="Ann. ITD"` (the shorter label is this
+    page's own display concision, not a different calculation — spec
+    Assumptions).
     """
 
     key: str

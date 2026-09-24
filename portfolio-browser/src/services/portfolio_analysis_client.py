@@ -184,8 +184,9 @@ class PortfolioAnalysisClient(Protocol):
             projection_date: The date to project forward to. Must be later
                 than the resolved start date (the service validates this).
             returns: Zero or more return names to project
-                ("itd_ann"/"1y"/"3y"/"5y"). An empty list still returns the
-                "Historical" series alone.
+                ("ITD (Ann.)"/"1Y"/"3Y"/"5Y" — the exact measure names the
+                service's own performance endpoint uses). An empty list
+                still returns the "Historical" series alone.
             start: The date historical data ends and every projection begins.
                 Omitted from the request entirely when None, which the
                 service defaults to the account's most recently recorded

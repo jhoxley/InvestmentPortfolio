@@ -38,8 +38,10 @@ _TIMEOUT = 10
 
 # Wire-format return key -> the display label this page's config gives it
 # (config/content.yaml's `projection.returns`), mirrored here rather than
-# imported so the fake stays a self-contained double.
-_LABEL_BY_RETURN_KEY = {"itd_ann": "Ann. ITD", "1y": "1Y", "3y": "3Y", "5y": "5Y"}
+# imported so the fake stays a self-contained double. Keys are the exact
+# performance-measure names portfolio-analysis-service's projection endpoint
+# expects (specs/009-projection-endpoint/research.md #2 in that repo).
+_LABEL_BY_RETURN_KEY = {"ITD (Ann.)": "Ann. ITD", "1Y": "1Y", "3Y": "3Y", "5Y": "5Y"}
 
 _ACCOUNTS = [
     AccountSummary(
@@ -71,7 +73,7 @@ class _FakeProjectionClient:
     def __init__(
         self,
         accounts: list[AccountSummary],
-        supported_return_keys: frozenset[str] = frozenset({"itd_ann", "1y", "3y", "5y"}),
+        supported_return_keys: frozenset[str] = frozenset({"ITD (Ann.)", "1Y", "3Y", "5Y"}),
         raise_on_mount: bool = False,
         raise_on_chart: bool = False,
     ) -> None:
@@ -163,7 +165,9 @@ def stub_client_with_data(monkeypatch):
     target_fixture="stub_client",
 )
 def stub_client_short_history(monkeypatch):
-    client = _FakeProjectionClient(_ACCOUNTS, supported_return_keys=frozenset({"itd_ann", "1y"}))
+    client = _FakeProjectionClient(
+        _ACCOUNTS, supported_return_keys=frozenset({"ITD (Ann.)", "1Y"})
+    )
     _install_stub_client(monkeypatch, client)
     return client
 
