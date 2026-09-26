@@ -73,3 +73,5 @@ Documented via the router's own `summary`/`responses` kwargs (FastAPI auto-gener
 `/openapi.json` entry from these, per Constitution Principle V) — no separate hand-maintained
 OpenAPI file exists in this codebase; the live spec at `/openapi.json` is authoritative,
 consistent with every other endpoint here.
+
+> **Update (010-projection-start-alignment):** for non-day periodicities each projected series contains window-start dates only; see `specs/010-projection-start-alignment/contracts/projection-api-delta.md`.

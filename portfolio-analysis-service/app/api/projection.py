@@ -77,7 +77,11 @@ async def get_account_projection(
         default=None,
         description=(
             "Optional aggregation interval: day, week, month, quarter, annual. Applied "
-            "independently to the historical series and to each projected series."
+            "independently to the historical series and to each projected series. For a "
+            "non-day interval each projected series contains window-start dates only: it "
+            "opens at the first window start on or after start (start itself appears only "
+            "when it is a window start) and ends at the last window start on or before "
+            "projection_date."
         ),
         json_schema_extra={"enum": list(SUPPORTED_PERIODICITY_VALUES)},
     ),

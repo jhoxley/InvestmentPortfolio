@@ -424,3 +424,47 @@ def check_historical_final_matches_account_latest(
 
     entries = [e for e in projection_response.json()["entries"] if e["position"] == "Historical"]
     assert max(e["date"] for e in entries) == expected_to_date
+
+
+@when(
+    parsers.parse(
+        'a "{periodicity}" projection request is made with start {start}, '
+        'projection_date {projection_date}, and return "{return_name}"'
+    ),
+    target_fixture="projection_response",
+)
+def request_with_periodicity_start_and_one_return(
+    account_name: str,
+    periodicity: str,
+    start: str,
+    projection_date: str,
+    return_name: str,
+    app_client: TestClient,
+) -> object:
+    """GET the projection endpoint with an explicit periodicity, start, date and one return."""
+    return app_client.get(
+        f"/v1/accounts/{account_name}/projection",
+        params=[
+            ("start", start),
+            ("projection_date", projection_date),
+            ("return", return_name),
+            ("periodicity", periodicity),
+        ],
+    )
+
+
+@then(parsers.parse('the "{label}" series\' first entry date is {expected_date}'))
+def check_series_first_date(projection_response: object, label: str, expected_date: str) -> None:
+    """Assert a labeled series' earliest-dated entry falls on the given date."""
+    entries = [e for e in projection_response.json()["entries"] if e["position"] == label]
+    assert entries, f"No entries for series '{label}'"
+    assert min(e["date"] for e in entries) == expected_date
+
+
+@then(parsers.parse('the "{label}" series has no entry dated {unexpected_date}'))
+def check_series_has_no_entry_dated(
+    projection_response: object, label: str, unexpected_date: str
+) -> None:
+    """Assert a labeled series contains no entry on the given date."""
+    dates = [e["date"] for e in projection_response.json()["entries"] if e["position"] == label]
+    assert unexpected_date not in dates

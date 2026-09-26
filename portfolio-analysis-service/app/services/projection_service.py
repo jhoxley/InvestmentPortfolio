@@ -15,7 +15,7 @@ from app.exceptions import (
     MissingRequiredSourceError,
     PositionLadderNotIngestedError,
 )
-from app.models.periodicity import Periodicity
+from app.models.periodicity import PERIOD_ALIAS, Periodicity
 from app.models.position_timeseries import PositionTimeSeriesEntry, PositionTimeSeriesResponse
 from app.models.timeseries import AccountResourceRange
 from app.repositories.ladder_repository import LadderRepository
@@ -253,6 +253,11 @@ class ProjectionService:
         scales *volatility*, not a return, and was the source of a since-fixed defect: it
         produced a ~390% "daily rate" for a 24% annualized return instead of ~0.08%).
 
+        For a non-daily periodicity whose window does not start on `resolved_start`, the
+        clamped first-window row is omitted so every row sits on a window-start date (the
+        series then opens at the next window start, and may be empty). Values on the
+        retained rows are unaffected (specs/010-projection-start-alignment/research.md).
+
         Args:
             start_market_value: The historical series' own final market_value.
             annualized_return: The return's annualized rate as of resolved_start.
@@ -273,4 +278,32 @@ class ProjectionService:
                 ],
             }
         )
-        return aggregate_last_observation(daily_df, periodicity, resolved_start)
+        aggregated = aggregate_last_observation(daily_df, periodicity, resolved_start)
+        if _starts_on_window_boundary(resolved_start, periodicity):
+            return aggregated
+        # The aggregator clamps the first (partial) window's date up to resolved_start; that
+        # row is the only one dated on or before it, and would sit off the periodicity grid.
+        return aggregated[aggregated["date"] > resolved_start].reset_index(drop=True)
+
+
+def _starts_on_window_boundary(resolved_start: date, periodicity: Periodicity) -> bool:
+    """Report whether a projected series should open with a row dated at `resolved_start`.
+
+    True for `Periodicity.DAY` (no bucketing) and when `resolved_start` is itself its own
+    calendar period's window-start business day — the same date `aggregate_last_observation`
+    would report for that window, so the two can never disagree.
+
+    Args:
+        resolved_start: The resolved, business-day-aligned start date.
+        periodicity: Calendar aggregation interval.
+
+    Returns:
+        False when `resolved_start` falls part-way through a period, meaning the first
+        (clamped) window row must be omitted.
+    """
+    alias = PERIOD_ALIAS.get(periodicity)
+    if alias is None:
+        return True
+    window_start = pd.Period(resolved_start, alias).start_time.date()
+    natural: date = pd.bdate_range(start=window_start, periods=1)[0].date()
+    return natural == resolved_start

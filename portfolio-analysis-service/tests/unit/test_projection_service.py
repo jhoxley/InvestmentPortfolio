@@ -449,6 +449,207 @@ class TestPeriodicityIsAppliedToBothHistoricalAndProjectedLegs:
         # Far fewer than one point per business day on each leg.
         assert len(historical_dates) < 5
         assert len(projected_dates) < 5
-        assert len(set(historical_dates) & set(projected_dates)) == 0 or resolved_start in (
-            set(historical_dates) & set(projected_dates)
+        # Mid-year start: the clamped start-date row is omitted; series opens at next year start.
+        assert resolved_start not in projected_dates
+        assert projected_dates[0] == date(2020, 1, 1)
+
+
+# --- 010: projection start alignment ------------------------------------------
+
+
+def _projected_dates(response: object, label: str = "3Y") -> list[date]:
+    """Return the sorted dates of one projected series from a projection response."""
+    return sorted(e.date for e in response.entries if e.position == label)  # type: ignore[attr-defined]
+
+
+def _projected_values(response: object, label: str = "3Y") -> dict[date, float]:
+    """Return {date: market_value} for one projected series from a projection response."""
+    return {
+        e.date: e.model_dump()["market_value"]
+        for e in response.entries  # type: ignore[attr-defined]
+        if e.position == label
+    }
+
+
+_OFF_BOUNDARY_CASES = [
+    pytest.param(
+        Periodicity.MONTH,
+        date(2019, 6, 12),
+        date(2019, 9, 30),
+        [date(2019, 7, 1), date(2019, 8, 1), date(2019, 9, 2)],
+        id="month-mid-month-start-and-off-boundary-end",
+    ),
+    pytest.param(
+        Periodicity.QUARTER,
+        date(2019, 5, 15),
+        date(2020, 1, 15),
+        [date(2019, 7, 1), date(2019, 10, 1), date(2020, 1, 1)],
+        id="quarter-mid-quarter-start",
+    ),
+    pytest.param(
+        Periodicity.WEEK,
+        date(2019, 6, 12),
+        date(2019, 6, 27),
+        [date(2019, 6, 17), date(2019, 6, 24)],
+        id="week-mid-week-start",
+    ),
+    pytest.param(
+        Periodicity.ANNUAL,
+        date(2019, 6, 3),
+        date(2022, 6, 1),
+        [date(2020, 1, 1), date(2021, 1, 1), date(2022, 1, 3)],
+        id="annual-mid-year-start",
+    ),
+]
+
+
+class TestOffBoundaryStartOmitsStartDateRowForNonDailyPeriodicity:
+    """Non-daily periodicity with a mid-period start: series opens at the next window start."""
+
+    @pytest.mark.parametrize(
+        ("periodicity", "start", "projection_date", "expected_dates"), _OFF_BOUNDARY_CASES
+    )
+    def test_projected_series_dates_are_window_starts_only(
+        self,
+        ladder_repo: LadderRepository,
+        service: ProjectionService,
+        periodicity: Periodicity,
+        start: date,
+        projection_date: date,
+        expected_dates: list[date],
+    ) -> None:
+        """No row at the start date or projection_date; only consecutive window starts."""
+        _write_ladder(ladder_repo, "known")
+
+        response = service.get_projection(
+            "known",
+            projection_date=projection_date,
+            returns=["3Y"],
+            start=start,
+            periodicity=periodicity,
         )
+
+        assert _projected_dates(response) == expected_dates
+
+    def test_historical_series_still_ends_at_its_final_window(
+        self, ladder_repo: LadderRepository, service: ProjectionService
+    ) -> None:
+        """The historical leg is unchanged: its last row is still the start's own window."""
+        _write_ladder(ladder_repo, "known")
+
+        response = service.get_projection(
+            "known",
+            projection_date=date(2019, 9, 30),
+            returns=["3Y"],
+            start=date(2019, 6, 12),
+            periodicity=Periodicity.MONTH,
+        )
+
+        historical_dates = sorted(e.date for e in response.entries if e.position == "Historical")
+        assert historical_dates[-1] == date(2019, 6, 3)
+
+    def test_retained_values_match_daily_projection_window_end_values(
+        self, ladder_repo: LadderRepository, service: ProjectionService
+    ) -> None:
+        """FR-007: each retained row carries the last daily value of its own window."""
+        _write_ladder(ladder_repo, "known")
+        start, projection_date = date(2019, 6, 12), date(2019, 9, 30)
+
+        daily = service.get_projection(
+            "known", projection_date=projection_date, returns=["3Y"], start=start
+        )
+        monthly = service.get_projection(
+            "known",
+            projection_date=projection_date,
+            returns=["3Y"],
+            start=start,
+            periodicity=Periodicity.MONTH,
+        )
+
+        daily_values = _projected_values(daily)
+        expected = {
+            date(2019, 7, 1): daily_values[date(2019, 7, 31)],
+            date(2019, 8, 1): daily_values[date(2019, 8, 30)],
+            date(2019, 9, 2): daily_values[date(2019, 9, 30)],
+        }
+        actual = _projected_values(monthly)
+        assert actual.keys() == expected.keys()
+        for key, value in expected.items():
+            assert actual[key] == pytest.approx(value)
+
+    def test_every_requested_return_is_aligned_the_same_way(
+        self, ladder_repo: LadderRepository, service: ProjectionService
+    ) -> None:
+        """FR-008: multiple projected series all drop the start-date row."""
+        _write_ladder(ladder_repo, "known")
+
+        response = service.get_projection(
+            "known",
+            projection_date=date(2019, 9, 30),
+            returns=["1Y", "3Y"],
+            start=date(2019, 6, 12),
+            periodicity=Periodicity.MONTH,
+        )
+
+        assert _projected_dates(response, "1Y") == _projected_dates(response, "3Y")
+        assert _projected_dates(response, "1Y")[0] == date(2019, 7, 1)
+
+
+class TestNextBoundaryAfterProjectionDateYieldsNoProjectedSeries:
+    """Empty projected series when no window start falls within the range."""
+
+    def test_return_is_absent_when_no_window_start_in_range(
+        self, ladder_repo: LadderRepository, service: ProjectionService
+    ) -> None:
+        """Monthly, start 2019-06-12, projection_date 2019-06-28: next start is 2019-07-01."""
+        _write_ladder(ladder_repo, "known")
+
+        response = service.get_projection(
+            "known",
+            projection_date=date(2019, 6, 28),
+            returns=["3Y"],
+            start=date(2019, 6, 12),
+            periodicity=Periodicity.MONTH,
+        )
+
+        assert response.positions == ["Historical"]
+
+
+class TestBoundaryStartOrDailyPeriodicityKeepsStartDateRow:
+    """No regression when the start is on a window start or periodicity is daily."""
+
+    @pytest.mark.parametrize(
+        ("periodicity", "start", "projection_date"),
+        [
+            pytest.param(Periodicity.MONTH, date(2019, 7, 1), date(2019, 10, 15), id="month"),
+            pytest.param(
+                Periodicity.MONTH,
+                date(2019, 9, 2),
+                date(2019, 12, 15),
+                id="month-starting-on-weekend-start-is-following-monday",
+            ),
+            pytest.param(Periodicity.QUARTER, date(2019, 10, 1), date(2020, 1, 2), id="quarter"),
+            pytest.param(Periodicity.WEEK, date(2019, 6, 10), date(2019, 6, 27), id="week"),
+            pytest.param(Periodicity.DAY, date(2019, 6, 12), date(2019, 6, 27), id="day"),
+        ],
+    )
+    def test_first_projected_row_is_the_start_date(
+        self,
+        ladder_repo: LadderRepository,
+        service: ProjectionService,
+        periodicity: Periodicity,
+        start: date,
+        projection_date: date,
+    ) -> None:
+        """First projected entry equals the resolved start."""
+        _write_ladder(ladder_repo, "known")
+
+        response = service.get_projection(
+            "known",
+            projection_date=projection_date,
+            returns=["3Y"],
+            start=start,
+            periodicity=periodicity,
+        )
+
+        assert _projected_dates(response)[0] == start
