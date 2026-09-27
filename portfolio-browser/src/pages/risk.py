@@ -156,7 +156,7 @@ def _render_chart_and_table(
 
     chart = dcc.Graph(
         id="risk-histogram-chart",
-        figure=build_figure(response.histogram),
+        figure=build_figure(response.histogram, response.statistics),
         style={"height": "500px"},
     )
     table = dash_table.DataTable(  # type: ignore[attr-defined]

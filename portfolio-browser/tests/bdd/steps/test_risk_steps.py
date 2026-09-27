@@ -29,6 +29,7 @@ from src.models.portfolio_analysis import (
     HistogramStatistics,
     ReturnHistogramResponse,
 )
+from src.pages._risk_chart import bucket_histogram
 
 scenarios("../features/risk_view_histogram.feature")
 scenarios("../features/risk_shortcut_buttons.feature")
@@ -263,7 +264,9 @@ def bar_chart_displayed(dash_duo, stub_client):
         "var gd = document.querySelector('#risk-histogram-chart .js-plotly-plot');"
         "return gd.data[0].x;"
     )
-    assert [int(v) for v in x_values] == [pair[0] for pair in stub_client._histogram]
+    expected_centers = [center for center, _ in bucket_histogram(stub_client._histogram)]
+    expected_percent = [round(center / 100, 10) for center in expected_centers]
+    assert [round(v, 10) for v in x_values] == expected_percent
 
 
 @then('a statistics table is displayed with columns headed "statistic" and "value"')
