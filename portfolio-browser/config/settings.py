@@ -30,4 +30,12 @@ class Settings(BaseSettings):
     # nothing wrong (or logged) on the service side. 20s gives real margin
     # above the worst observed case, including when two widgets both fetch
     # concurrently on the same account/date change.
-    request_timeout_seconds: float = 20.0
+    #
+    # Raised 20s -> 60s (2026-09-26): HL-SIPP's Overview page fires several
+    # requests at once (timeseries, position, projection) and the service
+    # logged 200 responses for that account at 19.8-20.7s under that
+    # concurrent load, while the browser was timing out at exactly 20.0s and
+    # showing "Could not load ... data". Note this is httpx's per-phase
+    # timeout (connect/read/write/pool each), so it bounds how long one
+    # request may sit silent, not the total time a page waits.
+    request_timeout_seconds: float = 60.0

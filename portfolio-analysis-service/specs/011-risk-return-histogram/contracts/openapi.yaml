@@ -1,0 +1,220 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Locally hosted API for portfolio analysis features. This version adds a new "risk" endpoint
+    group. Its first endpoint returns a histogram of an account's portfolio-level daily returns in
+    integer basis points, with distribution statistics.
+  version: "0.11.0"
+
+servers:
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+paths:
+  /accounts/{account_name}/risk/return-histogram:
+
+    get:
+      operationId: get_account_return_histogram
+      summary: >
+        Retrieve a histogram and statistics of an account's portfolio-level daily returns
+        in basis points
+      description: >
+        Uses the same daily portfolio return series as the performance endpoints (the sum of
+        weighted_position_return across every position/sub-account per business day). Each
+        daily return is converted to basis points (x 10,000) and rounded to the nearest integer
+        (halves away from zero). Only business days within the resolved start/end window are
+        observed. Buckets with no observations are omitted; buckets are sorted ascending.
+        Statistics describe the same rounded observations.
+      tags: [Risk]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+          description: >
+            Case-sensitive account identifier. Restricted to alphanumeric
+            characters, hyphens, and underscores; 1–64 characters.
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the account's own earliest recorded position-ladder date. Adjusted
+            forward to the next business day if it falls on a weekend.
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the business day before today. Must not be later than today.
+            Adjusted forward to the next business day if it falls on a weekend (capped at
+            today).
+      responses:
+        "200":
+          description: >
+            Histogram and statistics returned. The resolved window always contains at least
+            one business day, so count is at least 1.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReturnHistogramResponse"
+              example:
+                account_name: HL-SIPP
+                from_date: "2024-01-02"
+                to_date: "2024-12-31"
+                histogram: [[-25, 1], [-3, 4], [0, 12], [7, 9], [65, 1]]
+                statistics:
+                  count: 27
+                  mean: 4.1
+                  median: 3.0
+                  mode: 0
+                  minimum: -25
+                  maximum: 65
+                  std_dev: 14.2
+                  std_dev_bands:
+                    - {sigma: 1, multiple: 14.2, lower: -10.1, upper: 18.3}
+                    - {sigma: 2, multiple: 28.4, lower: -24.3, upper: 32.5}
+                    - {sigma: 3, multiple: 42.6, lower: -38.5, upper: 46.7}
+                  skewness: 1.8
+                  kurtosis: 6.2
+                _links:
+                  self: "/v1/accounts/HL-SIPP/risk/return-histogram?start=2024-01-02&end=2024-12-31"
+                  accounts: "/v1/accounts"
+        "404":
+          description: No resource of any kind has been ingested for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: >
+            Validation failed — invalid account name, account known but no position ladder
+            ingested, a start date before the ladder's first date, an invalid date range, or a
+            future end date
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+components:
+  schemas:
+
+    ReturnHistogramResponse:
+      type: object
+      required: [account_name, from_date, to_date, histogram, statistics, _links]
+      properties:
+        account_name:
+          type: string
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+        histogram:
+          type: array
+          description: >
+            Pairs of [basis point bucket, number of business days in that bucket], sorted by
+            bucket ascending. Counts are always at least 1.
+          items:
+            type: array
+            prefixItems:
+              - type: integer
+                description: Basis point bucket (1 bp = 0.01%)
+              - type: integer
+                minimum: 1
+                description: Observation count
+            minItems: 2
+            maxItems: 2
+        statistics:
+          $ref: "#/components/schemas/HistogramStatistics"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    HistogramStatistics:
+      type: object
+      required:
+        - count
+        - mean
+        - median
+        - mode
+        - minimum
+        - maximum
+        - std_dev
+        - std_dev_bands
+        - skewness
+        - kurtosis
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        mean:
+          type: [number, "null"]
+          description: Basis points; null when count is 0
+        median:
+          type: [number, "null"]
+          description: Basis points; null when count is 0
+        mode:
+          type: [integer, "null"]
+          description: Most frequent bucket (smallest on ties); null when count is 0
+        minimum:
+          type: [integer, "null"]
+        maximum:
+          type: [integer, "null"]
+        std_dev:
+          type: [number, "null"]
+          description: Sample standard deviation in basis points; null when count < 2
+        std_dev_bands:
+          type: array
+          description: One entry each for sigma = 1, 2, 3; empty when std_dev is null
+          items:
+            $ref: "#/components/schemas/StdDevBand"
+        skewness:
+          type: [number, "null"]
+          description: Sample skewness; null when count < 3 or std_dev is 0
+        kurtosis:
+          type: [number, "null"]
+          description: Sample excess kurtosis; null when count < 4 or std_dev is 0
+
+    StdDevBand:
+      type: object
+      required: [sigma, multiple, lower, upper]
+      properties:
+        sigma:
+          type: integer
+          enum: [1, 2, 3]
+        multiple:
+          type: number
+          description: sigma x std_dev, in basis points
+        lower:
+          type: number
+          description: mean minus multiple
+        upper:
+          type: number
+          description: mean plus multiple
+
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string

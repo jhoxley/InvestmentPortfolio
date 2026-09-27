@@ -18,6 +18,7 @@ from app.api import (
     performance,
     position_timeseries,
     projection,
+    risk,
     timeseries,
 )
 from app.config import get_settings
@@ -78,6 +79,7 @@ app.include_router(accounts.router)
 app.include_router(position_timeseries.router)
 app.include_router(performance.router)
 app.include_router(projection.router)
+app.include_router(risk.router)
 app.include_router(health.router)
 
 

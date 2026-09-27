@@ -8,12 +8,11 @@ from datetime import date
 import pandas as pd
 import structlog
 
-from app.exceptions import AccountNotFoundError, MissingRequiredSourceError
 from app.models.performance import PerformanceEntry, PerformanceResponse
 from app.repositories.ladder_repository import LadderRepository
 from app.services import performance_attributes
 from app.services.accounts_service import AccountsService
-from app.services.daily_portfolio_return import compute_daily_portfolio_return
+from app.services.daily_return_series_loader import DailyReturnSeriesLoader
 from app.services.performance_metrics import compute_performance_measures
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 
@@ -37,9 +36,11 @@ class PerformanceService:
             accounts_service: Shared account existence/date-range lookup service.
             date_resolver: Shared date defaulting/adjustment service.
         """
-        self._ladder_repo = ladder_repo
-        self._accounts_service = accounts_service
-        self._date_resolver = date_resolver
+        self._loader = DailyReturnSeriesLoader(
+            ladder_repo=ladder_repo,
+            accounts_service=accounts_service,
+            date_resolver=date_resolver,
+        )
 
     def get_performance(
         self,
@@ -65,52 +66,23 @@ class PerformanceService:
             NoAttributesRequestedError: If attributes is empty.
             UnsupportedAttributeError: If any attribute name is unsupported.
             AccountNotFoundError: If the account has no ingested resource at all.
-            MissingRequiredSourceError: If the account has no position ladder.
+            MissingRequiredSourceError: If the account has no position ladder, or the
+                resolved start precedes the ladder's first date.
             FutureEndDateError: If end is later than today.
             InvalidDateRangeError: If the resolved start is after the resolved end.
         """
         log = logger.bind(account_name=account_name, attributes=attributes)
         performance_attributes.validate_attributes(attributes)
 
-        summary = self._accounts_service.get_summary(account_name)
-        if summary.capital_ledger is None and summary.position_ladder is None:
-            raise AccountNotFoundError(
-                account_name=account_name,
-                message=(
-                    f"No capital ledger or position ladder has been ingested for "
-                    f"account '{account_name}'."
-                ),
-            )
-        if summary.position_ladder is None:
-            raise MissingRequiredSourceError(
-                account_name=account_name, attribute=attributes[0], source="position_ladder"
-            )
-
-        resolved_start, resolved_end = self._date_resolver.resolve(
-            raw_start=start,
-            raw_end=end,
+        loaded = self._loader.load(
+            account_name=account_name,
+            start=start,
+            end=end,
             today=today,
-            required_source_earliest_dates=[summary.position_ladder.from_date],
+            attribute_label=attributes[0],
         )
-
-        if resolved_start < summary.position_ladder.from_date:
-            raise MissingRequiredSourceError(
-                account_name=account_name,
-                attribute=attributes[0],
-                source="position_ladder",
-                message=(
-                    f"position_ladder for account '{account_name}' has no data before "
-                    f"{summary.position_ladder.from_date}, but the resolved start date "
-                    f"is {resolved_start}."
-                ),
-            )
-
-        ladder_df = self._ladder_repo.read_full_df(account_name)
-        daily_returns_df = compute_daily_portfolio_return(
-            ladder_df,
-            from_date=summary.position_ladder.from_date,
-            through_date=resolved_end,
-        )
+        resolved_start, resolved_end = loaded.resolved_start, loaded.resolved_end
+        daily_returns_df = loaded.daily_returns
         measures_df = compute_performance_measures(daily_returns_df)
 
         windowed = measures_df[
