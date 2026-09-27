@@ -105,3 +105,49 @@ class PositionTimeSeriesResponse(BaseModel):
     periodicity: str | None = None
     entries: list[PositionTimeSeriesEntry]
     links: dict[str, str] = Field(default_factory=dict)
+
+
+class StdDevBand(BaseModel):
+    """One standard deviation band around the mean, in basis points.
+
+    Not rendered by the Risk page (spec 024 explicitly excludes this from its
+    statistics table) — modeled here only because it is a required nested
+    field of HistogramStatistics and must validate.
+    """
+
+    sigma: int
+    multiple: float
+    lower: float
+    upper: float
+
+
+class HistogramStatistics(BaseModel):
+    """Summary statistics of an account's rounded basis-point return observations.
+
+    Scalar fields are None when there are too few observations to define them
+    (see portfolio-analysis-service/app/models/risk.py, verified against source).
+    """
+
+    count: int
+    mean: float | None
+    median: float | None
+    mode: int | None
+    minimum: int | None
+    maximum: int | None
+    std_dev: float | None
+    std_dev_bands: list[StdDevBand]
+    skewness: float | None
+    kurtosis: float | None
+
+
+class ReturnHistogramResponse(BaseModel):
+    """Response body for GET /v1/accounts/{account_name}/risk/return-histogram."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    account_name: str
+    from_date: date
+    to_date: date
+    histogram: list[tuple[int, int]]
+    statistics: HistogramStatistics
+    links: dict[str, str] = Field(default_factory=dict, alias="_links")

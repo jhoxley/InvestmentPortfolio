@@ -18,6 +18,9 @@ nav_sections:
   - key: projection
     label: Projection
     order: 4
+  - key: risk
+    label: Risk
+    order: 5
 
 periodicity:
   label: "Periodicity"

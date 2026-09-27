@@ -24,6 +24,7 @@ _OVERVIEW_PATH = "/"
 _POSITIONS_PATH = "/positions"
 _PERFORMANCE_PATH = "/performance"
 _PROJECTION_PATH = "/projection"
+_RISK_PATH = "/risk"
 
 
 def _build_static_parameters_bar() -> list:
@@ -174,6 +175,26 @@ def _build_projection_parameters_bar() -> list:
     ]
 
 
+def _build_risk_parameters_bar() -> list:
+    """Real Account/From/To/shortcut controls, with a "10Y" first shortcut (024).
+
+    Options/values are populated by callbacks in src/pages/risk.py once the
+    page has fetched /v1/accounts — this only builds the empty controls. The
+    first shortcut button is relabeled "10Y" (in place of "YtD"/"ITD"); the
+    page's own callback maps it to the new `SHORTCUT_10Y` code, the same
+    page-local remapping Performance already uses for its "ITD" label
+    (research.md #1). The trailing `FormText` mirrors Projection's own
+    `projection-date-validation` pattern for FR-007's inline message.
+    """
+    return [
+        *build_account_date_controls(first_shortcut_label="10Y"),
+        dbc.Col(
+            dbc.FormText(id="risk-date-validation", color="danger"),
+            width="auto",
+        ),
+    ]
+
+
 def _render_parameters_bar(pathname: str | None) -> list:
     if pathname == _OVERVIEW_PATH:
         return _build_overview_parameters_bar()
@@ -183,6 +204,8 @@ def _render_parameters_bar(pathname: str | None) -> list:
         return _build_performance_parameters_bar()
     if pathname == _PROJECTION_PATH:
         return _build_projection_parameters_bar()
+    if pathname == _RISK_PATH:
+        return _build_risk_parameters_bar()
     return _build_static_parameters_bar()
 
 

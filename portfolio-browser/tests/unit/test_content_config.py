@@ -175,6 +175,7 @@ def test_real_content_yaml_loads() -> None:
         "positions",
         "performance",
         "projection",
+        "risk",
     }
 
 

@@ -32,8 +32,11 @@ SHORTCUT_YTD = "ytd"
 SHORTCUT_1Y = "1y"
 SHORTCUT_3Y = "3y"
 SHORTCUT_5Y = "5y"
+# Added by the Risk page (024) as a new first-slot alternative to YTD/ITD;
+# additive only — every existing page's shortcut codes are unchanged.
+SHORTCUT_10Y = "10y"
 SHORTCUT_ALL = "all"
-_SHORTCUT_YEAR_OFFSETS = {SHORTCUT_1Y: 1, SHORTCUT_3Y: 3, SHORTCUT_5Y: 5}
+_SHORTCUT_YEAR_OFFSETS = {SHORTCUT_1Y: 1, SHORTCUT_3Y: 3, SHORTCUT_5Y: 5, SHORTCUT_10Y: 10}
 
 _SHORTCUT_BUTTONS = [
     ("overview-shortcut-ytd", "YtD"),

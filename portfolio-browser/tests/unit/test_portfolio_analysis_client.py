@@ -760,3 +760,84 @@ def test_get_projection_ignored_periodicity_is_logged_as_a_warning() -> None:
     warnings = [e for e in entries if e["log_level"] == "warning"]
     assert len(warnings) == 1
     assert warnings[0]["event"] == "periodicity_not_applied"
+
+
+# --- return histogram (024) -------------------------------------------------
+
+
+def test_get_return_histogram_success() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/accounts/HL-SIPP/risk/return-histogram"
+        params = httpx.QueryParams(request.url.query)
+        assert params.get("start") == "2024-01-02"
+        assert params.get("end") == "2024-12-31"
+        return httpx.Response(
+            200,
+            json={
+                "account_name": "HL-SIPP",
+                "from_date": "2024-01-02",
+                "to_date": "2024-12-31",
+                "histogram": [[-25, 1], [0, 12], [65, 1]],
+                "statistics": {
+                    "count": 14,
+                    "mean": 4.1,
+                    "median": 3.0,
+                    "mode": 0,
+                    "minimum": -25,
+                    "maximum": 65,
+                    "std_dev": 14.2,
+                    "std_dev_bands": [],
+                    "skewness": 1.8,
+                    "kurtosis": 6.2,
+                },
+                "_links": {"self": "/v1/accounts/HL-SIPP/risk/return-histogram"},
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    response = client.get_return_histogram(
+        account_name="HL-SIPP",
+        start=date(2024, 1, 2),
+        end=date(2024, 12, 31),
+    )
+
+    assert response.account_name == "HL-SIPP"
+    assert response.histogram == [(-25, 1), (0, 12), (65, 1)]
+    assert response.statistics.count == 14
+    assert response.statistics.mean == 4.1
+
+
+@pytest.mark.parametrize("status_code", [404, 422])
+def test_get_return_histogram_raises_on_error_status(status_code: int) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status_code,
+            json={
+                "type": "about:blank",
+                "title": "Error",
+                "status": status_code,
+                "detail": "boom",
+                "instance": str(request.url),
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_return_histogram(
+            account_name="HL-SIPP",
+            start=date(2024, 1, 2),
+            end=date(2024, 12, 31),
+        )
+
+
+def test_get_return_histogram_raises_on_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TimeoutException("timed out", request=request)
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_return_histogram(
+            account_name="HL-SIPP",
+            start=date(2024, 1, 2),
+            end=date(2024, 12, 31),
+        )

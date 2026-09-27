@@ -20,6 +20,7 @@ from src.models.portfolio_analysis import (
     AttributeDefinition,
     PositionSummary,
     PositionTimeSeriesResponse,
+    ReturnHistogramResponse,
     TimeSeriesResponse,
 )
 
@@ -197,6 +198,24 @@ class PortfolioAnalysisClient(Protocol):
 
         Returns:
             The parsed PositionTimeSeriesResponse.
+        """
+        ...
+
+    def get_return_histogram(
+        self,
+        account_name: str,
+        start: date,
+        end: date,
+    ) -> ReturnHistogramResponse:
+        """Return the daily-return histogram and statistics for an account over a date range.
+
+        Args:
+            account_name: The account to request a return histogram for.
+            start: Start of the requested observation window (inclusive).
+            end: End of the requested observation window (inclusive).
+
+        Returns:
+            The parsed ReturnHistogramResponse.
         """
         ...
 
@@ -456,6 +475,38 @@ class HttpPortfolioAnalysisClient:
         response = PositionTimeSeriesResponse.model_validate(payload)
         _warn_if_periodicity_ignored(periodicity, response.periodicity, account_name, path)
         return response
+
+    def get_return_histogram(
+        self,
+        account_name: str,
+        start: date,
+        end: date,
+    ) -> ReturnHistogramResponse:
+        """Return the daily-return histogram and statistics for an account over a date range.
+
+        Args:
+            account_name: The account to request a return histogram for.
+            start: Start of the requested observation window (inclusive).
+            end: End of the requested observation window (inclusive).
+
+        Returns:
+            The parsed ReturnHistogramResponse.
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        path = f"/v1/accounts/{account_name}/risk/return-histogram"
+        params: list[tuple[str, str | int | float | bool | None]] = [
+            ("start", str(start)),
+            ("end", str(end)),
+        ]
+        payload = self._get(
+            path,
+            params=params,
+            log_context={"account_name": account_name},
+        )
+        return ReturnHistogramResponse.model_validate(payload)
 
     def _get(
         self,

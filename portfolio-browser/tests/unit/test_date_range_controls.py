@@ -15,6 +15,7 @@ from src.components.date_range_controls import (
     SHORTCUT_1Y,
     SHORTCUT_3Y,
     SHORTCUT_5Y,
+    SHORTCUT_10Y,
     SHORTCUT_ALL,
     SHORTCUT_YTD,
     _earliest_from_date,
@@ -122,6 +123,19 @@ def test_shortcut_5y_clamps_to_accounts_earliest_from_date() -> None:
     # account's own earliest recorded date (FR-008), not requested as-is.
     today = date(2026, 7, 16)
     assert _shortcut_from_date(SHORTCUT_5Y, _SHORT_HISTORY_ACCOUNT, today) == date(2025, 1, 1)
+
+
+def test_shortcut_10y_is_exact_calendar_offset() -> None:
+    today = date(2026, 3, 15)
+    assert _shortcut_from_date(SHORTCUT_10Y, _LONG_HISTORY_ACCOUNT, today) == date(2016, 3, 15)
+
+
+def test_shortcut_10y_clamps_to_accounts_earliest_from_date() -> None:
+    # _SHORT_HISTORY_ACCOUNT only goes back to 2025-01-01 — far less than 10
+    # years before "today" — so the computed date MUST be raised to the
+    # account's own earliest recorded date (024; FR-005), not requested as-is.
+    today = date(2026, 7, 16)
+    assert _shortcut_from_date(SHORTCUT_10Y, _SHORT_HISTORY_ACCOUNT, today) == date(2025, 1, 1)
 
 
 def _first_shortcut_button_label(controls: list) -> str:
