@@ -353,3 +353,50 @@ class VarRunService:
                 "dates_computed": len(dates),
             }
         )
+
+
+def recover_interrupted(var_repo: VarRepository) -> int:
+    """Mark every queued/running VaR run as failed/interrupted, across all accounts.
+
+    Called once at application start-up (FR-024): the in-memory run queue does not
+    survive a restart, so any run still recorded as queued or running at that point was
+    orphaned by the previous process stopping (a crash, or `uvicorn --reload`).
+
+    Args:
+        var_repo: The VaR calculation store to scan and update.
+
+    Returns:
+        The number of run records recovered.
+    """
+    recovered = 0
+    for account_name in var_repo.list_accounts_with_runs():
+        for run in var_repo.list_runs(account_name):
+            if run.status not in _ACTIVE_STATUSES:
+                continue
+            updated = run.model_copy(
+                update={
+                    "status": "failed",
+                    "finished_at": datetime.now(UTC),
+                    "failure": RunFailure(
+                        type="https://portfolio-analysis/errors/var-run-interrupted",
+                        title="VaR Run Failed",
+                        detail=(
+                            f"Run '{run.run_id}' was still '{run.status}' when the service "
+                            "started; the previous process must have stopped before it "
+                            "finished."
+                        ),
+                        reason="interrupted",
+                        run_id=run.run_id,
+                        correlation_id=run.correlation_id,
+                    ),
+                }
+            )
+            var_repo.write_run(account_name, updated)
+            logger.warning(
+                "var_run_interrupted",
+                account_name=account_name,
+                run_id=run.run_id,
+                previous_status=run.status,
+            )
+            recovered += 1
+    return recovered

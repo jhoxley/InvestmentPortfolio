@@ -171,15 +171,20 @@ async def get_var_run(
     "/accounts/{account_name}/risk/var/runs",
     response_model=VarRunList,
     summary="List an account's VaR calculation runs, newest first",
+    responses={
+        422: {"description": "Validation failed — invalid account name or limit out of range"}
+    },
 )
 async def list_var_runs(
     account_name: str,
+    limit: int | None = None,
     var_repo: VarRepository = Depends(get_var_repository),
 ) -> JSONResponse:
-    """List every run recorded for an account.
+    """List every run recorded for an account, newest first.
 
     Args:
         account_name: Path parameter identifying the account.
+        limit: Maximum number of runs to return (1-100, default 20).
         var_repo: Injected VarRepository.
 
     Returns:
@@ -187,9 +192,16 @@ async def list_var_runs(
 
     Raises:
         InvalidAccountNameError: Account name fails pattern check.
+        InvalidVarRunRequestError: limit is outside 1-100.
     """
     validate_account_name(account_name)
-    runs = var_repo.list_runs(account_name)
+    resolved_limit = 20 if limit is None else limit
+    if not 1 <= resolved_limit <= 100:
+        raise InvalidVarRunRequestError(
+            message=f"limit must be between 1 and 100 (got {resolved_limit}).",
+            fields=["limit"],
+        )
+    runs = var_repo.list_runs(account_name)[:resolved_limit]
     body = VarRunList(
         account_name=account_name,
         runs=runs,

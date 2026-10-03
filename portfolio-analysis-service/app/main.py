@@ -47,13 +47,20 @@ from app.exceptions import (
 )
 from app.logging_config import setup_logging
 from app.models.ladder import ProblemDetail
+from app.repositories.var_repository import VarRepository
+from app.services.var.run_scheduler import get_default_scheduler
+from app.services.var.var_run_service import recover_interrupted
 
 logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Configure logging, load settings, and ensure the data directory exists.
+    """Configure logging, load settings, ensure the data directory exists, and recover.
+
+    Any VaR run still recorded as queued or running at start-up is orphaned -- the
+    in-memory scheduler queue does not survive a restart -- so it is marked failed with
+    reason "interrupted" (FR-024) before the app starts serving requests.
 
     Args:
         app: The FastAPI application instance.
@@ -64,8 +71,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
     settings = get_settings()
     settings.data.directory.mkdir(parents=True, exist_ok=True)
-    logger.info("startup_complete", data_dir=str(settings.data.directory))
+    recovered = recover_interrupted(VarRepository(data_dir=settings.data.directory))
+    logger.info(
+        "startup_complete", data_dir=str(settings.data.directory), var_runs_recovered=recovered
+    )
     yield
+    get_default_scheduler().shutdown()
     logger.info("shutdown")
 
 

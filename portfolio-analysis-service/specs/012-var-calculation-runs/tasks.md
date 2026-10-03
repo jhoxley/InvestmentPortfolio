@@ -177,7 +177,7 @@ for `failed` with no store change; restart (call the lifespan recovery) to turn 
 
 ### Tests for User Story 2 (write first, must fail) ⚠️
 
-- [ ] T027 [P] [US2] Write unit tests in `tests/unit/test_var_run_service.py`:
+- [X] T027 [P] [US2] Write unit tests in `tests/unit/test_var_run_service.py`:
   - `create_run` raises `VarRunInProgressError` when a `queued` or `running` record exists for the account, but not for another account's;
   - two threads calling `create_run` concurrently (with a scheduler that never runs jobs) produce exactly one run and one conflict;
   - `execute` with the observed client raising `MarketDataServiceError` → run `failed` with reason `market_data_unavailable` and the store untouched;
@@ -186,22 +186,22 @@ for `failed` with no store change; restart (call the lifespan recovery) to turn 
   - every `RunFailure` carries the run's `run_id` and the creating request's `correlation_id`;
   - `recover_interrupted()` rewrites every `queued` and `running` record across accounts to `failed`/`interrupted` with `finished_at` set, and leaves succeeded/failed records alone;
   - a requested range is clipped to the ladder range, and a range with no ladder dates succeeds with 0 dates computed.
-- [ ] T028 [P] [US2] Add the US2 scenarios from spec.md (immediate acknowledgement, finished run reports outcome, one active run per account, runs execute one at a time, failed run records why, interrupted runs, invalid run requests) to `tests/features/var_calculation_runs.feature`, with steps in `tests/steps/var_calculation_runs_steps.py`:
+- [X] T028 [P] [US2] Add the US2 scenarios from spec.md (immediate acknowledgement, finished run reports outcome, one active run per account, runs execute one at a time, failed run records why, interrupted runs, invalid run requests) to `tests/features/var_calculation_runs.feature`, with steps in `tests/steps/var_calculation_runs_steps.py`:
   - for "one active run", seed a `queued` run record directly via `VarRepository.write_run` before POSTing;
   - for "one at a time", call `ThreadRunScheduler` directly with two `VarRunService.execute` jobs for two accounts and compare the stored `started_at`/`finished_at`;
   - for "interrupted", seed a `running` record and call the app's startup recovery.
-- [ ] T029 [P] [US2] Write `tests/unit/test_risk_var_openapi.py`: `app.openapi()` contains the POST/GET runs and GET run paths, a 202 response for POST, the 409/404/422 responses, and `_links`, `correlation_id` and `dates_skipped` properties on `VarRun`.
+- [X] T029 [P] [US2] Write `tests/unit/test_risk_var_openapi.py`: `app.openapi()` contains the POST/GET runs and GET run paths, a 202 response for POST, the 409/404/422 responses, and `_links`, `correlation_id` and `dates_skipped` properties on `VarRun`.
 
 ### Implementation for User Story 2
 
-- [ ] T030 [US2] In `app/services/var/var_run_service.py`:
+- [X] T030 [US2] In `app/services/var/var_run_service.py`:
   - add a module-level `threading.Lock` around the "check active → write queued record" section of `create_run` (research.md §3);
   - wrap `execute` in try/except mapping `MarketDataServiceError` → `market_data_unavailable`, `ObservedHistoryUnsupportedError` → `observed_history_unsupported`, and any `Exception` → `internal_error`;
   - record `RunFailure` (type/title/detail/reason/run_id/correlation_id) with `finished_at`, and log `var_run_failed` via `logger.exception`, so the stack trace goes to the logs but never into the payload;
   - commit to the store only in the final persist stage, so a failure never writes partial results;
   - implement `recover_interrupted(repo)`, logging `var_run_interrupted` per record.
-- [ ] T031 [US2] Add `GET /v1/accounts/{account_name}/risk/var/runs` (query `limit`, default 20, 1..100, validated in-handler → `InvalidVarRunRequestError`) returning `VarRunList` with `_links`. Ensure every `VarRun` response carries `_links.self`, `_links.account_runs` and `_links.status`. File: `app/api/risk_var.py`.
-- [ ] T032 [US2] In the `app/main.py` lifespan, call `VarRunService.recover_interrupted` (via a `VarRepository` built from settings) after the data directory is ensured, and call `get_default_scheduler().shutdown()` on shutdown. Expose recovery as a plain function (e.g. `recover_interrupted_runs(settings)`) so the BDD step from T028 can invoke it without restarting the app.
+- [X] T031 [US2] Add `GET /v1/accounts/{account_name}/risk/var/runs` (query `limit`, default 20, 1..100, validated in-handler → `InvalidVarRunRequestError`) returning `VarRunList` with `_links`. Ensure every `VarRun` response carries `_links.self`, `_links.account_runs` and `_links.status`. File: `app/api/risk_var.py`.
+- [X] T032 [US2] In the `app/main.py` lifespan, call `VarRunService.recover_interrupted` (via a `VarRepository` built from settings) after the data directory is ensured, and call `get_default_scheduler().shutdown()` on shutdown. Expose recovery as a plain function (e.g. `recover_interrupted_runs(settings)`) so the BDD step from T028 can invoke it without restarting the app.
 
 **Checkpoint**: The US1 + US2 BDD scenarios pass; this is a usable MVP (full runs only, actual returns + rescale).
 

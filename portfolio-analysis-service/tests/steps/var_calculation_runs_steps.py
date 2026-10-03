@@ -393,3 +393,105 @@ def check_only_range_has_estimates(
     stored_dates = set(df.loc[df["lookback_code"] == code, "date"])
     expected_dates = {pd.Timestamp(d.date()) for d in pd.bdate_range(start=start, end=end)}
     assert stored_dates == expected_dates
+
+
+# --- User Story 2: run lifecycle -------------------------------------------------
+
+
+@when(parsers.parse('a VaR run is requested for "{account}"'))
+def request_run_no_wait(account: str, app_client: TestClient, run_context: dict[str, Any]) -> None:
+    """POST a run without waiting on or reading back its final status."""
+    response = app_client.post(f"/v1/accounts/{account}/risk/var/runs", json={"mode": "full"})
+    run_context["account"] = account
+    run_context["response"] = response
+
+
+@given(parsers.parse('a VaR run for "{account}" is already queued'))
+def seed_queued_run(account: str, var_repo: VarRepository) -> None:
+    """Write a queued run record directly, standing in for a run already in progress."""
+    from app.models.var import VarRun
+
+    var_repo.write_run(
+        account,
+        VarRun(
+            run_id="existing-run",
+            account_name=account,
+            mode="full",
+            status="queued",
+            correlation_id="existing-corr",
+            requested_at=datetime.now(UTC),
+            _links={"self": f"/v1/accounts/{account}/risk/var/runs/existing-run"},
+        ),
+    )
+
+
+@when(parsers.parse('the VaR run "{run_id}" is requested for "{account}"'))
+def request_specific_run(
+    run_id: str, account: str, app_client: TestClient, run_context: dict[str, Any]
+) -> None:
+    """GET a specific run by id."""
+    run_context["account"] = account
+    run_context["response"] = app_client.get(f"/v1/accounts/{account}/risk/var/runs/{run_id}")
+
+
+@then(parsers.parse("the response status is {status:d}"))
+def check_response_status(status: int, run_context: dict[str, Any]) -> None:
+    """Assert the raw HTTP response status code."""
+    response = run_context["response"]
+    assert response.status_code == status, response.text
+
+
+@then(parsers.parse('the response has a run identifier and a status of "{a}" or "{b}"'))
+def check_response_has_run_id_and_status(a: str, b: str, run_context: dict[str, Any]) -> None:
+    """Assert the 202 body carries a run_id and one of the two accepted statuses."""
+    body = run_context["response"].json()
+    assert body["run_id"]
+    assert body["status"] in (a, b)
+
+
+@then("the response links to the active run")
+def check_response_links_active_run(run_context: dict[str, Any]) -> None:
+    """Assert the 409 problem body links to the already-active run."""
+    body = run_context["response"].json()
+    assert "existing-run" in body["_links"]["active_run"]
+
+
+@given(parsers.parse('account "{account}" has a VaR run record stuck in "{status}" status'))
+def seed_stuck_run(account: str, status: str, var_repo: VarRepository) -> None:
+    """Write a run record directly in the given (queued/running) status."""
+    from app.models.var import VarRun
+
+    var_repo.write_run(
+        account,
+        VarRun(
+            run_id="stuck-run",
+            account_name=account,
+            mode="full",
+            status=status,  # type: ignore[arg-type]
+            correlation_id="stuck-corr",
+            requested_at=datetime.now(UTC),
+            _links={"self": f"/v1/accounts/{account}/risk/var/runs/stuck-run"},
+        ),
+    )
+    run_context_holder["account"] = account
+
+
+run_context_holder: dict[str, Any] = {}
+
+
+@when("the service recovers interrupted runs")
+def run_recovery(var_repo: VarRepository) -> None:
+    """Call recover_interrupted() against the test's VarRepository."""
+    from app.services.var.var_run_service import recover_interrupted
+
+    recover_interrupted(var_repo)
+
+
+@then(parsers.parse('that run\'s status is "{status}" with reason "{reason}"'))
+def check_recovered_run(status: str, reason: str, var_repo: VarRepository) -> None:
+    """Assert the previously stuck run now has the given status and failure reason."""
+    run = var_repo.read_run(run_context_holder["account"], "stuck-run")
+    assert run is not None
+    assert run.status == status
+    assert run.failure is not None
+    assert run.failure.reason == reason

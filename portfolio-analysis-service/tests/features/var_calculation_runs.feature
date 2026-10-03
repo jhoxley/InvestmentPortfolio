@@ -36,3 +36,30 @@ Feature: Historical-simulation VaR calculation runs
     And the VaR look-backs are configured as win:5
     When a full VaR run is requested for "var-acct" from 2026-03-02 to 2026-03-04 and completes
     Then only dates from 2026-03-02 to 2026-03-04 have an estimate for look-back "win"
+
+  @us2
+  Scenario: Creating a run is acknowledged immediately
+    Given account "var-acct" holds "Equity A" with daily GBP prices from 2026-01-02 to 2026-03-06
+    When a VaR run is requested for "var-acct"
+    Then the response status is 202
+    And the response has a run identifier and a status of "queued" or "running"
+
+  @us2
+  Scenario: Only one active run per account
+    Given account "var-acct" holds "Equity A" with daily GBP prices from 2026-01-02 to 2026-03-06
+    And a VaR run for "var-acct" is already queued
+    When a VaR run is requested for "var-acct"
+    Then the response status is 409
+    And the response links to the active run
+
+  @us2
+  Scenario: Reading an unknown run is reported as not found
+    Given account "var-acct" holds "Equity A" with daily GBP prices from 2026-01-02 to 2026-03-06
+    When the VaR run "does-not-exist" is requested for "var-acct"
+    Then the response status is 404
+
+  @us2
+  Scenario: Interrupted runs are recovered at startup
+    Given account "var-acct" has a VaR run record stuck in "running" status
+    When the service recovers interrupted runs
+    Then that run's status is "failed" with reason "interrupted"
