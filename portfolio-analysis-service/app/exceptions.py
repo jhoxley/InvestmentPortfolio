@@ -340,3 +340,90 @@ class UnsupportedPeriodicityError(Exception):
             f"Periodicity '{requested}' is not supported. Supported values: {valid}."
         )
         super().__init__(self.message)
+
+
+class VarRunInProgressError(Exception):
+    """Raised when a VaR run is requested for an account that already has an active run."""
+
+    def __init__(self, account_name: str, active_run_id: str, message: str | None = None) -> None:
+        """Initialise with the account and the run already in progress.
+
+        Args:
+            account_name: The account that already has a queued or running VaR run.
+            active_run_id: The identifier of the active run.
+            message: Optional override message.
+        """
+        self.account_name = account_name
+        self.active_run_id = active_run_id
+        self.message = message or (
+            f"Account '{account_name}' already has run '{active_run_id}' queued or running."
+        )
+        super().__init__(self.message)
+
+
+class VarRunNotFoundError(Exception):
+    """Raised when no VaR run with the given identifier exists for the account."""
+
+    def __init__(self, account_name: str, run_id: str, message: str | None = None) -> None:
+        """Initialise with the account and the run identifier that could not be found.
+
+        Args:
+            account_name: The account the run was requested under.
+            run_id: The run identifier that does not exist.
+            message: Optional override message.
+        """
+        self.account_name = account_name
+        self.run_id = run_id
+        self.message = message or f"No VaR run '{run_id}' exists for account '{account_name}'."
+        super().__init__(self.message)
+
+
+class InvalidVarRunRequestError(Exception):
+    """Raised when a VaR run request body or query parameters fail validation."""
+
+    def __init__(self, message: str, fields: list[str] | None = None) -> None:
+        """Initialise with a descriptive message and the offending fields.
+
+        Args:
+            message: Human-readable description of the validation failure.
+            fields: Names of the request fields that failed validation.
+        """
+        self.message = message
+        self.fields = fields or []
+        super().__init__(self.message)
+
+
+class ObservedHistoryUnsupportedError(Exception):
+    """Raised when market-data-service does not support observed-only (fill=none) history."""
+
+    def __init__(self, identifier: str, message: str | None = None) -> None:
+        """Initialise with the identifier whose observed-history request lacked support markers.
+
+        Args:
+            identifier: The identifier requested when the unsupported response was received.
+            message: Optional override message.
+        """
+        self.identifier = identifier
+        self.message = message or (
+            "market-data-web-service does not support observed-only price history "
+            f"(fill=none) for '{identifier}'. VaR calculation requires feature "
+            "009-observed-price-history."
+        )
+        super().__init__(self.message)
+
+
+class InstrumentNotFoundError(Exception):
+    """Raised when market-data-service has no price history at all for an identifier."""
+
+    def __init__(self, identifier: str, message: str | None = None) -> None:
+        """Initialise with the identifier that could not be priced.
+
+        Args:
+            identifier: The identifier market-data-service could not find.
+            message: Optional override message.
+        """
+        self.identifier = identifier
+        self.message = message or (
+            f"market-data-web-service has no price history for '{identifier}'."
+        )
+        super().__init__(self.message)
