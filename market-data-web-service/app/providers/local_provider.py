@@ -5,6 +5,7 @@ import structlog
 from app.exceptions import DataNotFoundError, ProviderUnavailableError
 from app.models.fallback import FallbackEntry
 from app.providers import PricingProvider
+from app.providers.observation_window import ObservationWindow
 
 logger = structlog.get_logger(__name__)
 
@@ -12,6 +13,20 @@ logger = structlog.get_logger(__name__)
 class LocalPricingProvider(PricingProvider):
     def __init__(self, entry: FallbackEntry) -> None:
         self._entry = entry
+
+    def observation_window(self, ticker: str) -> ObservationWindow | None:
+        """Satisfies ObservationWindowSource from the fallback CSV's extremes."""
+        from datetime import date as _date
+
+        try:
+            rows = self.get_price_history(ticker, _date(1900, 1, 1), _date(2999, 12, 31))
+        except (DataNotFoundError, ProviderUnavailableError):
+            return None
+        if not rows:
+            return None
+        return ObservationWindow(
+            first_observed_date=rows[0][0], last_observed_date=rows[-1][0]
+        )
 
     def get_price_history(
         self, ticker: str, from_date: date, to_date: date

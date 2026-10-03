@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Path, Query
 
 from app.cache.repository import CacheRepository
 from app.config import Settings, get_settings
+from app.models.fill import FillMode
 from app.models.pricing import PriceHistoryResponse, PriceResponse
 from app.providers.cached_provider import CachedPricingProvider
 from app.providers.fallback_provider import FallbackPricingProvider
@@ -15,6 +16,7 @@ from app.services.fx_aligner import FxAligner
 from app.services.gap_fill import GapFillService
 from app.services.minor_unit import SubUnitNormaliser
 from app.services.pricing_service import PricingService
+from app.services.series_fill import FillStrategyResolver, ObservedOnlyFiller
 from app.validators.currency import validate_currency_code
 
 router = APIRouter(prefix="/securities", tags=["Securities"])
@@ -28,7 +30,10 @@ def get_pricing_service(settings: Settings = Depends(get_settings)) -> PricingSe
     fallback_repo = FallbackConfigRepository(settings.fallback.config_path)
     provider = FallbackPricingProvider(inner=yf_provider, fallback_repo=fallback_repo)
     return PricingService(
-        provider=provider, gap_fill=GapFillService(), normaliser=SubUnitNormaliser()
+        provider=provider,
+        gap_fill=GapFillService(),
+        normaliser=SubUnitNormaliser(),
+        fill_resolver=FillStrategyResolver(GapFillService(), ObservedOnlyFiller()),
     )
 
 
@@ -59,12 +64,13 @@ async def get_price_history(
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
     currency: str | None = Query(default=None),
+    fill: FillMode = Query(default=FillMode.ALL),
     service: PricingService = Depends(get_pricing_service),
     currency_svc: CurrencyService = Depends(get_currency_service),
 ) -> PriceHistoryResponse:
     if currency is not None:
         validate_currency_code(currency)
-    response = service.get_price_history(ticker, from_date, to_date)
+    response = service.get_price_history(ticker, from_date, to_date, fill)
     if currency is not None and currency != response.currency:
         from datetime import UTC, datetime, timedelta
 

@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Market Data API
   description: Locally hosted security pricing API backed by Yahoo Finance (yfinance).
-  version: 0.1.2
+  version: 0.1.3
 paths:
   /securities/{ticker}/price:
     get:
@@ -113,13 +113,50 @@ paths:
           - type: 'null'
           title: Currency
           example: GBP
+      - name: fill
+        in: query
+        required: false
+        description: >
+          Series shaping mode.
+
+          `all` (default) returns a value for every Mon–Fri business day in the requested
+          range, filling gaps from holidays or data outages by forward/backward carry of the
+          nearest observation — the behaviour of all prior versions.
+
+          `none` returns only dates that have a real market observation from the primary
+          source, the cache, or a configured local fallback file. No date is manufactured, so
+          the series may be shorter than the requested range and may skip business days. Use
+          this when genuine day-to-day returns matter, for example a Value-at-Risk
+          calculation, where a carried-forward flat price would be indistinguishable from a
+          real zero-return day.
+
+          Any other value is rejected with 422.
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/FillMode'
+          default: all
+          title: Fill
       responses:
         '200':
           description: >
             Price history returned (translated if currency parameter provided).
-            All Mon–Fri business days in the requested range are guaranteed to have an
-            entry — gaps from holidays or data outages are filled by forward/backward
-            carry of the nearest observation.
+
+            **`fill=all` (default)**: all Mon–Fri business days in the requested range are
+            guaranteed to have an entry — gaps from holidays or data outages are filled by
+            forward/backward carry of the nearest observation.
+
+            **`fill=none`**: only dates with a real market observation are returned. Business
+            days without an observation are absent, the series is not extended to the requested
+            start or end date, and no value is ever carried. A weekend-dated observation, if the
+            source holds one, is returned as the real observation it is.
+
+            **Observation window**: `first_observed_date` and `last_observed_date` report the
+            instrument's known observation range in both modes, independent of the requested
+            range, so a consumer can size a lookback window without exploratory requests.
+
+            **Currency conversion**: unchanged in both modes. Each returned price is converted at
+            the gap-filled FX rate for its own date, so a missing raw FX rate can never drop a
+            real price observation. Conversion adds no dates under `fill=none`.
 
             **Sub-unit currency normalisation**: Same normalisation as the `/price` endpoint
             applies. All `close` values in the returned series are in major-unit terms, and the
@@ -131,7 +168,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/PriceHistoryResponse'
         '404':
-          description: Ticker not found or FX alignment failed.
+          description: >
+            Ticker not found, FX alignment failed, or no observation exists within the requested
+            range. The empty-range case applies to both fill modes: a range containing no
+            observations is a not-found response, never a 200 with an empty `prices` list.
           content:
             application/json:
               schema:
@@ -414,12 +454,45 @@ components:
             $ref: '#/components/schemas/PricePoint'
           type: array
           title: Prices
+        first_observed_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: First Observed Date
+          description: >
+            Earliest date for which the service knows of a real market observation for this
+            instrument, as far as the service knows — derived from stored history plus anything
+            fetched while serving this request. Independent of the requested range: it may be
+            earlier than the `from` parameter. Never derived from a gap-filled value. Populated
+            in both fill modes.
+          example: '2024-03-01'
+        last_observed_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Last Observed Date
+          description: >
+            Latest date for which the service knows of a real market observation for this
+            instrument. May be later than the `to` parameter. Never derived from a gap-filled
+            value. Populated in both fill modes.
+          example: '2025-06-30'
       type: object
       required:
       - ticker
       - currency
       - prices
       title: PriceHistoryResponse
+    FillMode:
+      type: string
+      enum:
+      - all
+      - none
+      title: FillMode
+      description: >
+        Series shaping mode for price history. `all` gap-fills every business day;
+        `none` returns observed prices only.
     PricePoint:
       properties:
         date:

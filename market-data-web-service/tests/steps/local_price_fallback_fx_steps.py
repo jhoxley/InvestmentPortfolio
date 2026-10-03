@@ -52,6 +52,7 @@ def fx_rate_gbpusd_125(fx_mocks: tuple[MagicMock, MagicMock]) -> TestClient:
     from app.services.fx_aligner import FxAligner
     from app.services.gap_fill import GapFillService
     from app.services.pricing_service import PricingService
+    from app.services.series_fill import FillStrategyResolver, ObservedOnlyFiller
 
     mock_inner, mock_fx = fx_mocks
     mock_fx.get_price_history.return_value = [(date(2025, 1, 2), 1.25)]
@@ -64,6 +65,7 @@ def fx_rate_gbpusd_125(fx_mocks: tuple[MagicMock, MagicMock]) -> TestClient:
             provider=provider,
             gap_fill=GapFillService(),
             normaliser=SubUnitNormaliser(),
+            fill_resolver=FillStrategyResolver(GapFillService(), ObservedOnlyFiller()),
         )
 
     def override_currency() -> CurrencyService:

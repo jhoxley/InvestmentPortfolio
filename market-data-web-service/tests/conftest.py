@@ -51,6 +51,7 @@ def client_with_cache(
     from app.providers.cached_provider import CachedPricingProvider
     from app.services.gap_fill import GapFillService
     from app.services.pricing_service import PricingService
+    from app.services.series_fill import FillStrategyResolver, ObservedOnlyFiller
 
     def override_settings() -> Settings:
         return Settings(cache=CacheSettings(directory=tmp_cache_dir))
@@ -62,6 +63,7 @@ def client_with_cache(
             provider=provider,
             gap_fill=GapFillService(),
             normaliser=SubUnitNormaliser(),
+            fill_resolver=FillStrategyResolver(GapFillService(), ObservedOnlyFiller()),
         )
 
     app.dependency_overrides[get_settings] = override_settings
@@ -86,6 +88,7 @@ def client_with_fx(
     from app.services.fx_aligner import FxAligner
     from app.services.gap_fill import GapFillService
     from app.services.pricing_service import PricingService
+    from app.services.series_fill import FillStrategyResolver, ObservedOnlyFiller
 
     def override_settings() -> Settings:
         return Settings(cache=CacheSettings(directory=tmp_cache_dir))
@@ -97,6 +100,7 @@ def client_with_fx(
             provider=provider,
             gap_fill=GapFillService(),
             normaliser=SubUnitNormaliser(),
+            fill_resolver=FillStrategyResolver(GapFillService(), ObservedOnlyFiller()),
         )
 
     def override_currency_service() -> CurrencyService:
@@ -132,6 +136,7 @@ def client_with_gap_fill(
     from app.services.fx_aligner import FxAligner
     from app.services.gap_fill import GapFillService
     from app.services.pricing_service import PricingService
+    from app.services.series_fill import FillStrategyResolver, ObservedOnlyFiller
 
     def override_settings() -> Settings:
         return Settings(cache=CacheSettings(directory=tmp_cache_dir))
@@ -143,6 +148,7 @@ def client_with_gap_fill(
             provider=provider,
             gap_fill=GapFillService(),
             normaliser=SubUnitNormaliser(),
+            fill_resolver=FillStrategyResolver(GapFillService(), ObservedOnlyFiller()),
         )
 
     def override_currency_service() -> CurrencyService:
@@ -218,6 +224,7 @@ def client_with_fallback(
     from app.services.gap_fill import GapFillService
     from app.services.identifier_service import IdentifierService
     from app.services.pricing_service import PricingService
+    from app.services.series_fill import FillStrategyResolver, ObservedOnlyFiller
 
     pricing_repo = FallbackConfigRepository(_Path("tests/fixtures/fallback_config.json"))
     isin_repo = FallbackConfigRepository(_Path("tests/fixtures/fallback_config_isin.json"))
@@ -230,6 +237,7 @@ def client_with_fallback(
             provider=provider,
             gap_fill=GapFillService(),
             normaliser=SubUnitNormaliser(),
+            fill_resolver=FillStrategyResolver(GapFillService(), ObservedOnlyFiller()),
         )
 
     def override_identifier() -> IdentifierService:

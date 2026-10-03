@@ -167,4 +167,8 @@ class CurrencyService:
             ticker=response.ticker,
             currency=target_currency,
             prices=translated_prices,
+            # Carry the observation window through: it describes the instrument, not the
+            # currency, and rebuilding the model from scratch would silently drop it.
+            first_observed_date=response.first_observed_date,
+            last_observed_date=response.last_observed_date,
         )

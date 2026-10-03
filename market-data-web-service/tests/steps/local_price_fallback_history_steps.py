@@ -30,6 +30,7 @@ def _make_fallback_client(config_path: Path) -> tuple[TestClient, MagicMock, Mag
     from app.services.gap_fill import GapFillService
     from app.services.identifier_service import IdentifierService
     from app.services.pricing_service import PricingService
+    from app.services.series_fill import FillStrategyResolver, ObservedOnlyFiller
 
     mock_inner = MagicMock(spec=PricingProvider)
     mock_inner.get_price_history.side_effect = DataNotFoundError("PRIV01")
@@ -47,6 +48,7 @@ def _make_fallback_client(config_path: Path) -> tuple[TestClient, MagicMock, Mag
             provider=provider,
             gap_fill=GapFillService(),
             normaliser=SubUnitNormaliser(),
+            fill_resolver=FillStrategyResolver(GapFillService(), ObservedOnlyFiller()),
         )
 
     def override_identifier() -> IdentifierService:
@@ -171,6 +173,7 @@ def primary_no_data_unknown() -> TestClient:
     from app.repositories.fallback_config import FallbackConfigRepository
     from app.services.gap_fill import GapFillService
     from app.services.pricing_service import PricingService
+    from app.services.series_fill import FillStrategyResolver, ObservedOnlyFiller
 
     mock_inner = MagicMock(spec=PricingProvider)
     mock_inner.get_price_history.side_effect = DataNotFoundError("UNKNOWN")
@@ -184,6 +187,7 @@ def primary_no_data_unknown() -> TestClient:
             provider=provider,
             gap_fill=GapFillService(),
             normaliser=SubUnitNormaliser(),
+            fill_resolver=FillStrategyResolver(GapFillService(), ObservedOnlyFiller()),
         )
 
     app.dependency_overrides[get_pricing_service] = override_pricing
