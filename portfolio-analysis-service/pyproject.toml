@@ -42,7 +42,11 @@ ignore = ["B008", "D203", "D213"]
 convention = "google"
 
 [tool.mypy]
-python_version = "3.11"
+# 3.12, not the package's 3.11 floor: numpy 2.5's own .pyi stubs use PEP 695 `type X = Y`
+# aliases, which mypy only parses under python_version >= 3.12. numpy is a new direct
+# import in app/services/var/ (feature 012); nothing in this codebase writes 3.12-only
+# syntax, so this only affects how mypy reads installed stubs, not runtime compatibility.
+python_version = "3.12"
 strict = true
 ignore_missing_imports = true
 

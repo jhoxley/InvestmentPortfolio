@@ -270,6 +270,22 @@ alter every existing error response and its tests, which is outside this feature
 feature complies for everything it adds, and the inherited gap in existing handlers is recorded in
 plan.md's Complexity Tracking for a separate fix.
 
+## 14b. mypy `python_version` and numpy's stubs (found during implementation)
+
+**Finding**: `app/services/var/engine.py` and `return_panel.py` are the first production
+modules in this service to `import numpy` directly (pandas was imported before, but its
+stubs never forced mypy to fully parse numpy's own `.pyi`). numpy 2.5's `__init__.pyi`
+uses PEP 695 `type X = Y` alias statements, which mypy only parses under
+`python_version >= 3.12`. The project's `pyproject.toml` pinned `[tool.mypy]
+python_version = "3.11"`, so `mypy --strict app/` failed outright on a syntax error
+inside numpy's stub, unrelated to any code in this feature.
+
+**Fix**: bumped `[tool.mypy] python_version` to `"3.12"`. This only changes what syntax
+mypy accepts while *reading installed stubs*; nothing in this codebase uses 3.12-only
+syntax, so it has no effect on runtime behaviour, and `[project] requires-python` (the
+package's actual floor) is unchanged. Verified: `mypy --strict app/` clean across all 69
+source files after the change, full suite (548 tests) green.
+
 ## 14. Logging events
 
 `var_run_queued`, `var_run_started`, `var_run_stage` (stage = load_ladder | select_dates |

@@ -112,20 +112,20 @@ spec's values.
 
 ### Tests for User Story 1 (write first, must fail) ⚠️
 
-- [ ] T017 [P] [US1] Write engine unit tests in `tests/unit/test_var_engine.py`:
+- [X] T017 [P] [US1] Write engine unit tests in `tests/unit/test_var_engine.py`:
   - `rank_k(n, p_bp)` for n = 1, 5, 20, 260, 520, 1300 at 9500/9750/9900, including k = 14/7/3, 27/14/6 and 66/33/14, and 1 ≤ k ≤ n for every n in 1..2000;
   - `var_es(losses, p_bp)` on losses 1..520 → VaR 494/507/515 and ES 507.5/514/(2590 + 0.2·515)/5.2 exactly (`pytest.approx` with rel = 1e-12);
   - `scenario_pnl` on the mini example (A 60000, B 30000, Cash 10000; five return pairs) → [-600, -300, -2610, 810, -30], with Cash contributing nothing;
   - the observed-share exclusion drops a row where only 40% of risky value was observed (n = 4);
   - rescale: A 60000 −1%, C 20000 +2%, B 20000 missing → −250;
   - zero risky value → VaR/ES 0, coverage 100/0/0, quality ok.
-- [ ] T018 [P] [US1] Write return-panel unit tests in `tests/unit/test_var_return_panel.py`:
+- [X] T018 [P] [US1] Write return-panel unit tests in `tests/unit/test_var_return_panel.py`:
   - grid returns use the previous **observed** price;
   - the first observed day's return is NaN and earlier days are NaN;
   - unobserved days inside the history are 0.0 with `observed = False`;
   - a return spanning a holiday equals the two-day price ratio;
   - the grid covers exactly the requested Mon–Fri range.
-- [ ] T019 [P] [US1] Write exposure unit tests in `tests/unit/test_var_exposures.py`. From a ladder DataFrame (columns as stored), `build_exposures(ladder_df, mapping)`:
+- [X] T019 [P] [US1] Write exposure unit tests in `tests/unit/test_var_exposures.py`. From a ladder DataFrame (columns as stored), `build_exposures(ladder_df, mapping)`:
   - excludes Cash from positions but records `cash_value`;
   - excludes positions with market value 0 or quantity 0;
   - maps sub-account → identifier using `ticker or isin` (same rule as `PricingEnrichmentService`);
@@ -141,12 +141,12 @@ spec's values.
 
 ### Implementation for User Story 1
 
-- [ ] T021 [P] [US1] Implement `app/services/var/return_panel.py`:
+- [X] T021 [P] [US1] Implement `app/services/var/return_panel.py`:
   - `ReturnPanel` dataclass (grid, identifiers, `returns` T×m float with NaN, `observed` T×m bool, `first_observed`);
   - `build_return_panel(histories: Mapping[str, ObservedPriceHistory], grid_start, grid_end) -> ReturnPanel`, per research.md §6.
   Makes T018 pass.
-- [ ] T022 [P] [US1] Implement `app/services/var/exposures.py`: `PositionExposure` and `Exposure` dataclasses (data-model.md) and `build_exposures(ladder_df, lookup: Callable[[str], IdentifierMappingEntry | None]) -> dict[date, Exposure]`, with `fingerprint` left as `""` until US5. Makes T019 pass.
-- [ ] T023 [US1] Implement `app/services/var/engine.py`:
+- [X] T022 [P] [US1] Implement `app/services/var/exposures.py`: `PositionExposure` and `Exposure` dataclasses (data-model.md) and `build_exposures(ladder_df, lookup: Callable[[str], IdentifierMappingEntry | None]) -> dict[date, Exposure]`, with `fingerprint` left as `""` until US5. Makes T019 pass.
+- [X] T023 [US1] Implement `app/services/var/engine.py`:
   - `rank_k`, using integer `ceil_div`;
   - `var_es`, using `fractions.Fraction` for m and returning GBP floats;
   - `scenario_pnl(returns_matrix, values)`;
