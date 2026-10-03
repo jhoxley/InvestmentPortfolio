@@ -358,3 +358,33 @@ def estimate(
         quality_reason=reason,
         levels=levels,
     )
+
+
+def hypothetical_pnl(exposure: Exposure, panel: ReturnPanel, outcome_row: int) -> float:
+    """Revalue an as-of date's holdings at the next business day's observed returns.
+
+    This is the Basel-style "hypothetical PnL" backtest basis (FR-014): the positions
+    frozen at the as-of date's close, revalued purely by market movement on the outcome
+    day, with no trades, deposits, withdrawals or income in between.
+
+    Args:
+        exposure: The positions held (and their GBP market values) at the as-of date.
+        panel: The shared return grid; `outcome_row` indexes into `panel.grid` for the
+            outcome date (the as-of date's next business day).
+        outcome_row: Row index of the outcome date within `panel.grid`.
+
+    Returns:
+        Sum over positions of market_value x observed return on the outcome day. An
+        instrument with no observed return that day (including one never yet observed)
+        contributes 0.0. Cash is not a position and never contributes.
+    """
+    total = 0.0
+    for position in exposure.positions:
+        if position.identifier not in panel.identifiers:
+            continue
+        col = panel.identifiers.index(position.identifier)
+        r = panel.returns[outcome_row, col]
+        if np.isnan(r):
+            continue
+        total += position.market_value * float(r)
+    return total

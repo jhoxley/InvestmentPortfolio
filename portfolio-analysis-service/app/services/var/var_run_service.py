@@ -42,7 +42,8 @@ from app.repositories.var_repository import (
     VarRepository,
 )
 from app.services.accounts_service import AccountsService
-from app.services.var.engine import estimate
+from app.services.daily_portfolio_return import compute_daily_portfolio_return
+from app.services.var.engine import estimate, hypothetical_pnl
 from app.services.var.exposures import build_exposures, build_proxy_configs
 from app.services.var.return_panel import build_return_panel
 from app.services.var.run_scheduler import RunScheduler
@@ -269,7 +270,8 @@ class VarRunService:
 
         if dates:
             fetch_start = pd.bdate_range(end=min(dates), periods=max_lookback + 6)[0].date()
-            fetch_end = max(dates)
+            last_outcome_date = pd.bdate_range(start=max(dates), periods=2)[-1].date()
+            fetch_end = min(last_outcome_date, meta.to_date)
         else:
             fetch_start = fetch_end = meta.from_date
 
@@ -367,7 +369,41 @@ class VarRunService:
         estimates_df = (
             pd.DataFrame(estimate_rows) if estimate_rows else pd.DataFrame(columns=ESTIMATE_COLUMNS)
         )
-        outcomes_df = pd.DataFrame(columns=OUTCOME_COLUMNS)  # populated by feature 012 User Story 4
+
+        ladder_returns = compute_daily_portfolio_return(ladder_df, meta.from_date, meta.to_date)
+        ladder_return_by_date = dict(
+            zip(ladder_returns["date"], ladder_returns["daily_return"], strict=True)
+        )
+        outcome_rows: list[dict[str, object]] = []
+        for d in dates:
+            exposure = exposures[d]
+            outcome_date = pd.bdate_range(start=d, periods=2)[-1].date()
+            pending = outcome_date > meta.to_date
+            hyp_pnl = (
+                None if pending else hypothetical_pnl(exposure, panel, row_by_date[outcome_date])
+            )
+            ladder_pnl = (
+                None
+                if pending
+                else ladder_return_by_date.get(outcome_date, 0.0) * exposure.total_value
+            )
+            outcome_rows.append(
+                {
+                    "date": d,
+                    "outcome_date": outcome_date,
+                    "outcome_status": "pending" if pending else "realised",
+                    "total_value_gbp": exposure.total_value,
+                    "risky_value_gbp": exposure.risky_value,
+                    "hypothetical_pnl_gbp": hyp_pnl,
+                    "ladder_pnl_gbp": ladder_pnl,
+                    "row_fingerprint": "",
+                    "run_id": run.run_id,
+                    "computed_at": computed_at,
+                }
+            )
+        outcomes_df = (
+            pd.DataFrame(outcome_rows) if outcome_rows else pd.DataFrame(columns=OUTCOME_COLUMNS)
+        )
         instruments_df = pd.DataFrame(instrument_rows)
 
         log.info("var_run_stage", stage="persist", date_count=len(dates))

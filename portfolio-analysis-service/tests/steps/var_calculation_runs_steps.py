@@ -563,3 +563,95 @@ def check_proxied_share(
     row = df[(df["date"] == pd.Timestamp(as_of)) & (df["lookback_code"] == code)]
     assert len(row) == 1, df.to_string()
     assert row.iloc[0]["proxied_mv_pct"] == pytest.approx(float(expected), abs=1e-6)
+
+
+# --- User Story 4: realised outcomes --------------------------------------------
+
+
+@given(parsers.parse('"{sub_a}"\'s observed return on {outcome_date} is "{pct}"'))
+def configure_single_day_return(
+    sub_a: str, outcome_date: str, pct: str, fake_market_data_service: FakeMarketDataService
+) -> None:
+    """Configure a two-point price series giving sub_a an exact return on one day."""
+    pct_value = float(pct.rstrip("%")) / 100.0
+    out_d = date.fromisoformat(outcome_date)
+    base_d = pd.bdate_range(end=out_d, periods=2)[0].date()
+    points = [
+        PriceHistoryPoint(date=base_d, close=100.0),
+        PriceHistoryPoint(date=out_d, close=100.0 * (1.0 + pct_value)),
+    ]
+    fake_market_data_service.configure_observed_prices(sub_a, points)
+
+
+@then(
+    parsers.parse(
+        "the stored outcome for {as_of} has outcome date {outcome_date}, "
+        'hypothetical PnL {expected:d} GBP, and status "{status}"'
+    )
+)
+def check_outcome_full(
+    as_of: str,
+    outcome_date: str,
+    expected: int,
+    status: str,
+    run_context: dict[str, Any],
+    var_repo: VarRepository,
+) -> None:
+    """Assert the stored outcome's date, hypothetical PnL, and status all match."""
+    df = var_repo.read_outcomes(run_context["account"])
+    row = df[df["date"] == pd.Timestamp(as_of)]
+    assert len(row) == 1, df.to_string()
+    assert row.iloc[0]["outcome_date"] == pd.Timestamp(outcome_date)
+    assert row.iloc[0]["hypothetical_pnl_gbp"] == pytest.approx(float(expected), abs=1e-6)
+    assert row.iloc[0]["outcome_status"] == status
+
+
+@then(parsers.parse('the stored outcome for {as_of} has status "{status}"'))
+def check_outcome_status(
+    as_of: str, status: str, run_context: dict[str, Any], var_repo: VarRepository
+) -> None:
+    """Assert the stored outcome's status for one date."""
+    df = var_repo.read_outcomes(run_context["account"])
+    row = df[df["date"] == pd.Timestamp(as_of)]
+    assert len(row) == 1, df.to_string()
+    assert row.iloc[0]["outcome_status"] == status
+
+
+_extend_ladder_pattern = (
+    'the ladder for "{account}" is extended with "{sub_a}" worth {value:d} on {as_of}'
+)
+
+
+@given(parsers.parse(_extend_ladder_pattern))
+@when(parsers.parse(_extend_ladder_pattern))
+def extend_ladder(
+    account: str,
+    sub_a: str,
+    value: int,
+    as_of: str,
+    ladder_repo: LadderRepository,
+) -> None:
+    """Append one more business day to the account's stored ladder."""
+    existing = ladder_repo.read_full_df(account)
+    new_row = pd.DataFrame(
+        [
+            {
+                "date": date.fromisoformat(as_of),
+                "sub_account": sub_a,
+                "book_cost": 0.0,
+                "quantity": 10.0,
+                "total_income": 0.0,
+                "price": value / 10.0,
+                "market_value": float(value),
+                "portfolio_weight": 1.0,
+                "position_return": 0.0,
+                "weighted_position_return": 0.0,
+            }
+        ]
+    )
+    combined = pd.concat([existing, new_row], ignore_index=True)
+    meta = ladder_repo.read_meta(account)
+    updated_meta = meta.model_copy(
+        update={"to_date": date.fromisoformat(as_of), "row_count": len(combined)}
+    )
+    ladder_repo.write(account, combined, updated_meta)

@@ -255,13 +255,13 @@ pending, and a later run fills it.
 
 ### Tests for User Story 4 (write first, must fail) ⚠️
 
-- [ ] T039 [P] [US4] Add unit tests to `tests/unit/test_var_engine.py` for `hypothetical_pnl(exposure, panel, outcome_row)`: A 60000 at +1% and B 30000 at −2% → 0; an instrument not observed on the outcome day contributes 0; Cash contributes 0.
-- [ ] T040 [P] [US4] Add the US4 scenarios from spec.md to `tests/features/var_calculation_runs.feature`, with steps in `tests/steps/var_calculation_runs_steps.py`. For ladder PnL, assert equality with `compute_daily_portfolio_return(...)` at the outcome date × the as-of total value. For "filled later", ingest a ladder extended by one business day (rewrite `ladder.xlsx`/`meta.json` via `LadderRepository.write`) and run `full` (US5 will make `missing` work).
+- [X] T039 [P] [US4] Add unit tests to `tests/unit/test_var_engine.py` for `hypothetical_pnl(exposure, panel, outcome_row)`: A 60000 at +1% and B 30000 at −2% → 0; an instrument not observed on the outcome day contributes 0; Cash contributes 0.
+- [X] T040 [P] [US4] Add the US4 scenarios from spec.md to `tests/features/var_calculation_runs.feature`, with steps in `tests/steps/var_calculation_runs_steps.py`. For ladder PnL, assert equality with `compute_daily_portfolio_return(...)` at the outcome date × the as-of total value. For "filled later", ingest a ladder extended by one business day (rewrite `ladder.xlsx`/`meta.json` via `LadderRepository.write`) and run `full` (US5 will make `missing` work).
 
 ### Implementation for User Story 4
 
-- [ ] T041 [US4] Implement `hypothetical_pnl` in `app/services/var/engine.py`, making T039 pass.
-- [ ] T042 [US4] In `app/services/var/var_run_service.py`, compute outcomes for every selected date:
+- [X] T041 [US4] Implement `hypothetical_pnl` in `app/services/var/engine.py`, making T039 pass.
+- [X] T042 [US4] In `app/services/var/var_run_service.py`, compute outcomes for every selected date:
   - `outcome_date = as_of + BDay(1)`;
   - pending (null PnLs, `outcome_status = "pending"`) when after the ladder's `to_date`;
   - otherwise `hypothetical_pnl`, and `ladder_pnl = compute_daily_portfolio_return(ladder_df, ladder_from, ladder_to)` daily return at the outcome date × `exposure.total_value`;

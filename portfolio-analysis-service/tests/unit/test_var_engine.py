@@ -9,6 +9,7 @@ import pytest
 from app.config import VarSettings
 from app.services.var.engine import (
     estimate,
+    hypothetical_pnl,
     rank_k,
     scenario_pnl,
     var_es,
@@ -401,3 +402,43 @@ class TestEstimateWithProxies:
         )
 
         assert result.scenario_count == 1
+
+
+class TestHypotheticalPnl:
+    """hypothetical_pnl() revalues as-of holdings at the outcome day's observed returns."""
+
+    def test_offsetting_returns_net_to_zero(self) -> None:
+        """A 60000 at +1% and B 30000 at -2% nets to 0 GBP."""
+        exposure = _exposure([("A", "A", 60000.0), ("B", "B", 30000.0)])
+        grid = [date(2026, 3, 3)]
+        returns = np.array([[0.01, -0.02]])
+        observed = np.array([[True, True]])
+        panel = _panel(("A", "B"), grid, returns, observed)
+
+        pnl = hypothetical_pnl(exposure, panel, outcome_row=0)
+
+        assert pnl == pytest.approx(0.0)
+
+    def test_unobserved_outcome_day_contributes_zero(self) -> None:
+        """An instrument not observed on the outcome day contributes 0, not NaN or an error."""
+        exposure = _exposure([("A", "A", 60000.0)])
+        grid = [date(2026, 3, 1), date(2026, 3, 3)]  # A's first observed day is 2026-03-01
+        returns = np.array([[np.nan], [np.nan]])  # unobserved everywhere in this tiny panel
+        observed = np.array([[False], [False]])
+        panel = _panel(("A",), grid, returns, observed, first_observed={"A": None})
+
+        pnl = hypothetical_pnl(exposure, panel, outcome_row=1)
+
+        assert pnl == pytest.approx(0.0)
+
+    def test_cash_contributes_nothing(self) -> None:
+        """Cash (not a position) never appears in hypothetical_pnl's inputs or output."""
+        exposure = _exposure([("A", "A", 60000.0)], cash=10000.0)
+        grid = [date(2026, 3, 3)]
+        returns = np.array([[0.0]])
+        observed = np.array([[True]])
+        panel = _panel(("A",), grid, returns, observed)
+
+        pnl = hypothetical_pnl(exposure, panel, outcome_row=0)
+
+        assert pnl == pytest.approx(0.0)

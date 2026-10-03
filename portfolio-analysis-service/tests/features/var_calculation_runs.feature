@@ -83,3 +83,22 @@ Feature: Historical-simulation VaR calculation runs
     And "Balanced Proxy" has daily GBP prices covering the 5-day window ending 2026-03-02
     When a full VaR run is requested for "var-acct" and completes
     Then the stored proxied share for 2026-03-02 at look-back "win" is 100 percent
+
+  @us4
+  Scenario: Hypothetical and ladder PnL are recorded as the realised outcome
+    Given account "var-acct" holds "Equity A" worth 60000 and "Equity B" worth 30000 on 2026-03-02
+    And the ladder for "var-acct" is extended with "Equity A" worth 60000 on 2026-03-03
+    And "Equity A"'s observed return on 2026-03-03 is "+1%"
+    And "Equity B"'s observed return on 2026-03-03 is "-2%"
+    When a full VaR run is requested for "var-acct" from 2026-03-02 to 2026-03-02 and completes
+    Then the stored outcome for 2026-03-02 has outcome date 2026-03-03, hypothetical PnL 0 GBP, and status "realised"
+
+  @us4
+  Scenario: The newest date's outcome is pending and is filled once the ladder extends
+    Given account "var-acct" holds "Equity A" with daily GBP prices from 2026-01-02 to 2026-03-02
+    And the VaR look-backs are configured as win:5
+    When a full VaR run is requested for "var-acct" and completes
+    Then the stored outcome for 2026-03-02 has status "pending"
+    When the ladder for "var-acct" is extended with "Equity A" worth 1000 on 2026-03-03
+    And a full VaR run is requested for "var-acct" and completes
+    Then the stored outcome for 2026-03-02 has status "realised"
