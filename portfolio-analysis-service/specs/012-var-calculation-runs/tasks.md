@@ -131,7 +131,7 @@ spec's values.
   - maps sub-account → identifier using `ticker or isin` (same rule as `PricingEnrichmentService`);
   - keeps two sub-accounts sharing one identifier as separate positions;
   - computes risky and total values.
-- [ ] T020 [P] [US1] Add US1 scenarios to `tests/features/var_calculation_runs.feature`: "Scenario PnL applies historical returns…", "VaR is the k-th largest loss…", "Expected Shortfall is the empirical tail mean", "All three look-backs come from the same scenario history" and "Low-information scenario days are excluded". Implement their steps in `tests/steps/var_calculation_runs_steps.py`:
+- [X] T020 [P] [US1] Add US1 scenarios to `tests/features/var_calculation_runs.feature`: "Scenario PnL applies historical returns…", "VaR is the k-th largest loss…", "Expected Shortfall is the empirical tail mean", "All three look-backs come from the same scenario history" and "Low-information scenario days are excluded". Implement their steps in `tests/steps/var_calculation_runs_steps.py`:
   - seed the ladder by ingesting a ledger through the existing `app_client` fixtures, or by writing `ladder.xlsx` + `meta.json` with `LadderRepository.write`;
   - seed observed prices via `fake_market_data_service.configure_observed_prices`;
   - shrink look-backs where a scenario says so by overriding `Settings.var.lookbacks` in the test settings;
@@ -153,13 +153,13 @@ spec's values.
   - `estimate(exposure, panel, as_of_row, lookback_days, confidences_bp, settings) -> VarEstimate`: window rows; observed-share exclusion using the instrument's own `observed` mask; rescale for NaN cells (value-weighted mean of present positions); coverage classes (actual / rescaled only in US1); quality via thresholds (`insufficient` stores a reason and no VaR/ES);
   - `estimate_all_lookbacks(...)`, reusing one window for every look-back as tail slices.
   Makes T017 pass.
-- [ ] T024 [US1] Add a `_get_var_run_service(...)` dependency factory in `app/api/risk_var.py`. It wires `VarRunService` from `get_ladder_repository`, `get_capital_repository` (→ `AccountsService`), the identifier mapping repository (reuse `_get_identifier_mapping_repository` from `app/api/ladder.py`), `get_observed_price_client`, `get_var_repository`, `get_run_scheduler` and `get_settings().var`.
-- [ ] T025 [US1] Implement `VarRunService` in `app/services/var/var_run_service.py`:
+- [X] T024 [US1] Add a `_get_var_run_service(...)` dependency factory in `app/api/risk_var.py`. It wires `VarRunService` from `get_ladder_repository`, `get_capital_repository` (→ `AccountsService`), the identifier mapping repository (reuse `_get_identifier_mapping_repository` from `app/api/ladder.py`), `get_observed_price_client`, `get_var_repository`, `get_run_scheduler` and `get_settings().var`.
+- [X] T025 [US1] Implement `VarRunService` in `app/services/var/var_run_service.py`:
   - `create_run(account_name, request, today, correlation_id)` (validation per data-model.md: account exists via `AccountsService`, has a ladder; writes a `queued` record that stores `correlation_id`; submits `execute(run_id)` to the scheduler; returns the `VarRun`);
   - inside `execute`, bind `run_id`, `account_name` and the stored `correlation_id` with `structlog.contextvars.bound_contextvars` for the whole job;
   - `execute(account_name, run_id)` with stages load_ladder → select_dates (`full`: every ladder date in range) → fetch_prices (one `get_observed_price_history` per identifier over research.md §8's range) → build_panel → compute (every date × look-back) → persist (`VarRepository.commit`).
   It marks the run `running`, then `succeeded` with counts, and logs `var_run_stage` durations. Failure handling comes in US2. Collaborators are injected: `LadderRepository`, `AccountsService`, `IdentifierMappingRepository`, `ObservedPriceClient`, `VarRepository`, `RunScheduler`, `VarSettings`.
-- [ ] T026 [US1] Add `POST /v1/accounts/{account_name}/risk/var/runs` (202, body `VarRun`, `Location` header = `_links.self`) and `GET /v1/accounts/{account_name}/risk/var/runs/{run_id}` in `app/api/risk_var.py`, using the T024 factory. Pass the request's correlation ID (from structlog contextvars) to `create_run`. Validate the account name with `validate_account_name`. Parse the body as an optional dict and validate it in-handler with `VarRunRequest.model_validate`, converting a `ValidationError` into `InvalidVarRunRequestError` (research.md §10). Makes the T020 scenarios pass.
+- [X] T026 [US1] Add `POST /v1/accounts/{account_name}/risk/var/runs` (202, body `VarRun`, `Location` header = `_links.self`) and `GET /v1/accounts/{account_name}/risk/var/runs/{run_id}` in `app/api/risk_var.py`, using the T024 factory. Pass the request's correlation ID (from structlog contextvars) to `create_run`. Validate the account name with `validate_account_name`. Parse the body as an optional dict and validate it in-handler with `VarRunRequest.model_validate`, converting a `ValidationError` into `InvalidVarRunRequestError` (research.md §10). Makes the T020 scenarios pass.
 
 **Checkpoint**: The US1 BDD scenarios and engine, panel and exposure unit tests pass; a `full` run populates `estimates.csv`.
 

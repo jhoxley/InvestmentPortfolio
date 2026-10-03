@@ -1,0 +1,355 @@
+"""Orchestrates a VaR calculation run end to end: validate, fetch, compute, persist.
+
+A run is created synchronously (validation, admission control, the initial "queued"
+record) and then executed on the configured RunScheduler, so the triggering HTTP request
+returns immediately (FR-017, SC-002) while the calculation -- which can take minutes the
+first time a long price history must be fetched -- proceeds in the background.
+"""
+
+import threading
+import uuid
+from datetime import UTC, date, datetime
+from typing import TYPE_CHECKING
+
+import pandas as pd
+import structlog
+
+from app.config import VarSettings
+from app.exceptions import (
+    AccountNotFoundError,
+    InstrumentNotFoundError,
+    InvalidVarRunRequestError,
+    MarketDataServiceError,
+    MissingRequiredSourceError,
+    ObservedHistoryUnsupportedError,
+    VarRunInProgressError,
+)
+from app.models.var import RunFailure, RunFailureReason, VarRun, VarRunRequest
+from app.repositories.identifier_mapping_repository import IdentifierMappingRepository
+from app.repositories.ladder_repository import LadderRepository
+from app.repositories.var_repository import (
+    ESTIMATE_COLUMNS,
+    OUTCOME_COLUMNS,
+    VarMeta,
+    VarRepository,
+)
+from app.services.accounts_service import AccountsService
+from app.services.var.engine import estimate
+from app.services.var.exposures import build_exposures
+from app.services.var.return_panel import build_return_panel
+from app.services.var.run_scheduler import RunScheduler
+
+if TYPE_CHECKING:
+    from app.clients.market_data_client import ObservedPriceClient
+
+logger = structlog.get_logger(__name__)
+
+_ATTRIBUTE_LABEL = "risk/var"
+_ACTIVE_STATUSES = {"queued", "running"}
+
+_create_run_lock = threading.Lock()
+
+
+class VarRunService:
+    """Creates and executes historical-simulation VaR calculation runs."""
+
+    def __init__(
+        self,
+        ladder_repo: LadderRepository,
+        accounts_service: AccountsService,
+        identifier_mapping_repo: IdentifierMappingRepository,
+        observed_price_client: "ObservedPriceClient",
+        var_repo: VarRepository,
+        scheduler: RunScheduler,
+        settings: VarSettings,
+    ) -> None:
+        """Initialise with every collaborator a run needs.
+
+        Args:
+            ladder_repo: Repository for position ladders.
+            accounts_service: Shared account existence/date-range lookup service.
+            identifier_mapping_repo: Resolves sub-account names to identifiers.
+            observed_price_client: Fetches observed-only (fill=none) price history.
+            var_repo: The VaR calculation store.
+            scheduler: Executes a run's job in the background.
+            settings: VaR configuration (look-backs, confidence levels, thresholds).
+        """
+        self._ladder_repo = ladder_repo
+        self._accounts_service = accounts_service
+        self._mapping_repo = identifier_mapping_repo
+        self._observed_price_client = observed_price_client
+        self._var_repo = var_repo
+        self._scheduler = scheduler
+        self._settings = settings
+
+    def create_run(
+        self, account_name: str, request: VarRunRequest, today: date, correlation_id: str
+    ) -> VarRun:
+        """Validate, admit, and queue a VaR calculation run.
+
+        Args:
+            account_name: The account identifier.
+            request: The validated run request body.
+            today: The current date (unused for "full"/"missing" selection in this
+                version; reserved for future date-resolution needs).
+            correlation_id: Correlation ID of the triggering HTTP request.
+
+        Returns:
+            The newly created VarRun, with status "queued".
+
+        Raises:
+            AccountNotFoundError: If the account has no ingested resource at all.
+            MissingRequiredSourceError: If the account has no position ladder.
+            InvalidVarRunRequestError: If start is later than end.
+            VarRunInProgressError: If the account already has a queued or running run.
+        """
+        del today  # reserved: "missing" mode's date selection (feature 012 US5) uses it
+        summary = self._accounts_service.get_summary(account_name)
+        if summary.capital_ledger is None and summary.position_ladder is None:
+            raise AccountNotFoundError(
+                account_name=account_name,
+                message=(
+                    f"No capital ledger or position ladder has been ingested for "
+                    f"account '{account_name}'."
+                ),
+            )
+        if summary.position_ladder is None:
+            raise MissingRequiredSourceError(
+                account_name=account_name, attribute=_ATTRIBUTE_LABEL, source="position_ladder"
+            )
+        if request.start is not None and request.end is not None and request.start > request.end:
+            raise InvalidVarRunRequestError(
+                message=f"start ({request.start}) must not be later than end ({request.end}).",
+                fields=["start", "end"],
+            )
+
+        run_id = uuid.uuid4().hex
+        with _create_run_lock:
+            active = [
+                r for r in self._var_repo.list_runs(account_name) if r.status in _ACTIVE_STATUSES
+            ]
+            if active:
+                raise VarRunInProgressError(
+                    account_name=account_name, active_run_id=active[0].run_id
+                )
+
+            run = VarRun(
+                run_id=run_id,
+                account_name=account_name,
+                mode=request.mode,
+                requested_start=request.start,
+                requested_end=request.end,
+                status="queued",
+                correlation_id=correlation_id,
+                requested_at=datetime.now(UTC),
+                _links={
+                    "self": f"/v1/accounts/{account_name}/risk/var/runs/{run_id}",
+                    "account_runs": f"/v1/accounts/{account_name}/risk/var/runs",
+                    "status": f"/v1/accounts/{account_name}/risk/var/status",
+                },
+            )
+            self._var_repo.write_run(account_name, run)
+
+        self._scheduler.submit(lambda: self.execute(account_name, run_id))
+        return run
+
+    def execute(self, account_name: str, run_id: str) -> None:
+        """Run the full calculation for one queued run, updating its record as it goes.
+
+        Args:
+            account_name: The account identifier.
+            run_id: The run to execute.
+        """
+        run = self._var_repo.read_run(account_name, run_id)
+        if run is None:
+            logger.error("var_run_execute_missing_record", account_name=account_name, run_id=run_id)
+            return
+
+        log = logger.bind(
+            account_name=account_name, run_id=run_id, correlation_id=run.correlation_id
+        )
+        run = run.model_copy(update={"status": "running", "started_at": datetime.now(UTC)})
+        self._var_repo.write_run(account_name, run)
+        log.info("var_run_started", mode=run.mode)
+
+        try:
+            run = self._execute_body(account_name, run, log)
+        except (
+            MarketDataServiceError,
+            ObservedHistoryUnsupportedError,
+            InstrumentNotFoundError,
+        ) as exc:
+            reason: RunFailureReason = (
+                "observed_history_unsupported"
+                if isinstance(exc, ObservedHistoryUnsupportedError)
+                else "market_data_unavailable"
+            )
+            run = self._fail(run, reason, str(exc))
+            log.error("var_run_failed", reason=reason, detail=str(exc))
+        except Exception as exc:
+            run = self._fail(run, "internal_error", str(exc))
+            log.exception("var_run_failed", reason="internal_error")
+        self._var_repo.write_run(account_name, run)
+
+    def _fail(self, run: VarRun, reason: RunFailureReason, detail: str) -> VarRun:
+        """Build the failed-run update for `run`.
+
+        Args:
+            run: The in-progress run record.
+            reason: Machine-readable failure reason.
+            detail: Human-readable failure detail.
+
+        Returns:
+            `run` updated to status "failed" with a populated RunFailure.
+        """
+        return run.model_copy(
+            update={
+                "status": "failed",
+                "finished_at": datetime.now(UTC),
+                "failure": RunFailure(
+                    type=f"https://portfolio-analysis/errors/var-run-{reason.replace('_', '-')}",
+                    title="VaR Run Failed",
+                    detail=detail,
+                    reason=reason,
+                    run_id=run.run_id,
+                    correlation_id=run.correlation_id,
+                ),
+            }
+        )
+
+    def _execute_body(self, account_name: str, run: VarRun, log: "structlog.BoundLogger") -> VarRun:
+        """Perform the calculation and persist its results; returns the succeeded run.
+
+        Args:
+            account_name: The account identifier.
+            run: The "running" run record.
+            log: A bound logger carrying account_name/run_id/correlation_id.
+
+        Returns:
+            `run` updated to status "succeeded" with its counts filled in.
+        """
+        meta = self._ladder_repo.read_meta(account_name)
+        resolved_start = max(run.requested_start or meta.from_date, meta.from_date)
+        resolved_end = min(run.requested_end or meta.to_date, meta.to_date)
+        dates: list[date] = (
+            [d.date() for d in pd.bdate_range(start=resolved_start, end=resolved_end)]
+            if resolved_start <= resolved_end
+            else []
+        )
+
+        ladder_df = self._ladder_repo.read_full_df(account_name)
+        exposures = build_exposures(ladder_df, self._mapping_repo.lookup)
+
+        sub_accounts_by_identifier: dict[str, set[str]] = {}
+        for d in dates:
+            for position in exposures[d].positions:
+                sub_accounts_by_identifier.setdefault(position.identifier, set()).add(
+                    position.sub_account
+                )
+        needed_identifiers = sorted(sub_accounts_by_identifier)
+
+        lookbacks = self._settings.lookbacks
+        confidences = tuple(self._settings.confidence_levels_bp)
+        max_lookback = max(lookbacks.values()) if lookbacks else 0
+
+        if dates:
+            fetch_start = pd.bdate_range(end=min(dates), periods=max_lookback + 6)[0].date()
+            fetch_end = max(dates)
+        else:
+            fetch_start = fetch_end = meta.from_date
+
+        log.info(
+            "var_run_stage",
+            stage="fetch_prices",
+            identifier_count=len(needed_identifiers),
+            fetch_start=str(fetch_start),
+            fetch_end=str(fetch_end),
+        )
+        histories = {
+            identifier: self._observed_price_client.get_observed_price_history(
+                identifier, fetch_start, fetch_end, "GBP"
+            )
+            for identifier in needed_identifiers
+        }
+
+        panel = build_return_panel(histories, grid_start=fetch_start, grid_end=fetch_end)
+        row_by_date = {d: i for i, d in enumerate(panel.grid)}
+
+        estimate_rows: list[dict[str, object]] = []
+        computed_at = datetime.now(UTC)
+        for d in dates:
+            exposure = exposures[d]
+            as_of_row = row_by_date[d]
+            for code, lookback_days in lookbacks.items():
+                result = estimate(
+                    exposure, panel, as_of_row, lookback_days, confidences, self._settings
+                )
+                level_by_bp = {level.confidence_bp: level for level in result.levels}
+                row: dict[str, object] = {
+                    "date": d,
+                    "method": "historical-simulation",
+                    "lookback_code": code,
+                    "lookback_days": lookback_days,
+                    "scenario_count": result.scenario_count,
+                    "excluded_scenarios": result.excluded_scenarios,
+                    "actual_mv_pct": result.actual_mv_pct,
+                    "proxied_mv_pct": result.proxied_mv_pct,
+                    "rescaled_mv_pct": result.rescaled_mv_pct,
+                    "quality": result.quality,
+                    "quality_reason": result.quality_reason,
+                    "row_fingerprint": "",
+                    "methodology_version": self._settings.methodology_version,
+                    "run_id": run.run_id,
+                    "computed_at": computed_at,
+                }
+                for p_bp in (9500, 9750, 9900):
+                    level = level_by_bp.get(p_bp)
+                    row[f"var_{p_bp}_gbp"] = level.var_gbp if level else None
+                    row[f"es_{p_bp}_gbp"] = level.es_gbp if level else None
+                estimate_rows.append(row)
+
+        instrument_rows = [
+            {
+                "identifier": identifier,
+                "sub_accounts": ";".join(sorted(sub_accounts_by_identifier[identifier])),
+                "first_observed_date": histories[identifier].first_observed_date,
+                "last_observed_date": histories[identifier].last_observed_date,
+                "proxy": None,
+                "proxy_mode": "fill_gaps",
+                "proxy_scale": 1.0,
+                "outlier_count": 0,
+            }
+            for identifier in needed_identifiers
+        ]
+
+        estimates_df = (
+            pd.DataFrame(estimate_rows) if estimate_rows else pd.DataFrame(columns=ESTIMATE_COLUMNS)
+        )
+        outcomes_df = pd.DataFrame(columns=OUTCOME_COLUMNS)  # populated by feature 012 User Story 4
+        instruments_df = pd.DataFrame(instrument_rows)
+
+        log.info("var_run_stage", stage="persist", date_count=len(dates))
+        self._var_repo.commit(
+            account_name,
+            estimates=estimates_df,
+            outcomes=outcomes_df,
+            instruments=instruments_df,
+            meta=VarMeta(
+                account_name=account_name,
+                methodology_version=self._settings.methodology_version,
+                config_fingerprint="",
+                last_successful_run_id=run.run_id,
+                updated_at=computed_at,
+            ),
+        )
+
+        return run.model_copy(
+            update={
+                "status": "succeeded",
+                "finished_at": datetime.now(UTC),
+                "resolved_start": resolved_start if dates else None,
+                "resolved_end": resolved_end if dates else None,
+                "dates_selected": len(dates),
+                "dates_computed": len(dates),
+            }
+        )
