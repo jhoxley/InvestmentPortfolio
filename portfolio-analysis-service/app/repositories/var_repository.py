@@ -108,10 +108,7 @@ def _read_csv_or_empty(path: Path, columns: list[str]) -> pd.DataFrame:
     df = pd.read_csv(path)
     if df.empty:
         return _empty_frame(columns)
-    for col in _DATE_COLUMNS | _DATETIME_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col])
-    return df.reindex(columns=columns)
+    return _parse_date_columns(df).reindex(columns=columns)
 
 
 def _format_for_csv(df: pd.DataFrame) -> pd.DataFrame:
@@ -147,9 +144,17 @@ def _parse_date_columns(df: pd.DataFrame) -> pd.DataFrame:
         A copy with date-like columns converted via pd.to_datetime().
     """
     out = df.copy()
-    for col in _DATE_COLUMNS | _DATETIME_COLUMNS:
+    for col in _DATE_COLUMNS:
         if col in out.columns and not out.empty:
             out[col] = pd.to_datetime(out[col])
+    for col in _DATETIME_COLUMNS:
+        if col in out.columns and not out.empty:
+            # Stored timestamps round-trip through the CSV as naive (UTC, implicitly --
+            # see _format_for_csv). Caller-supplied values may be tz-aware (e.g.
+            # datetime.now(UTC)); normalise both to the same naive-UTC dtype so merging
+            # never mixes tz-aware and tz-naive datetimes in one column.
+            parsed = pd.to_datetime(out[col], utc=True)
+            out[col] = parsed.dt.tz_localize(None)
     return out
 
 

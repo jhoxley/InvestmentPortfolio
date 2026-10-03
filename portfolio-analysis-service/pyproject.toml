@@ -59,5 +59,8 @@ markers = [
     "us2: User Story 2 scenarios",
     "us3: User Story 3 scenarios",
     "us4: User Story 4 scenarios",
+    "us5: User Story 5 scenarios",
+    "us6: User Story 6 scenarios",
+    "us7: User Story 7 scenarios",
     "validation: Validation edge-case scenarios",
 ]

@@ -102,3 +102,30 @@ Feature: Historical-simulation VaR calculation runs
     When the ladder for "var-acct" is extended with "Equity A" worth 1000 on 2026-03-03
     And a full VaR run is requested for "var-acct" and completes
     Then the stored outcome for 2026-03-02 has status "realised"
+
+  @us5
+  Scenario: Nothing to do when the store is current
+    Given account "var-acct" holds "Equity A" with daily GBP prices from 2026-01-02 to 2026-03-06
+    And the VaR look-backs are configured as win:5
+    And a full VaR run is requested for "var-acct" and completes
+    When a "missing" VaR run is requested for "var-acct" and completes
+    Then the run status is "succeeded"
+    And the run reports 0 dates computed
+
+  @us5
+  Scenario: A missing run picks up new ladder dates
+    Given account "var-acct" holds "Equity A" with daily GBP prices from 2026-01-02 to 2026-03-04
+    And the VaR look-backs are configured as win:5
+    And a full VaR run is requested for "var-acct" and completes
+    When the ladder for "var-acct" is extended with "Equity A" worth 1000 on 2026-03-05
+    And a "missing" VaR run is requested for "var-acct" and completes
+    Then only dates from 2026-01-02 to 2026-03-05 have an estimate for look-back "win"
+
+  @us5
+  Scenario: Changed holdings make only that date stale
+    Given account "var-acct" holds "Equity A" with daily GBP prices from 2026-01-02 to 2026-03-06
+    And the VaR look-backs are configured as win:5
+    And a full VaR run is requested for "var-acct" and completes
+    When the market value for "Equity A" on 2026-03-04 is changed to 99999
+    And a "missing" VaR run is requested for "var-acct" and completes
+    Then the run reports 1 dates computed

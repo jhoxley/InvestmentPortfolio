@@ -283,22 +283,22 @@ recomputes. Change the config → every date recomputes.
 
 ### Tests for User Story 5 (write first, must fail) ⚠️
 
-- [ ] T043 [P] [US5] Write `tests/unit/test_var_fingerprint.py`:
+- [X] T043 [P] [US5] Write `tests/unit/test_var_fingerprint.py`:
   - the same inputs give the same hash regardless of position order;
   - a market value change in the 3rd decimal place does **not** change it (rounded to pence) but a 1p change does;
   - a change to methodology version, any `VarSettings` field, or any proxy field changes it.
-- [ ] T044 [P] [US5] Add date-selection unit tests to `tests/unit/test_var_run_service.py` for a `select_dates(mode, ladder_dates, stored_outcomes, fingerprints, ladder_to, range)` function:
+- [X] T044 [P] [US5] Add date-selection unit tests to `tests/unit/test_var_run_service.py` for a `select_dates(mode, ladder_dates, stored_outcomes, fingerprints, ladder_to, range)` function:
   - `missing` picks absent dates, mismatched fingerprints, and pending outcomes whose outcome date ≤ `ladder_to`;
   - `full` picks every date in range;
   - the range filter applies to both modes;
   - the counts `dates_missing`, `dates_stale`, `outcomes_pending_filled` and `dates_skipped` (in-range ladder dates not selected) are correct;
   - `execute` with zero dates selected never calls the observed-price client and succeeds with `dates_computed = 0` (SC-004 early exit).
-- [ ] T045 [P] [US5] Add the US5 scenarios from spec.md to `tests/features/var_calculation_runs.feature`, with steps in `tests/steps/var_calculation_runs_steps.py`. For re-pricing, rewrite one date's `market_value` in the stored ladder; for a config change, override `Settings.var.methodology_version`.
+- [X] T045 [P] [US5] Add the US5 scenarios from spec.md to `tests/features/var_calculation_runs.feature`, with steps in `tests/steps/var_calculation_runs_steps.py`. For re-pricing, rewrite one date's `market_value` in the stored ladder; for a config change, override `Settings.var.methodology_version`.
 
 ### Implementation for User Story 5
 
-- [ ] T046 [US5] Implement `app/services/var/fingerprint.py`: `config_fingerprint(var_settings, proxy_configs) -> str` and `row_fingerprint(config_fp, exposure) -> str` (canonical JSON with `sort_keys=True` → sha256 hex), per research.md §8. Set `Exposure.fingerprint` in `build_exposures` (or immediately afterwards in the run service). Makes T043 pass.
-- [ ] T047 [US5] Implement `select_dates` and use it in `VarRunService.execute`. Restrict computation and the price-fetch range to the selected dates; when nothing is selected, skip the fetch_prices, build_panel, compute and persist stages and succeed immediately (research.md §8 early exit). Record `dates_skipped` on the run. Store `row_fingerprint` on outcome and estimate rows. Record the selection counts on the run. Write `meta.json` (`methodology_version`, `config_fingerprint`, `last_successful_run_id`, `updated_at`). File: `app/services/var/var_run_service.py`. Makes T044 and T045 pass.
+- [X] T046 [US5] Implement `app/services/var/fingerprint.py`: `config_fingerprint(var_settings, proxy_configs) -> str` and `row_fingerprint(config_fp, exposure) -> str` (canonical JSON with `sort_keys=True` → sha256 hex), per research.md §8. Set `Exposure.fingerprint` in `build_exposures` (or immediately afterwards in the run service). Makes T043 pass.
+- [X] T047 [US5] Implement `select_dates` and use it in `VarRunService.execute`. Restrict computation and the price-fetch range to the selected dates; when nothing is selected, skip the fetch_prices, build_panel, compute and persist stages and succeed immediately (research.md §8 early exit). Record `dates_skipped` on the run. Store `row_fingerprint` on outcome and estimate rows. Record the selection counts on the run. Write `meta.json` (`methodology_version`, `config_fingerprint`, `last_successful_run_id`, `updated_at`). File: `app/services/var/var_run_service.py`. Makes T044 and T045 pass.
 
 **Checkpoint**: A `missing` run is incremental and a no-op when nothing has changed.
 

@@ -8,6 +8,7 @@ first time a long price history must be fetched -- proceeds in the background.
 
 import threading
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,7 @@ from app.models.var import (
     RunWarning,
     RunWarningKind,
     VarRun,
+    VarRunMode,
     VarRunRequest,
 )
 from app.repositories.identifier_mapping_repository import IdentifierMappingRepository
@@ -45,6 +47,7 @@ from app.services.accounts_service import AccountsService
 from app.services.daily_portfolio_return import compute_daily_portfolio_return
 from app.services.var.engine import estimate, hypothetical_pnl
 from app.services.var.exposures import build_exposures, build_proxy_configs
+from app.services.var.fingerprint import config_fingerprint, row_fingerprint
 from app.services.var.return_panel import build_return_panel
 from app.services.var.run_scheduler import RunScheduler
 
@@ -57,6 +60,83 @@ _ATTRIBUTE_LABEL = "risk/var"
 _ACTIVE_STATUSES = {"queued", "running"}
 
 _create_run_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class DateSelection:
+    """The outcome of `select_dates()`: which dates to (re)compute, and why.
+
+    Attributes:
+        dates: The dates selected for computation, in input order.
+        dates_missing: In-range dates with no stored fingerprint at all.
+        dates_stale: In-range dates whose stored fingerprint no longer matches.
+        outcomes_pending_filled: In-range dates that were current and not stale, but
+            whose stored outcome was pending and has now become resolvable (the ladder
+            has caught up to their outcome date).
+        dates_skipped: In-range dates not selected (current, with no resolvable pending
+            outcome).
+    """
+
+    dates: list[date]
+    dates_missing: int = 0
+    dates_stale: int = 0
+    outcomes_pending_filled: int = 0
+    dates_skipped: int = field(default=0)
+
+
+def select_dates(
+    mode: VarRunMode,
+    in_range_dates: list[date],
+    stored_fingerprints: dict[date, str],
+    stored_pending: set[date],
+    current_fingerprints: dict[date, str],
+    ladder_to: date,
+) -> DateSelection:
+    """Choose which in-range dates a run must (re)compute.
+
+    Args:
+        mode: "full" selects every in-range date; "missing" selects only what has
+            changed or become resolvable.
+        in_range_dates: Ladder dates already filtered to the run's requested range.
+        stored_fingerprints: Date to the fingerprint of its currently stored estimate,
+            for dates that have ever been computed.
+        stored_pending: Dates whose stored outcome is still "pending".
+        current_fingerprints: Date to the fingerprint freshly computed from today's
+            configuration and holdings, for every date in `in_range_dates`.
+        ladder_to: The ladder's last recorded date -- a pending outcome becomes
+            resolvable once its outcome date (the next business day) is on or before
+            this date.
+
+    Returns:
+        The DateSelection.
+    """
+    if mode == "full":
+        return DateSelection(dates=list(in_range_dates))
+
+    selected: list[date] = []
+    missing = stale = pending_filled = 0
+    for d in in_range_dates:
+        if d not in stored_fingerprints:
+            selected.append(d)
+            missing += 1
+            continue
+        if stored_fingerprints[d] != current_fingerprints.get(d):
+            selected.append(d)
+            stale += 1
+            continue
+        if d in stored_pending:
+            outcome_date = pd.bdate_range(start=d, periods=2)[-1].date()
+            if outcome_date <= ladder_to:
+                selected.append(d)
+                pending_filled += 1
+
+    return DateSelection(
+        dates=selected,
+        dates_missing=missing,
+        dates_stale=stale,
+        outcomes_pending_filled=pending_filled,
+        dates_skipped=len(in_range_dates) - len(selected),
+    )
 
 
 class VarRunService:
@@ -240,7 +320,7 @@ class VarRunService:
         meta = self._ladder_repo.read_meta(account_name)
         resolved_start = max(run.requested_start or meta.from_date, meta.from_date)
         resolved_end = min(run.requested_end or meta.to_date, meta.to_date)
-        dates: list[date] = (
+        in_range_dates: list[date] = (
             [d.date() for d in pd.bdate_range(start=resolved_start, end=resolved_end)]
             if resolved_start <= resolved_end
             else []
@@ -248,6 +328,49 @@ class VarRunService:
 
         ladder_df = self._ladder_repo.read_full_df(account_name)
         exposures = build_exposures(ladder_df, self._mapping_repo.lookup)
+
+        all_proxy_configs = build_proxy_configs(self._mapping_repo.entries())
+        config_fp = config_fingerprint(self._settings, all_proxy_configs)
+        current_fingerprints = {d: row_fingerprint(config_fp, exposures[d]) for d in in_range_dates}
+
+        stored_outcomes = self._var_repo.read_outcomes(account_name)
+        stored_fingerprints: dict[date, str] = {}
+        stored_pending: set[date] = set()
+        for stored in stored_outcomes.itertuples():
+            stored_date = stored.date.date()
+            stored_fingerprints[stored_date] = stored.row_fingerprint
+            if stored.outcome_status == "pending":
+                stored_pending.add(stored_date)
+
+        selection = select_dates(
+            run.mode,
+            in_range_dates,
+            stored_fingerprints,
+            stored_pending,
+            current_fingerprints,
+            meta.to_date,
+        )
+        dates = selection.dates
+
+        base_update = {
+            "resolved_start": resolved_start if in_range_dates else None,
+            "resolved_end": resolved_end if in_range_dates else None,
+            "dates_selected": len(dates),
+            "dates_missing": selection.dates_missing,
+            "dates_stale": selection.dates_stale,
+            "outcomes_pending_filled": selection.outcomes_pending_filled,
+            "dates_skipped": selection.dates_skipped,
+        }
+        if not dates:
+            log.info("var_run_stage", stage="no_dates_selected")
+            return run.model_copy(
+                update={
+                    **base_update,
+                    "status": "succeeded",
+                    "finished_at": datetime.now(UTC),
+                    "dates_computed": 0,
+                }
+            )
 
         sub_accounts_by_identifier: dict[str, set[str]] = {}
         for d in dates:
@@ -257,7 +380,6 @@ class VarRunService:
                 )
         needed_identifiers = sorted(sub_accounts_by_identifier)
 
-        all_proxy_configs = build_proxy_configs(self._mapping_repo.entries())
         proxy_configs = {
             ident: cfg for ident, cfg in all_proxy_configs.items() if ident in needed_identifiers
         }
@@ -268,12 +390,9 @@ class VarRunService:
         confidences = tuple(self._settings.confidence_levels_bp)
         max_lookback = max(lookbacks.values()) if lookbacks else 0
 
-        if dates:
-            fetch_start = pd.bdate_range(end=min(dates), periods=max_lookback + 6)[0].date()
-            last_outcome_date = pd.bdate_range(start=max(dates), periods=2)[-1].date()
-            fetch_end = min(last_outcome_date, meta.to_date)
-        else:
-            fetch_start = fetch_end = meta.from_date
+        fetch_start = pd.bdate_range(end=min(dates), periods=max_lookback + 6)[0].date()
+        last_outcome_date = pd.bdate_range(start=max(dates), periods=2)[-1].date()
+        fetch_end = min(last_outcome_date, meta.to_date)
 
         log.info(
             "var_run_stage",
@@ -333,7 +452,7 @@ class VarRunService:
                     "rescaled_mv_pct": result.rescaled_mv_pct,
                     "quality": result.quality,
                     "quality_reason": result.quality_reason,
-                    "row_fingerprint": "",
+                    "row_fingerprint": current_fingerprints[d],
                     "methodology_version": self._settings.methodology_version,
                     "run_id": run.run_id,
                     "computed_at": computed_at,
@@ -396,7 +515,7 @@ class VarRunService:
                     "risky_value_gbp": exposure.risky_value,
                     "hypothetical_pnl_gbp": hyp_pnl,
                     "ladder_pnl_gbp": ladder_pnl,
-                    "row_fingerprint": "",
+                    "row_fingerprint": current_fingerprints[d],
                     "run_id": run.run_id,
                     "computed_at": computed_at,
                 }
@@ -415,7 +534,7 @@ class VarRunService:
             meta=VarMeta(
                 account_name=account_name,
                 methodology_version=self._settings.methodology_version,
-                config_fingerprint="",
+                config_fingerprint=config_fp,
                 last_successful_run_id=run.run_id,
                 updated_at=computed_at,
             ),
@@ -423,11 +542,9 @@ class VarRunService:
 
         return run.model_copy(
             update={
+                **base_update,
                 "status": "succeeded",
                 "finished_at": datetime.now(UTC),
-                "resolved_start": resolved_start if dates else None,
-                "resolved_end": resolved_end if dates else None,
-                "dates_selected": len(dates),
                 "dates_computed": len(dates),
                 "warnings": warnings,
             }

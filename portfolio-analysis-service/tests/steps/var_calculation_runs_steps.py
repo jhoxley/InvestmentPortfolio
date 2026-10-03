@@ -292,6 +292,7 @@ def configure_missing_day(
     # 100.0 price for every business day, so it is always observed.
 
 
+@given(parsers.parse('a full VaR run is requested for "{account}" and completes'))
 @when(parsers.parse('a full VaR run is requested for "{account}" and completes'))
 def request_full_run(account: str, app_client: TestClient, run_context: dict[str, Any]) -> None:
     """POST a full run and (the test scheduler being inline) read back its final status."""
@@ -655,3 +656,44 @@ def extend_ladder(
         update={"to_date": date.fromisoformat(as_of), "row_count": len(combined)}
     )
     ladder_repo.write(account, combined, updated_meta)
+
+
+# --- User Story 5: incremental (missing) runs -----------------------------------
+
+
+@when(parsers.parse('a "{mode}" VaR run is requested for "{account}" and completes'))
+def request_mode_run(
+    mode: str, account: str, app_client: TestClient, run_context: dict[str, Any]
+) -> None:
+    """POST a run with an explicit mode and read back its final status."""
+    response = app_client.post(f"/v1/accounts/{account}/risk/var/runs", json={"mode": mode})
+    assert response.status_code == 202, response.text
+    run_id = response.json()["run_id"]
+    final = app_client.get(f"/v1/accounts/{account}/risk/var/runs/{run_id}")
+    run_context["account"] = account
+    run_context["run"] = final.json()
+
+
+@then(parsers.parse("the run reports {expected:d} dates computed"))
+def check_dates_computed(expected: int, run_context: dict[str, Any]) -> None:
+    """Assert the run's dates_computed count."""
+    assert run_context["run"]["dates_computed"] == expected
+
+
+@when(parsers.parse('the market value for "{sub_a}" on {as_of} is changed to {new_value:d}'))
+def reprice_one_date(
+    sub_a: str,
+    as_of: str,
+    new_value: int,
+    ladder_repo: LadderRepository,
+    run_context: dict[str, Any],
+) -> None:
+    """Rewrite one date's market_value directly in the stored ladder (simulating a reprice)."""
+    account = run_context["account"]
+    df = ladder_repo.read_full_df(account)
+    target = (df["sub_account"] == sub_a) & (
+        pd.to_datetime(df["date"]).dt.date == date.fromisoformat(as_of)
+    )
+    df.loc[target, "market_value"] = float(new_value)
+    meta = ladder_repo.read_meta(account)
+    ladder_repo.write(account, df, meta)

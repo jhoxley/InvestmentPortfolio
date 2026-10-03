@@ -423,3 +423,157 @@ class TestInstrumentWarnings:
         assert any(
             w.kind == "proxy_unresolved" and w.identifier == "Missing Proxy" for w in final.warnings
         )
+
+
+class TestSelectDates:
+    """select_dates() picks missing/stale/pending-resolvable dates for 'missing' mode."""
+
+    def test_full_mode_selects_every_in_range_date(self) -> None:
+        """mode='full' selects every date in range regardless of stored state."""
+        from app.services.var.var_run_service import select_dates
+
+        dates = [date(2026, 3, 2), date(2026, 3, 3)]
+        selection = select_dates(
+            "full",
+            dates,
+            stored_fingerprints={},
+            stored_pending=set(),
+            current_fingerprints={},
+            ladder_to=date(2026, 3, 3),
+        )
+        assert selection.dates == dates
+        assert selection.dates_skipped == 0
+
+    def test_missing_mode_selects_absent_dates(self) -> None:
+        """A date with no stored fingerprint at all is selected as 'missing'."""
+        from app.services.var.var_run_service import select_dates
+
+        dates = [date(2026, 3, 2), date(2026, 3, 3)]
+        selection = select_dates(
+            "missing",
+            dates,
+            stored_fingerprints={date(2026, 3, 2): "fp1"},
+            stored_pending=set(),
+            current_fingerprints={date(2026, 3, 2): "fp1", date(2026, 3, 3): "fp2"},
+            ladder_to=date(2026, 3, 3),
+        )
+        assert selection.dates == [date(2026, 3, 3)]
+        assert selection.dates_missing == 1
+        assert selection.dates_stale == 0
+        assert selection.dates_skipped == 1
+
+    def test_missing_mode_selects_stale_dates(self) -> None:
+        """A date whose stored fingerprint no longer matches is selected as 'stale'."""
+        from app.services.var.var_run_service import select_dates
+
+        dates = [date(2026, 3, 2)]
+        selection = select_dates(
+            "missing",
+            dates,
+            stored_fingerprints={date(2026, 3, 2): "old-fp"},
+            stored_pending=set(),
+            current_fingerprints={date(2026, 3, 2): "new-fp"},
+            ladder_to=date(2026, 3, 2),
+        )
+        assert selection.dates == [date(2026, 3, 2)]
+        assert selection.dates_stale == 1
+        assert selection.dates_missing == 0
+
+    def test_missing_mode_leaves_current_dates_unselected(self) -> None:
+        """A date with a matching stored fingerprint and no pending outcome is skipped."""
+        from app.services.var.var_run_service import select_dates
+
+        dates = [date(2026, 3, 2)]
+        selection = select_dates(
+            "missing",
+            dates,
+            stored_fingerprints={date(2026, 3, 2): "fp1"},
+            stored_pending=set(),
+            current_fingerprints={date(2026, 3, 2): "fp1"},
+            ladder_to=date(2026, 3, 3),
+        )
+        assert selection.dates == []
+        assert selection.dates_skipped == 1
+
+    def test_missing_mode_fills_pending_outcome_once_resolvable(self) -> None:
+        """A pending outcome is re-selected once the ladder extends past its outcome date."""
+        from app.services.var.var_run_service import select_dates
+
+        d = date(2026, 3, 2)  # outcome date 2026-03-03
+        selection = select_dates(
+            "missing",
+            [d],
+            stored_fingerprints={d: "fp1"},
+            stored_pending={d},
+            current_fingerprints={d: "fp1"},
+            ladder_to=date(2026, 3, 3),  # now covers the outcome date
+        )
+        assert selection.dates == [d]
+        assert selection.outcomes_pending_filled == 1
+
+    def test_missing_mode_leaves_still_pending_outcome_unselected(self) -> None:
+        """A pending outcome whose outcome date is still beyond the ladder stays unselected."""
+        from app.services.var.var_run_service import select_dates
+
+        d = date(2026, 3, 2)  # outcome date 2026-03-03
+        selection = select_dates(
+            "missing",
+            [d],
+            stored_fingerprints={d: "fp1"},
+            stored_pending={d},
+            current_fingerprints={d: "fp1"},
+            ladder_to=date(2026, 3, 2),  # still doesn't cover the outcome date
+        )
+        assert selection.dates == []
+        assert selection.outcomes_pending_filled == 0
+
+    def test_range_filter_applies_to_both_modes(self) -> None:
+        """in_range_dates already reflects the caller's range filter; both modes respect it."""
+        from app.services.var.var_run_service import select_dates
+
+        dates = [date(2026, 3, 2)]  # caller has already excluded 2026-03-03
+        full = select_dates(
+            "full",
+            dates,
+            stored_fingerprints={},
+            stored_pending=set(),
+            current_fingerprints={},
+            ladder_to=date(2026, 3, 3),
+        )
+        missing = select_dates(
+            "missing",
+            dates,
+            stored_fingerprints={},
+            stored_pending=set(),
+            current_fingerprints={},
+            ladder_to=date(2026, 3, 3),
+        )
+        assert full.dates == [date(2026, 3, 2)]
+        assert missing.dates == [date(2026, 3, 2)]
+
+
+class TestExecuteEarlyExit:
+    """execute() with zero selected dates skips fetching and succeeds immediately."""
+
+    def test_zero_dates_never_calls_observed_client(
+        self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
+    ) -> None:
+        """A 'missing' run with nothing changed makes no observed-price calls."""
+        ladder_repo, _, var_repo = repos
+        _write_ladder(ladder_repo, "acct")
+        client = _StubObservedClient()
+        service = _service(repos, client, InlineRunScheduler())
+
+        first = service.create_run("acct", VarRunRequest(mode="full"), date(2026, 3, 3), "corr-1")
+        assert var_repo.read_run("acct", first.run_id).status == "succeeded"  # type: ignore[union-attr]
+        client.calls.clear()
+
+        second = service.create_run(
+            "acct", VarRunRequest(mode="missing"), date(2026, 3, 3), "corr-2"
+        )
+
+        final = var_repo.read_run("acct", second.run_id)
+        assert final is not None
+        assert final.status == "succeeded"
+        assert final.dates_computed == 0
+        assert client.calls == []
