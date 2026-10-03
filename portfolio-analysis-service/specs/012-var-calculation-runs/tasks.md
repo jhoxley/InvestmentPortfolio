@@ -60,37 +60,37 @@ every story uses.
 
 ### Tests (write first, must fail)
 
-- [ ] T007 [P] Write `tests/unit/test_market_data_client_observed.py` using `httpx.MockTransport`. Cover:
+- [X] T007 [P] Write `tests/unit/test_market_data_client_observed.py` using `httpx.MockTransport`. Cover:
   - `get_observed_price_history()` sends `fill=none` and `currency=GBP` and parses `prices`, `first_observed_date` and `last_observed_date`;
   - a 200 body **without** `first_observed_date` raises `ObservedHistoryUnsupportedError`;
   - a 404 raises `InstrumentNotFoundError`;
   - a 500, a timeout and a connection error raise `MarketDataServiceError`.
-- [ ] T008 [P] Write `tests/unit/test_var_repository.py` against a `tmp_path`. Cover:
+- [X] T008 [P] Write `tests/unit/test_var_repository.py` against a `tmp_path`. Cover:
   - (a) `write_run`/`read_run`/`list_runs` (newest first by `requested_at`) round-trip `VarRun` JSON under `data/{a}/var/runs/{run_id}.json`;
   - (b) `read_estimates`/`read_outcomes`/`read_instruments` return empty DataFrames with the data-model.md columns when no files exist;
   - (c) `commit(account, estimates_upsert, outcomes_upsert, instruments, meta)` replaces all rows for dates present in the upsert and keeps the others, sorted by (date, lookback_days) and by date;
   - (d) if writing any temp file raises (monkeypatch `DataFrame.to_csv` to fail on the third file), **no** existing file changes and no `*.tmp` files remain;
   - (e) `read_meta` returns None before the first commit;
   - (f) `list_accounts_with_runs()` enumerates `data/*/var/runs`.
-- [ ] T009 [P] Write `tests/unit/test_var_run_scheduler.py`:
+- [X] T009 [P] Write `tests/unit/test_var_run_scheduler.py`:
   - `InlineRunScheduler.submit` runs the job synchronously;
   - `ThreadRunScheduler` runs two submitted jobs strictly one after the other (record start/end times; the intervals don't overlap) and in submission order;
   - `shutdown()` waits for in-flight work.
 
 ### Implementation
 
-- [ ] T010 Add the `ObservedPriceClient` Protocol and `HttpMarketDataClient.get_observed_price_history()` in `app/clients/market_data_client.py`, per contracts/market-data-observed-history.md (same logging and timing style as `get_price_history`), making T007 pass. Leave the existing `MarketDataClient` protocol and `get_price_history` unchanged.
-- [ ] T011 Extend `FakeMarketDataService` in `tests/conftest.py`. When a request carries `fill=none`, return only the configured *observed* points within the range plus `first_observed_date`/`last_observed_date` computed from **all** configured points for the identifier. Add `configure_observed_prices(identifier, points)`, `configure_unsupported_observed_history()` (omits the observed-date fields), and `configure_not_found(identifier)` (404). Requests without `fill` must keep today's behaviour exactly; run the full existing suite to confirm.
-- [ ] T012 Implement `app/services/var/run_scheduler.py`:
+- [X] T010 Add the `ObservedPriceClient` Protocol and `HttpMarketDataClient.get_observed_price_history()` in `app/clients/market_data_client.py`, per contracts/market-data-observed-history.md (same logging and timing style as `get_price_history`), making T007 pass. Leave the existing `MarketDataClient` protocol and `get_price_history` unchanged.
+- [X] T011 Extend `FakeMarketDataService` in `tests/conftest.py`. When a request carries `fill=none`, return only the configured *observed* points within the range plus `first_observed_date`/`last_observed_date` computed from **all** configured points for the identifier. Add `configure_observed_prices(identifier, points)`, `configure_unsupported_observed_history()` (omits the observed-date fields), and `configure_not_found(identifier)` (404). Requests without `fill` must keep today's behaviour exactly; run the full existing suite to confirm.
+- [X] T012 Implement `app/services/var/run_scheduler.py`:
   - `RunScheduler` Protocol (`submit(job: Callable[[], None]) -> None`, `shutdown() -> None`);
   - `ThreadRunScheduler`, wrapping a lazily created `ThreadPoolExecutor(max_workers=1, thread_name_prefix="var-run")`, which logs and swallows exceptions escaping a job (jobs record their own failure);
   - `InlineRunScheduler`;
   - module-level `get_default_scheduler()` returning a process singleton.
   Makes T009 pass.
-- [ ] T013 Implement `VarRepository` in `app/repositories/var_repository.py` with the CSV columns from data-model.md. The staged all-or-none commit (research.md §5) writes every new file to `tempfile.mkstemp(dir=var_dir, suffix=".tmp")` first, then `os.replace`s them in turn with `meta.json` last, deleting temps on any failure. Run JSON writes are also temp-file + replace. Makes T008 pass.
-- [ ] T014 Add an `entries() -> list[IdentifierMappingEntry]` method to `IdentifierMappingRepository` in `app/repositories/identifier_mapping_repository.py` (loads lazily as `lookup` does), plus a unit test in `tests/unit/test_var_settings.py` or a new `tests/unit/test_identifier_mapping_repository_entries.py`. Add the same method to `FakeIdentifierMappingRepository` in `tests/conftest.py`, and let `set_entry(...)` accept the optional `var_proxy`, `var_proxy_mode` and `var_proxy_scale` keyword arguments.
-- [ ] T015 Add three dependency providers to `app/api/dependencies.py`: `get_var_repository`, `get_run_scheduler` (returns `get_default_scheduler()`), and `get_observed_price_client(settings) -> ObservedPriceClient` (returns an `HttpMarketDataClient` built from `settings.market_data_service`, mirroring `_get_market_data_client` in `app/api/ladder.py`). In `tests/conftest.py` `app_client`, override `get_run_scheduler` with an `InlineRunScheduler` and `get_observed_price_client` with `fake_market_data_service.client()`.
-- [ ] T016 Create `app/api/risk_var.py` with `router = APIRouter(prefix="/v1", tags=["Risk"])` and no routes yet. Register it in `app/main.py` after `risk.router`. Add RFC 7807 handlers in `app/main.py`:
+- [X] T013 Implement `VarRepository` in `app/repositories/var_repository.py` with the CSV columns from data-model.md. The staged all-or-none commit (research.md §5) writes every new file to `tempfile.mkstemp(dir=var_dir, suffix=".tmp")` first, then `os.replace`s them in turn with `meta.json` last, deleting temps on any failure. Run JSON writes are also temp-file + replace. Makes T008 pass.
+- [X] T014 Add an `entries() -> list[IdentifierMappingEntry]` method to `IdentifierMappingRepository` in `app/repositories/identifier_mapping_repository.py` (loads lazily as `lookup` does), plus a unit test in `tests/unit/test_var_settings.py` or a new `tests/unit/test_identifier_mapping_repository_entries.py`. Add the same method to `FakeIdentifierMappingRepository` in `tests/conftest.py`, and let `set_entry(...)` accept the optional `var_proxy`, `var_proxy_mode` and `var_proxy_scale` keyword arguments.
+- [X] T015 Add three dependency providers to `app/api/dependencies.py`: `get_var_repository`, `get_run_scheduler` (returns `get_default_scheduler()`), and `get_observed_price_client(settings) -> ObservedPriceClient` (returns an `HttpMarketDataClient` built from `settings.market_data_service`, mirroring `_get_market_data_client` in `app/api/ladder.py`). In `tests/conftest.py` `app_client`, override `get_run_scheduler` with an `InlineRunScheduler` and `get_observed_price_client` with `fake_market_data_service.client()`.
+- [X] T016 Create `app/api/risk_var.py` with `router = APIRouter(prefix="/v1", tags=["Risk"])` and no routes yet. Register it in `app/main.py` after `risk.router`. Add RFC 7807 handlers in `app/main.py`:
   - `VarRunInProgressError` → 409 `var-run-in-progress`, with `_links.active_run` added to the problem body;
   - `VarRunNotFoundError` → 404 `var-run-not-found`;
   - `InvalidVarRunRequestError` → 422 `invalid-var-run-request`.

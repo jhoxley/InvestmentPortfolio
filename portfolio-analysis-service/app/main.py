@@ -19,6 +19,7 @@ from app.api import (
     position_timeseries,
     projection,
     risk,
+    risk_var,
     timeseries,
 )
 from app.config import get_settings
@@ -31,6 +32,7 @@ from app.exceptions import (
     InvalidAccountNameError,
     InvalidDateRangeError,
     InvalidProjectionRangeError,
+    InvalidVarRunRequestError,
     MarketDataServiceError,
     MergeNotSupportedError,
     MissingRequiredSourceError,
@@ -40,6 +42,8 @@ from app.exceptions import (
     SchemaValidationError,
     UnsupportedAttributeError,
     UnsupportedPeriodicityError,
+    VarRunInProgressError,
+    VarRunNotFoundError,
 )
 from app.logging_config import setup_logging
 from app.models.ladder import ProblemDetail
@@ -80,6 +84,7 @@ app.include_router(position_timeseries.router)
 app.include_router(performance.router)
 app.include_router(projection.router)
 app.include_router(risk.router)
+app.include_router(risk_var.router)
 app.include_router(health.router)
 
 
@@ -146,6 +151,46 @@ def _problem(
         content=problem.model_dump(),
         media_type="application/problem+json",
     )
+
+
+def _var_problem(
+    request: Request,
+    status: int,
+    type_slug: str,
+    title: str,
+    detail: str,
+    extra: dict[str, object] | None = None,
+) -> JSONResponse:
+    """Build an RFC 7807 problem response carrying a correlation_id (FR-033).
+
+    Used by this feature's three new error types in place of `_problem()`. The
+    correlation ID is read from the structlog contextvars the request-logging
+    middleware binds per request, so it matches the id recorded against the request's
+    own log lines and, for a run that later fails, the id stored on the run itself.
+
+    Args:
+        request: The originating request (used for the instance field).
+        status: HTTP status code.
+        type_slug: Slug appended to the base error URI.
+        title: Short human-readable summary.
+        detail: Full explanation of the error.
+        extra: Additional fields to merge into the response body (e.g. `_links`).
+
+    Returns:
+        JSONResponse with application/problem+json content type.
+    """
+    correlation_id = structlog.contextvars.get_contextvars().get("correlation_id", "")
+    body: dict[str, object] = {
+        "type": f"https://portfolio-analysis/errors/{type_slug}",
+        "title": title,
+        "status": status,
+        "detail": detail,
+        "instance": str(request.url.path),
+        "correlation_id": correlation_id,
+    }
+    if extra:
+        body.update(extra)
+    return JSONResponse(status_code=status, content=body, media_type="application/problem+json")
 
 
 @app.exception_handler(InvalidAccountNameError)
@@ -466,4 +511,71 @@ async def market_data_service_error_handler(
         "market-data-service-unavailable",
         "Market Data Service Unavailable",
         exc.message,
+    )
+
+
+@app.exception_handler(VarRunInProgressError)
+async def var_run_in_progress_handler(request: Request, exc: VarRunInProgressError) -> JSONResponse:
+    """Handle VarRunInProgressError with a 409 response linking to the active run.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 409 Conflict response with correlation_id and _links.active_run.
+    """
+    logger.warning(
+        "var_run_in_progress",
+        account_name=exc.account_name,
+        active_run_id=exc.active_run_id,
+        detail=exc.message,
+    )
+    return _var_problem(
+        request,
+        409,
+        "var-run-in-progress",
+        "VaR Run In Progress",
+        exc.message,
+        extra={
+            "_links": {
+                "active_run": f"/v1/accounts/{exc.account_name}/risk/var/runs/{exc.active_run_id}"
+            }
+        },
+    )
+
+
+@app.exception_handler(VarRunNotFoundError)
+async def var_run_not_found_handler(request: Request, exc: VarRunNotFoundError) -> JSONResponse:
+    """Handle VarRunNotFoundError with a 404 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 404 Not Found response with correlation_id.
+    """
+    logger.info(
+        "var_run_not_found", account_name=exc.account_name, run_id=exc.run_id, detail=exc.message
+    )
+    return _var_problem(request, 404, "var-run-not-found", "VaR Run Not Found", exc.message)
+
+
+@app.exception_handler(InvalidVarRunRequestError)
+async def invalid_var_run_request_handler(
+    request: Request, exc: InvalidVarRunRequestError
+) -> JSONResponse:
+    """Handle InvalidVarRunRequestError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response with correlation_id.
+    """
+    logger.warning("invalid_var_run_request", fields=exc.fields, detail=exc.message)
+    return _var_problem(
+        request, 422, "invalid-var-run-request", "Invalid VaR Run Request", exc.message
     )
