@@ -63,3 +63,23 @@ Feature: Historical-simulation VaR calculation runs
     Given account "var-acct" has a VaR run record stuck in "running" status
     When the service recovers interrupted runs
     Then that run's status is "failed" with reason "interrupted"
+
+  @us3
+  Scenario: A configured proxy fills a short-history instrument's missing scenario days
+    Given account "var-acct" holds "Short History Fund" worth 50000 and "Benchmark" worth 50000 on 2026-03-02
+    And the VaR look-backs are configured as win:5
+    And "Short History Fund" has no price history at all
+    And "Short History Fund" is configured with proxy "Benchmark", mode "fill_gaps" and scale 1.0
+    And "Benchmark" has daily GBP prices covering the 5-day window ending 2026-03-02
+    When a full VaR run is requested for "var-acct" and completes
+    Then the stored proxied share for 2026-03-02 at look-back "win" is 50 percent
+
+  @us3
+  Scenario: Mode "always" uses the proxy for every scenario day
+    Given account "var-acct" holds only "Pension Fund" worth 100000 on 2026-03-02
+    And the VaR look-backs are configured as win:5
+    And "Pension Fund" has daily GBP prices covering the 5-day window ending 2026-03-02
+    And "Pension Fund" is configured with proxy "Balanced Proxy", mode "always" and scale 1.0
+    And "Balanced Proxy" has daily GBP prices covering the 5-day window ending 2026-03-02
+    When a full VaR run is requested for "var-acct" and completes
+    Then the stored proxied share for 2026-03-02 at look-back "win" is 100 percent

@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from app.models.market_data import IdentifierMappingEntry
-from app.services.var.exposures import build_exposures
+from app.services.var.exposures import build_exposures, build_proxy_configs
 
 
 def _lookup(
@@ -199,3 +199,36 @@ class TestBuildExposures:
 
         assert set(exposures.keys()) == {date(2026, 3, 2), date(2026, 3, 3)}
         assert exposures[date(2026, 3, 3)].risky_value == pytest.approx(110.0)
+
+
+class TestBuildProxyConfigs:
+    """build_proxy_configs() maps held identifiers to their configured VaR proxy."""
+
+    def test_entry_without_proxy_is_omitted(self) -> None:
+        """An entry with no var_proxy contributes nothing to the map."""
+        configs = build_proxy_configs([IdentifierMappingEntry(name="Equity A", ticker="EQA.L")])
+        assert configs == {}
+
+    def test_entry_with_proxy_is_keyed_by_held_identifier(self) -> None:
+        """An entry's var_proxy/mode/scale are keyed by its own resolved identifier."""
+        configs = build_proxy_configs(
+            [
+                IdentifierMappingEntry(
+                    name="Scottish Widows Pension",
+                    isin="SWPENSION",
+                    var_proxy="GB00B08HD927",
+                    var_proxy_mode="always",
+                    var_proxy_scale=1.5,
+                )
+            ]
+        )
+        assert configs["SWPENSION"].proxy == "GB00B08HD927"
+        assert configs["SWPENSION"].mode == "always"
+        assert configs["SWPENSION"].scale == pytest.approx(1.5)
+
+    def test_entry_with_no_resolvable_identifier_is_omitted(self) -> None:
+        """An entry with a proxy but no ticker/isin of its own cannot be keyed, so is omitted."""
+        configs = build_proxy_configs(
+            [IdentifierMappingEntry(name="Mystery Fund", var_proxy="GB00B08HD927")]
+        )
+        assert configs == {}

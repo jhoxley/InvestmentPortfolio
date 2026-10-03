@@ -7,6 +7,7 @@ is the seam a later Incremental VaR feature needs.
 """
 
 from dataclasses import dataclass, field
+from datetime import date
 from fractions import Fraction
 from typing import Literal, NamedTuple
 
@@ -14,7 +15,7 @@ import numpy as np
 import structlog
 
 from app.config import VarSettings
-from app.services.var.exposures import Exposure
+from app.services.var.exposures import Exposure, ProxyConfig
 from app.services.var.return_panel import ReturnPanel
 
 logger = structlog.get_logger(__name__)
@@ -110,8 +111,8 @@ class EstimateResult:
             (and by being outside the available grid).
         scenario_pnls: The retained scenario days' PnL (GBP), in window order.
         actual_mv_pct: Share of risky market value never needing proxy or rescale.
-        proxied_mv_pct: Share of risky market value using a proxy on any retained day
-            (always 0.0 until the proxy treatment, feature 012 User Story 3, is added).
+        proxied_mv_pct: Share of risky market value using a proxy (and not also rescaled)
+            on any retained day.
         rescaled_mv_pct: Share of risky market value rescaled on any retained day.
         quality: "ok" / "degraded" / "insufficient" per the configured thresholds.
         quality_reason: Empty unless degraded or insufficient.
@@ -146,6 +147,85 @@ def _window_slice(panel: ReturnPanel, as_of_row: int, lookback_days: int) -> tup
     return start, end
 
 
+_ACTUAL, _PROXY, _RESCALED = 0, 1, 2
+
+
+def _position_returns_and_provenance(
+    identifier: str,
+    panel: ReturnPanel,
+    start: int,
+    end: int,
+    window_grid: tuple[date, ...],
+    proxy_configs: dict[str, ProxyConfig],
+    settings: VarSettings,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build one position's window returns, source-observed mask, and provenance codes.
+
+    Args:
+        identifier: The position's market-data identifier.
+        panel: The shared return grid.
+        start: Window start row (inclusive) in panel.grid.
+        end: Window end row (exclusive) in panel.grid.
+        window_grid: panel.grid[start:end], passed in to avoid re-slicing per position.
+        proxy_configs: Held identifier to its configured ProxyConfig, if any.
+        settings: VaR configuration (sparse_density_threshold).
+
+    Returns:
+        (returns, source_observed, provenance): each a length-`window_len` array.
+        provenance is `_ACTUAL` or `_PROXY` here; a cell that is still NaN after this
+        (own return missing, and proxy missing or absent) is marked `_RESCALED` by the
+        caller's rescale pass once it fills it.
+    """
+    window_len = end - start
+    own_col = panel.identifiers.index(identifier) if identifier in panel.identifiers else None
+    own_returns = (
+        panel.returns[start:end, own_col] if own_col is not None else np.full(window_len, np.nan)
+    )
+    own_observed = (
+        panel.observed[start:end, own_col]
+        if own_col is not None
+        else np.zeros(window_len, dtype=bool)
+    )
+
+    config = proxy_configs.get(identifier)
+    if config is None:
+        provenance = np.full(window_len, _ACTUAL, dtype=int)
+        return own_returns, own_observed, provenance
+
+    proxy_col = panel.identifiers.index(config.proxy) if config.proxy in panel.identifiers else None
+    proxy_returns = (
+        panel.returns[start:end, proxy_col] * config.scale
+        if proxy_col is not None
+        else np.full(window_len, np.nan)
+    )
+    proxy_observed = (
+        panel.observed[start:end, proxy_col]
+        if proxy_col is not None
+        else np.zeros(window_len, dtype=bool)
+    )
+
+    first_observed = panel.first_observed.get(identifier)
+    if first_observed is None:
+        sparse = True
+    else:
+        eligible = np.array([d >= first_observed for d in window_grid])
+        eligible_count = int(eligible.sum())
+        if eligible_count == 0:
+            sparse = True
+        else:
+            density = float((own_observed & eligible).sum()) / eligible_count
+            sparse = density < settings.sparse_density_threshold
+
+    if config.mode == "always" or sparse:
+        return proxy_returns, proxy_observed, np.full(window_len, _PROXY, dtype=int)
+
+    own_missing = np.isnan(own_returns)
+    returns = np.where(own_missing, proxy_returns, own_returns)
+    source_observed = np.where(own_missing, proxy_observed, own_observed)
+    provenance = np.where(own_missing, _PROXY, _ACTUAL)
+    return returns, source_observed, provenance
+
+
 def estimate(
     exposure: Exposure,
     panel: ReturnPanel,
@@ -153,6 +233,7 @@ def estimate(
     lookback_days: int,
     confidences_bp: tuple[int, ...],
     settings: VarSettings,
+    proxy_configs: dict[str, ProxyConfig] | None = None,
 ) -> EstimateResult:
     """Compute one historical-simulation VaR/ES estimate for one date and look-back.
 
@@ -163,35 +244,36 @@ def estimate(
         lookback_days: The look-back window length in business days.
         confidences_bp: Confidence levels to compute, in basis points of probability.
         settings: VaR configuration (exclusion/sparsity/outlier/quality thresholds).
+        proxy_configs: Held identifier to its configured VaR proxy, if any (FR-009/010).
 
     Returns:
         The populated EstimateResult.
     """
+    proxy_configs = proxy_configs or {}
     start, end = _window_slice(panel, as_of_row, lookback_days)
     window_len = end - start
+    window_grid = panel.grid[start:end]
     excluded_scenarios = lookback_days - window_len
 
     values = np.array([p.market_value for p in exposure.positions], dtype=float)
-    columns = [
-        panel.identifiers.index(p.identifier) if p.identifier in panel.identifiers else None
-        for p in exposure.positions
-    ]
-
     n_positions = len(exposure.positions)
     returns = np.full((window_len, n_positions), np.nan, dtype=float)
-    own_observed = np.zeros((window_len, n_positions), dtype=bool)
-    for i, col in enumerate(columns):
-        if col is not None:
-            returns[:, i] = panel.returns[start:end, col]
-            own_observed[:, i] = panel.observed[start:end, col]
+    source_observed = np.zeros((window_len, n_positions), dtype=bool)
+    provenance = np.full((window_len, n_positions), _ACTUAL, dtype=int)
+    for i, position in enumerate(exposure.positions):
+        pos_returns, pos_observed, pos_provenance = _position_returns_and_provenance(
+            position.identifier, panel, start, end, window_grid, proxy_configs, settings
+        )
+        returns[:, i] = pos_returns
+        source_observed[:, i] = pos_observed
+        provenance[:, i] = pos_provenance
 
     if exposure.risky_value > 0:
-        observed_share = (own_observed.astype(float) @ values) / exposure.risky_value
+        observed_share = (source_observed.astype(float) @ values) / exposure.risky_value
         included = observed_share >= settings.min_observed_share_per_scenario
     else:
         included = np.ones(window_len, dtype=bool)
 
-    was_rescaled = np.zeros(n_positions, dtype=bool)
     effective_returns = returns.copy()
     for row in range(window_len):
         if not included[row]:
@@ -200,15 +282,14 @@ def estimate(
         missing = np.isnan(row_returns)
         if not missing.any():
             continue
-        was_rescaled |= missing
+        provenance[row, missing] = _RESCALED
         present = ~missing
         if present.any():
             present_values = values[present]
             total = present_values.sum()
-            if total > 0:
-                weighted_mean = float(np.dot(row_returns[present], present_values) / total)
-            else:
-                weighted_mean = 0.0
+            weighted_mean = (
+                float(np.dot(row_returns[present], present_values) / total) if total > 0 else 0.0
+            )
             effective_returns[row, missing] = weighted_mean
         else:
             effective_returns[row, missing] = 0.0
@@ -220,11 +301,18 @@ def estimate(
     excluded_scenarios += window_len - int(included.sum())
     scenario_count = int(included.sum())
 
-    rescaled_value = float(values[was_rescaled].sum()) if n_positions > 0 else 0.0
+    if n_positions > 0 and included.any():
+        worst = provenance[included].max(axis=0)
+    else:
+        worst = np.full(n_positions, _ACTUAL, dtype=int)
+    rescaled_value = float(values[worst == _RESCALED].sum()) if n_positions > 0 else 0.0
+    proxied_value = float(values[worst == _PROXY].sum()) if n_positions > 0 else 0.0
     rescaled_mv_pct = (
         100.0 * rescaled_value / exposure.risky_value if exposure.risky_value > 0 else 0.0
     )
-    proxied_mv_pct = 0.0
+    proxied_mv_pct = (
+        100.0 * proxied_value / exposure.risky_value if exposure.risky_value > 0 else 0.0
+    )
     actual_mv_pct = (
         100.0 if exposure.risky_value <= 0 else max(0.0, 100.0 - rescaled_mv_pct - proxied_mv_pct)
     )

@@ -217,7 +217,7 @@ the pre-inception scenario returns equal 1.5 × the proxy's and that coverage an
 
 ### Tests for User Story 3 (write first, must fail) ⚠️
 
-- [ ] T033 [P] [US3] Add engine unit tests to `tests/unit/test_var_engine.py`:
+- [X] T033 [P] [US3] Add engine unit tests to `tests/unit/test_var_engine.py`:
   - `fill_gaps` proxy with scale 1.5 turns a proxy −2% into −3% before inception, with actual returns after;
   - `always` uses the proxy on every row;
   - density < 0.8 in the window triggers `always` when a proxy exists, and rescales the whole window when none does. Density is measured only over window days on or after `first_observed`: an instrument with 260 days of daily prices in a 1300-day window is **not** sparse, keeps its actual returns for those 260 days, and is proxied or rescaled only before its first price (FR-010, U1);
@@ -225,13 +225,13 @@ the pre-inception scenario returns equal 1.5 × the proxy's and that coverage an
   - a proxy NaN on a row falls back to rescale for that row;
   - coverage precedence (rescaled > proxied > actual) and percentages over risky value;
   - quality thresholds: 70/26/4 → degraded; n < 0.8·L → insufficient with reason; rescaled 23% → insufficient; rescaled 5% and proxied 25% → ok (boundaries inclusive as in FR-013).
-- [ ] T034 [P] [US3] Add the US3 scenarios from spec.md to `tests/features/var_calculation_runs.feature`, with steps in `tests/steps/var_calculation_runs_steps.py`. Use `fake_identifier_mapping_repository.set_entry(..., var_proxy=..., var_proxy_mode=..., var_proxy_scale=...)` and configure the proxy's observed prices.
-- [ ] T035 [P] [US3] Add a unit test to `tests/unit/test_var_run_service.py`: a proxy identifier that market-data reports as 404 produces a `proxy_unresolved` warning and is treated as having no proxy; a held identifier that is 404 produces `instrument_not_found` and is rescaled.
+- [X] T034 [P] [US3] Add the US3 scenarios from spec.md to `tests/features/var_calculation_runs.feature`, with steps in `tests/steps/var_calculation_runs_steps.py`. Use `fake_identifier_mapping_repository.set_entry(..., var_proxy=..., var_proxy_mode=..., var_proxy_scale=...)` and configure the proxy's observed prices.
+- [X] T035 [P] [US3] Add a unit test to `tests/unit/test_var_run_service.py`: a proxy identifier that market-data reports as 404 produces a `proxy_unresolved` warning and is treated as having no proxy; a held identifier that is 404 produces `instrument_not_found` and is rescaled.
 
 ### Implementation for User Story 3
 
-- [ ] T036 [US3] Add a `ProxyConfig` dataclass and `build_proxy_configs(entries) -> dict[str, ProxyConfig]` (keyed by held identifier) to `app/services/var/exposures.py`.
-- [ ] T037 [US3] Extend `estimate` in `app/services/var/engine.py` with per-window, per-position treatment selection (research.md §6 steps 3–5):
+- [X] T036 [US3] Add a `ProxyConfig` dataclass and `build_proxy_configs(entries) -> dict[str, ProxyConfig]` (keyed by held identifier) to `app/services/var/exposures.py`.
+- [X] T037 [US3] Extend `estimate` in `app/services/var/engine.py` with per-window, per-position treatment selection (research.md §6 steps 3–5):
   - proxy substitution with scale;
   - density-based `always`, with density over days on or after `first_observed`;
   - proxy-missing → rescale;
@@ -239,7 +239,7 @@ the pre-inception scenario returns equal 1.5 × the proxy's and that coverage an
   - a `source_observed` mask (own observation for ACTUAL, the proxy's for PROXY, False for RESCALE) now feeding the scenario-exclusion rule in place of the US1 own-observation mask;
   - `proxied_mv_pct` and full quality evaluation.
   Makes T033 pass.
-- [ ] T038 [US3] In `app/services/var/var_run_service.py`: fetch proxy identifiers' observed histories alongside held ones (deduplicated); add proxies to the panel; translate `InstrumentNotFoundError` into the warnings from T035; and pass the proxy configs to the engine. Makes the T034 and T035 tests pass.
+- [X] T038 [US3] In `app/services/var/var_run_service.py`: fetch proxy identifiers' observed histories alongside held ones (deduplicated); add proxies to the panel; translate `InstrumentNotFoundError` into the warnings from T035; and pass the proxy configs to the engine. Makes the T034 and T035 tests pass.
 
 **Checkpoint**: US1–US3 pass independently; estimates carry correct coverage and quality.
 

@@ -495,3 +495,71 @@ def check_recovered_run(status: str, reason: str, var_repo: VarRepository) -> No
     assert run.status == status
     assert run.failure is not None
     assert run.failure.reason == reason
+
+
+# --- User Story 3: proxies for short/sparse-history instruments ----------------
+
+
+@given(parsers.parse('account "{account}" holds only "{sub_a}" worth {value_a:d} on {as_of}'))
+def holds_one_on_date(
+    account: str,
+    sub_a: str,
+    value_a: int,
+    as_of: str,
+    ladder_repo: LadderRepository,
+    fake_identifier_mapping_repository: FakeIdentifierMappingRepository,
+) -> None:
+    """Seed a single-date ladder with one risky position and no Cash."""
+    d = date.fromisoformat(as_of)
+    rows = [{"date": d, "sub_account": sub_a, "quantity": 1.0, "market_value": float(value_a)}]
+    _write_var_ladder(ladder_repo, account, rows)
+    fake_identifier_mapping_repository.set_entry(sub_a, ticker=sub_a)
+
+
+@given(parsers.parse('"{sub_a}" has no price history at all'))
+def configure_no_history(sub_a: str, fake_market_data_service: FakeMarketDataService) -> None:
+    """Configure a sub-account's ticker to return 404 (no price history at all)."""
+    fake_market_data_service.configure_not_found(sub_a)
+
+
+@given(
+    parsers.parse('"{sub_a}" is configured with proxy "{proxy}", mode "{mode}" and scale {scale:g}')
+)
+def configure_proxy(
+    sub_a: str,
+    proxy: str,
+    mode: str,
+    scale: float,
+    fake_identifier_mapping_repository: FakeIdentifierMappingRepository,
+) -> None:
+    """Configure a sub-account's identifier mapping entry with a VaR proxy."""
+    fake_identifier_mapping_repository.set_entry(
+        sub_a, ticker=sub_a, var_proxy=proxy, var_proxy_mode=mode, var_proxy_scale=scale
+    )
+
+
+@given(parsers.parse('"{sub_a}" has daily GBP prices covering the 5-day window ending {as_of}'))
+def configure_five_day_window_prices(
+    sub_a: str, as_of: str, fake_market_data_service: FakeMarketDataService
+) -> None:
+    """Configure a flat-ish daily price series covering (and one day before) the window."""
+    scenario_days = pd.bdate_range(end=as_of, periods=5)
+    seed_day = pd.bdate_range(end=scenario_days[0], periods=2)[0]
+    all_days = pd.DatetimeIndex([seed_day, *scenario_days])
+    prices = [100.0 + i for i in range(len(all_days))]
+    _configure_series(fake_market_data_service, sub_a, seed_day.date(), prices)
+
+
+@then(
+    parsers.parse(
+        'the stored proxied share for {as_of} at look-back "{code}" is {expected:d} percent'
+    )
+)
+def check_proxied_share(
+    as_of: str, code: str, expected: int, run_context: dict[str, Any], var_repo: VarRepository
+) -> None:
+    """Assert the stored proxied_mv_pct for one date/look-back matches an expected value."""
+    df = var_repo.read_estimates(run_context["account"])
+    row = df[(df["date"] == pd.Timestamp(as_of)) & (df["lookback_code"] == code)]
+    assert len(row) == 1, df.to_string()
+    assert row.iloc[0]["proxied_mv_pct"] == pytest.approx(float(expected), abs=1e-6)

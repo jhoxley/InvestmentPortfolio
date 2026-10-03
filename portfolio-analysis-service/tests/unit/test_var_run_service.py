@@ -23,12 +23,15 @@ class _StubObservedClient:
 
     def __init__(self) -> None:
         self.error: Exception | None = None
+        self.errors_by_identifier: dict[str, Exception] = {}
         self.calls: list[str] = []
 
     def get_observed_price_history(
         self, identifier: str, from_date: date, to_date: date, currency: str
     ) -> ObservedPriceHistory:
         self.calls.append(identifier)
+        if identifier in self.errors_by_identifier:
+            raise self.errors_by_identifier[identifier]
         if self.error is not None:
             raise self.error
         import pandas as pd
@@ -72,11 +75,19 @@ def _write_ladder(repo: LadderRepository, account: str) -> None:
 
 
 class _StubMappingRepo:
+    """A minimal IdentifierMappingRepository stub: ticker=sub_account, plus any entries."""
+
+    def __init__(self, entries: list[IdentifierMappingEntry] | None = None) -> None:
+        self._entries = entries or []
+
     def lookup(self, sub_account: str) -> IdentifierMappingEntry | None:
+        for entry in self._entries:
+            if entry.name == sub_account:
+                return entry
         return IdentifierMappingEntry(name=sub_account, ticker=sub_account)
 
     def entries(self) -> list[IdentifierMappingEntry]:
-        return []
+        return self._entries
 
 
 @pytest.fixture()
@@ -93,12 +104,13 @@ def _service(
     repos: tuple[LadderRepository, CapitalRepository, VarRepository],
     observed_client: object,
     scheduler: object,
+    mapping_repo: "_StubMappingRepo | None" = None,
 ) -> VarRunService:
     ladder_repo, capital_repo, var_repo = repos
     return VarRunService(
         ladder_repo=ladder_repo,
         accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
-        identifier_mapping_repo=_StubMappingRepo(),  # type: ignore[arg-type]
+        identifier_mapping_repo=mapping_repo or _StubMappingRepo(),  # type: ignore[arg-type]
         observed_price_client=observed_client,  # type: ignore[arg-type]
         var_repo=var_repo,
         scheduler=scheduler,  # type: ignore[arg-type]
@@ -353,3 +365,61 @@ class TestRecoverInterrupted:
             recovered = var_repo.read_run(account, "r1")
             assert recovered is not None
             assert recovered.status == "failed"
+
+
+class TestInstrumentWarnings:
+    """A 404 for a held instrument or its proxy degrades gracefully, with a warning."""
+
+    def test_held_instrument_not_found_is_rescaled_with_warning(
+        self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
+    ) -> None:
+        """A 404 for the only held instrument warns instrument_not_found and still succeeds."""
+        ladder_repo, _, var_repo = repos
+        _write_ladder(ladder_repo, "acct")
+        client = _StubObservedClient()
+        client.errors_by_identifier["Equity A"] = InstrumentNotFoundError(identifier="Equity A")
+        service = _service(repos, client, InlineRunScheduler())
+
+        run = service.create_run("acct", VarRunRequest(mode="full"), date(2026, 3, 3), "corr-1")
+
+        final = var_repo.read_run("acct", run.run_id)
+        assert final is not None
+        assert final.status == "succeeded"
+        assert any(
+            w.kind == "instrument_not_found" and w.identifier == "Equity A" for w in final.warnings
+        )
+        # The account's only position has zero usable data, so its one scenario day is
+        # excluded by the observed-share rule (0% coverage) rather than rescaled -- with
+        # no OTHER position to rescale from, that is the honest outcome: insufficient,
+        # not a silently-fabricated 100%-rescaled estimate.
+        estimates = var_repo.read_estimates("acct")
+        assert estimates.iloc[0]["quality"] == "insufficient"
+        assert estimates.iloc[0]["scenario_count"] == 0
+
+    def test_proxy_not_found_is_reported_as_proxy_unresolved(
+        self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
+    ) -> None:
+        """A 404 for a configured proxy (not itself held) warns proxy_unresolved."""
+        ladder_repo, _, var_repo = repos
+        _write_ladder(ladder_repo, "acct")
+        client = _StubObservedClient()
+        client.errors_by_identifier["Missing Proxy"] = InstrumentNotFoundError(
+            identifier="Missing Proxy"
+        )
+        mapping = _StubMappingRepo(
+            entries=[
+                IdentifierMappingEntry(
+                    name="Equity A", ticker="Equity A", var_proxy="Missing Proxy"
+                )
+            ]
+        )
+        service = _service(repos, client, InlineRunScheduler(), mapping_repo=mapping)
+
+        run = service.create_run("acct", VarRunRequest(mode="full"), date(2026, 3, 3), "corr-1")
+
+        final = var_repo.read_run("acct", run.run_id)
+        assert final is not None
+        assert final.status == "succeeded"
+        assert any(
+            w.kind == "proxy_unresolved" and w.identifier == "Missing Proxy" for w in final.warnings
+        )

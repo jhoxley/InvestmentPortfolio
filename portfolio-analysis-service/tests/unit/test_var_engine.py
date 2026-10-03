@@ -13,7 +13,7 @@ from app.services.var.engine import (
     scenario_pnl,
     var_es,
 )
-from app.services.var.exposures import Exposure, PositionExposure
+from app.services.var.exposures import Exposure, PositionExposure, ProxyConfig
 from app.services.var.return_panel import ReturnPanel
 
 
@@ -120,14 +120,18 @@ def _exposure(positions: list[tuple[str, str, float]], cash: float = 0.0) -> Exp
 
 
 def _panel(
-    identifiers: tuple[str, ...], grid: list[date], returns: np.ndarray, observed: np.ndarray
+    identifiers: tuple[str, ...],
+    grid: list[date],
+    returns: np.ndarray,
+    observed: np.ndarray,
+    first_observed: dict[str, date | None] | None = None,
 ) -> ReturnPanel:
     return ReturnPanel(
         grid=tuple(grid),
         identifiers=identifiers,
         returns=returns,
         observed=observed,
-        first_observed=dict.fromkeys(identifiers, grid[0]),
+        first_observed=first_observed or dict.fromkeys(identifiers, grid[0]),
     )
 
 
@@ -210,3 +214,190 @@ class TestEstimate:
         assert all(level.var_gbp == pytest.approx(0.0) for level in result.levels)
         assert all(level.es_gbp == pytest.approx(0.0) for level in result.levels)
         assert result.actual_mv_pct == pytest.approx(100.0)
+
+
+class TestEstimateWithProxies:
+    """estimate() substitutes a configured proxy's (scaled) returns per FR-009/FR-010."""
+
+    def test_fill_gaps_uses_proxy_scaled_before_inception(self) -> None:
+        """fill_gaps uses the scaled proxy return only where the instrument has none."""
+        exposure = _exposure([("B", "B", 100000.0)])
+        grid = [date(2026, 3, 2), date(2026, 3, 3)]
+        returns = np.array([[np.nan, -0.02], [0.01, 0.03]])  # columns: B, P
+        observed = np.array([[False, True], [True, True]])
+        panel = _panel(
+            ("B", "P"),
+            grid,
+            returns,
+            observed,
+            first_observed={"B": date(2026, 3, 3), "P": date(2026, 3, 2)},
+        )
+        configs = {"B": ProxyConfig(proxy="P", mode="fill_gaps", scale=1.5)}
+
+        result = estimate(
+            exposure,
+            panel,
+            as_of_row=1,
+            lookback_days=2,
+            confidences_bp=(9500,),
+            settings=VarSettings(min_observed_share_per_scenario=0.0),
+            proxy_configs=configs,
+        )
+
+        # Day 0: B has no return; proxy's -2% x 1.5 scale = -3% -> pnl -3000.
+        # Day 1: B's own +1% is used -> pnl 1000.
+        np.testing.assert_allclose(result.scenario_pnls, [-3000.0, 1000.0], atol=1e-9)
+        assert result.proxied_mv_pct == pytest.approx(100.0)
+        assert result.rescaled_mv_pct == pytest.approx(0.0)
+
+    def test_mode_always_uses_proxy_for_every_row(self) -> None:
+        """Mode 'always' uses the (scaled) proxy return on every row, even when observed."""
+        exposure = _exposure([("B", "B", 100000.0)])
+        grid = [date(2026, 3, 2), date(2026, 3, 3)]
+        returns = np.array([[0.05, -0.01], [0.06, 0.02]])  # B's own returns are ignored
+        observed = np.array([[True, True], [True, True]])
+        panel = _panel(("B", "P"), grid, returns, observed)
+        configs = {"B": ProxyConfig(proxy="P", mode="always", scale=1.0)}
+
+        result = estimate(
+            exposure,
+            panel,
+            as_of_row=1,
+            lookback_days=2,
+            confidences_bp=(9500,),
+            settings=VarSettings(min_observed_share_per_scenario=0.0),
+            proxy_configs=configs,
+        )
+
+        np.testing.assert_allclose(result.scenario_pnls, [-1000.0, 2000.0], atol=1e-9)
+        assert result.proxied_mv_pct == pytest.approx(100.0)
+
+    def test_sparse_instrument_is_treated_as_always_even_in_fill_gaps_mode(self) -> None:
+        """Below-threshold observed density in the window forces 'always', even for fill_gaps."""
+        exposure = _exposure([("B", "B", 100000.0)])
+        # 5-day window; B is observed on only 1 of the 5 days since its first_observed
+        # (density 20% < default 80% threshold), so every row uses the proxy.
+        grid = [date(2026, 3, d) for d in (2, 3, 4, 5, 6)]
+        returns = np.array(
+            [[0.05, 0.01], [np.nan, 0.02], [np.nan, 0.03], [np.nan, -0.01], [np.nan, 0.00]]
+        )
+        observed = np.array(
+            [[True, True], [False, True], [False, True], [False, True], [False, True]]
+        )
+        panel = _panel(
+            ("B", "P"), grid, returns, observed, first_observed={"B": grid[0], "P": grid[0]}
+        )
+        configs = {"B": ProxyConfig(proxy="P", mode="fill_gaps", scale=1.0)}
+
+        result = estimate(
+            exposure,
+            panel,
+            as_of_row=4,
+            lookback_days=5,
+            confidences_bp=(9500,),
+            settings=VarSettings(min_observed_share_per_scenario=0.0),
+            proxy_configs=configs,
+        )
+
+        # Sparse -> "always": even row 0 (where B was actually observed at +5%) uses P's +1%.
+        np.testing.assert_allclose(result.scenario_pnls[0], 1000.0, atol=1e-9)
+        assert result.proxied_mv_pct == pytest.approx(100.0)
+
+    def test_proxy_itself_missing_falls_back_to_rescale(self) -> None:
+        """When the proxy has no return either, that cell is rescaled, not left as proxy."""
+        exposure = _exposure([("A", "A", 60000.0), ("B", "B", 40000.0)])
+        grid = [date(2026, 3, 2)]
+        returns = np.array([[-0.01, np.nan]])  # B's own NaN; its proxy "P" is absent entirely
+        observed = np.array([[True, False]])
+        panel = _panel(("A", "B"), grid, returns, observed)
+        configs = {"B": ProxyConfig(proxy="P", mode="fill_gaps", scale=1.0)}
+
+        result = estimate(
+            exposure,
+            panel,
+            as_of_row=0,
+            lookback_days=1,
+            confidences_bp=(9500,),
+            settings=VarSettings(min_observed_share_per_scenario=0.0),
+            proxy_configs=configs,
+        )
+
+        # B rescaled to A's -1%: pnl = 60000*-0.01 + 40000*-0.01 = -1000.
+        assert result.scenario_pnls[0] == pytest.approx(-1000.0)
+        assert result.rescaled_mv_pct == pytest.approx(40.0)
+        assert result.proxied_mv_pct == pytest.approx(0.0)
+
+    def test_coverage_precedence_rescaled_over_proxied_over_actual(self) -> None:
+        """A position that is ever rescaled is reported as rescaled, never as proxied."""
+        exposure = _exposure([("B", "B", 100000.0)])
+        grid = [date(2026, 3, 2), date(2026, 3, 3)]
+        # Row 0: B missing, proxy present -> PROXY. Row 1: B missing, proxy also missing -> RESCALE.
+        returns = np.array([[np.nan, -0.02], [np.nan, np.nan]])
+        observed = np.array([[False, True], [False, False]])
+        panel = _panel(("B", "P"), grid, returns, observed)
+        configs = {"B": ProxyConfig(proxy="P", mode="fill_gaps", scale=1.0)}
+
+        result = estimate(
+            exposure,
+            panel,
+            as_of_row=1,
+            lookback_days=2,
+            confidences_bp=(9500,),
+            settings=VarSettings(min_observed_share_per_scenario=0.0),
+            proxy_configs=configs,
+        )
+
+        assert result.rescaled_mv_pct == pytest.approx(100.0)
+        assert result.proxied_mv_pct == pytest.approx(0.0)
+
+    def test_quality_boundary_degraded(self) -> None:
+        """70% actual / 26% proxied / 4% rescaled -> degraded (proxied exceeds 25%)."""
+        exposure = _exposure(
+            [("A", "actual", 70000.0), ("B", "proxied", 26000.0), ("C", "rescaled", 4000.0)]
+        )
+        grid = [date(2026, 3, 2)]
+        panel = _panel(
+            ("actual", "proxied", "rescaled", "P"),
+            grid,
+            np.array([[0.01, np.nan, np.nan, 0.02]]),
+            np.array([[True, False, False, True]]),
+        )
+        configs = {"proxied": ProxyConfig(proxy="P", mode="fill_gaps", scale=1.0)}
+
+        result = estimate(
+            exposure,
+            panel,
+            as_of_row=0,
+            lookback_days=1,
+            confidences_bp=(9500,),
+            settings=VarSettings(min_observed_share_per_scenario=0.0),
+            proxy_configs=configs,
+        )
+
+        assert result.proxied_mv_pct == pytest.approx(26.0)
+        assert result.rescaled_mv_pct == pytest.approx(4.0)
+        assert result.quality == "degraded"
+
+    def test_scenario_exclusion_counts_proxy_observation_not_own(self) -> None:
+        """A day where B is itself unobserved but its proxy IS observed still counts as covered."""
+        exposure = _exposure([("A", "A", 60000.0), ("B", "B", 40000.0)])
+        grid = [date(2026, 3, 2)]
+        # A observed (60%). B's own observation is absent, but its proxy P IS observed;
+        # under the PROXY treatment B's "source" is the proxy, so B also counts as
+        # covered -> combined share 100% -> the day is NOT excluded (default 50% rule).
+        returns = np.array([[0.015, np.nan, 0.02]])  # columns: A, B, P
+        observed = np.array([[True, False, True]])
+        panel = _panel(("A", "B", "P"), grid, returns, observed)
+        configs = {"B": ProxyConfig(proxy="P", mode="fill_gaps", scale=1.0)}
+
+        result = estimate(
+            exposure,
+            panel,
+            as_of_row=0,
+            lookback_days=1,
+            confidences_bp=(9500,),
+            settings=VarSettings(),  # default 50% threshold
+            proxy_configs=configs,
+        )
+
+        assert result.scenario_count == 1

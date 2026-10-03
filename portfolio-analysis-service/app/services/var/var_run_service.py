@@ -24,7 +24,15 @@ from app.exceptions import (
     ObservedHistoryUnsupportedError,
     VarRunInProgressError,
 )
-from app.models.var import RunFailure, RunFailureReason, VarRun, VarRunRequest
+from app.models.market_data import ObservedPriceHistory
+from app.models.var import (
+    RunFailure,
+    RunFailureReason,
+    RunWarning,
+    RunWarningKind,
+    VarRun,
+    VarRunRequest,
+)
 from app.repositories.identifier_mapping_repository import IdentifierMappingRepository
 from app.repositories.ladder_repository import LadderRepository
 from app.repositories.var_repository import (
@@ -35,7 +43,7 @@ from app.repositories.var_repository import (
 )
 from app.services.accounts_service import AccountsService
 from app.services.var.engine import estimate
-from app.services.var.exposures import build_exposures
+from app.services.var.exposures import build_exposures, build_proxy_configs
 from app.services.var.return_panel import build_return_panel
 from app.services.var.run_scheduler import RunScheduler
 
@@ -248,6 +256,13 @@ class VarRunService:
                 )
         needed_identifiers = sorted(sub_accounts_by_identifier)
 
+        all_proxy_configs = build_proxy_configs(self._mapping_repo.entries())
+        proxy_configs = {
+            ident: cfg for ident, cfg in all_proxy_configs.items() if ident in needed_identifiers
+        }
+        proxy_identifiers = {cfg.proxy for cfg in proxy_configs.values()}
+        fetch_identifiers = sorted(set(needed_identifiers) | proxy_identifiers)
+
         lookbacks = self._settings.lookbacks
         confidences = tuple(self._settings.confidence_levels_bp)
         max_lookback = max(lookbacks.values()) if lookbacks else 0
@@ -261,16 +276,29 @@ class VarRunService:
         log.info(
             "var_run_stage",
             stage="fetch_prices",
-            identifier_count=len(needed_identifiers),
+            identifier_count=len(fetch_identifiers),
             fetch_start=str(fetch_start),
             fetch_end=str(fetch_end),
         )
-        histories = {
-            identifier: self._observed_price_client.get_observed_price_history(
-                identifier, fetch_start, fetch_end, "GBP"
-            )
-            for identifier in needed_identifiers
-        }
+        histories: dict[str, ObservedPriceHistory] = {}
+        warnings: list[RunWarning] = []
+        for identifier in fetch_identifiers:
+            try:
+                histories[identifier] = self._observed_price_client.get_observed_price_history(
+                    identifier, fetch_start, fetch_end, "GBP"
+                )
+            except InstrumentNotFoundError:
+                kind: RunWarningKind = (
+                    "instrument_not_found"
+                    if identifier in needed_identifiers
+                    else "proxy_unresolved"
+                )
+                message = f"market-data-web-service has no price history for '{identifier}'."
+                warnings.append(RunWarning(kind=kind, identifier=identifier, message=message))
+                log.warning("var_" + kind, identifier=identifier)
+                # Omitted from histories/the panel; the engine treats an identifier
+                # missing from panel.identifiers as fully absent (rescale, or "no
+                # proxy" if this was someone's configured proxy).
 
         panel = build_return_panel(histories, grid_start=fetch_start, grid_end=fetch_end)
         row_by_date = {d: i for i, d in enumerate(panel.grid)}
@@ -282,7 +310,13 @@ class VarRunService:
             as_of_row = row_by_date[d]
             for code, lookback_days in lookbacks.items():
                 result = estimate(
-                    exposure, panel, as_of_row, lookback_days, confidences, self._settings
+                    exposure,
+                    panel,
+                    as_of_row,
+                    lookback_days,
+                    confidences,
+                    self._settings,
+                    proxy_configs=proxy_configs,
                 )
                 level_by_bp = {level.confidence_bp: level for level in result.levels}
                 row: dict[str, object] = {
@@ -312,11 +346,19 @@ class VarRunService:
             {
                 "identifier": identifier,
                 "sub_accounts": ";".join(sorted(sub_accounts_by_identifier[identifier])),
-                "first_observed_date": histories[identifier].first_observed_date,
-                "last_observed_date": histories[identifier].last_observed_date,
-                "proxy": None,
-                "proxy_mode": "fill_gaps",
-                "proxy_scale": 1.0,
+                "first_observed_date": (
+                    histories[identifier].first_observed_date if identifier in histories else None
+                ),
+                "last_observed_date": (
+                    histories[identifier].last_observed_date if identifier in histories else None
+                ),
+                "proxy": proxy_configs[identifier].proxy if identifier in proxy_configs else None,
+                "proxy_mode": (
+                    proxy_configs[identifier].mode if identifier in proxy_configs else "fill_gaps"
+                ),
+                "proxy_scale": (
+                    proxy_configs[identifier].scale if identifier in proxy_configs else 1.0
+                ),
                 "outlier_count": 0,
             }
             for identifier in needed_identifiers
@@ -351,6 +393,7 @@ class VarRunService:
                 "resolved_end": resolved_end if dates else None,
                 "dates_selected": len(dates),
                 "dates_computed": len(dates),
+                "warnings": warnings,
             }
         )
 

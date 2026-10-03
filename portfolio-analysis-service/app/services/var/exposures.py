@@ -7,6 +7,7 @@ every risky (non-Cash) position, plus the Cash balance, as of that date's close.
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Literal
 
 import pandas as pd
 import structlog
@@ -16,6 +17,47 @@ from app.models.market_data import IdentifierMappingEntry
 logger = structlog.get_logger(__name__)
 
 _CASH = "Cash"
+
+
+@dataclass(frozen=True)
+class ProxyConfig:
+    """A held identifier's configured VaR proxy.
+
+    Attributes:
+        proxy: The identifier whose returns stand in for this one.
+        mode: "fill_gaps" (use the proxy only where this identifier has no return) or
+            "always" (use the proxy for every scenario day in the window).
+        scale: Static multiplier applied to the proxy's returns.
+    """
+
+    proxy: str
+    mode: Literal["fill_gaps", "always"]
+    scale: float
+
+
+def build_proxy_configs(
+    entries: list[IdentifierMappingEntry],
+) -> dict[str, ProxyConfig]:
+    """Build a held-identifier to ProxyConfig map from the identifier mapping entries.
+
+    Args:
+        entries: Every configured identifier mapping entry.
+
+    Returns:
+        Mapping of held identifier (ticker, else isin) to its ProxyConfig, for every
+        entry that configures a var_proxy. Entries without one are omitted.
+    """
+    configs: dict[str, ProxyConfig] = {}
+    for entry in entries:
+        if not entry.var_proxy:
+            continue
+        identifier = _resolve_identifier(entry)
+        if identifier is None:
+            continue
+        configs[identifier] = ProxyConfig(
+            proxy=entry.var_proxy, mode=entry.var_proxy_mode, scale=entry.var_proxy_scale
+        )
+    return configs
 
 
 @dataclass(frozen=True)
