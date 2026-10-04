@@ -348,22 +348,22 @@ recomputes. Change the config → every date recomputes.
 
 ## Phase 10: Polish & Cross-Cutting Concerns
 
-- [ ] T058 [P] Update `README.md`:
+- [X] T058 [P] Update `README.md`:
   - capability table rows for the VaR runs and status endpoints;
   - a "Risk — VaR calculation runs" Key Behaviours paragraph (modes, 409, background execution, store layout, interrupted recovery, fail-closed on market-data without observed history);
   - the `var:` config block;
   - the proxy fields for the identifier mapping;
   - the new error types in the error table;
   - the new files in File Structure.
-- [ ] T059 [P] Update `docs/proposals/value-at-risk.md`: set §11-B to "Specified/implemented as 012", and note any deviation made during implementation. Add a follow-up entry to the proposal's §11 later-features table: "add `correlation_id` to all existing problem responses" (the inherited Principle IV gap from plan.md's Complexity Tracking). In the PR description, list both Complexity Tracking deviations (the inherited correlation-ID gap and the untested PowerShell scripts) for the reviewer's Constitution Check.
-- [ ] T060 Performance check (SC-002/003/004/007), with a `pytest -m performance`-style test in `tests/unit/test_performance.py` following the existing style:
+- [X] T059 [P] Update `docs/proposals/value-at-risk.md`: set §11-B to "Specified/implemented as 012", and note any deviation made during implementation. Add a follow-up entry to the proposal's §11 later-features table: "add `correlation_id` to all existing problem responses" (the inherited Principle IV gap from plan.md's Complexity Tracking). In the PR description, list both Complexity Tracking deviations (the inherited correlation-ID gap and the untested PowerShell scripts) for the reviewer's Constitution Check.
+- [X] T060 Performance check (SC-002/003/004/007), with a `pytest -m performance`-style test in `tests/unit/test_performance.py` following the existing style:
   - a synthetic ladder of 2,700 dates × 50 positions with an in-memory fake observed client;
   - assert a `full` run completes in < 60 s;
   - assert a following `missing` run computes 0 dates in < 15 s;
   - assert POST returns in < 1 s with a scheduler that defers execution;
   - assert status returns in < 2 s.
-- [ ] T061 Run the quality gates and fix all findings: `ruff check app/ tests/`, `ruff format app/ tests/`, `mypy --strict app/`, `pytest`. Allow only the documented pre-existing flaky `test_idempotent_resubmit_within_1_second` to fail.
-- [ ] T062 Live validation (memory lesson from feature 004: real data catches what unit tests miss). Once market-data feature 009 is available:
+- [X] T061 Run the quality gates and fix all findings: `ruff check app/ tests/`, `ruff format app/ tests/`, `mypy --strict app/`, `pytest`. Allow only the documented pre-existing flaky `test_idempotent_resubmit_within_1_second` to fail.
+- [X] T062 Live validation (memory lesson from feature 004: real data catches what unit tests miss). Once market-data feature 009 is available:
   - run quickstart steps 1–4 against the real HL-ISA and HL-SIPP data;
   - sanity-check VaR99 ≥ VaR97.5 ≥ VaR95, ES ≥ VaR, the latest 2Y quality, and the proxied share;
   - confirm Lindsell Train D Acc shows `2y: proxied` once its proxy is configured.

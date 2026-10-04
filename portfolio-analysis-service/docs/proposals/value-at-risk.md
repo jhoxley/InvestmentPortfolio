@@ -521,6 +521,40 @@ prices; filled prices must never be presented as observations when fill=none.
 
 ### B. portfolio-analysis-service — `012-var-calculation-runs`
 
+**Status: implemented** (2026-10-04), on branch `012-var-calculation-runs`. All 62 tasks in
+`specs/012-var-calculation-runs/tasks.md` complete; `/speckit-analyze` findings resolved. Live-validated
+against the real HL-ISA and HL-SIPP data once market-data-web-service's `009-observed-prices-fill-none`
+was running: full runs completed in 14s (2,140 dates, HL-ISA) and 31s (2,721 dates, HL-SIPP), well under
+the 60s target; VaR99 ≥ VaR97.5 ≥ VaR95 and ES ≥ VaR held exactly across every non-insufficient estimate;
+the rescale fallback for Scottish Widows Pension, WisdomTree Battery Metals and Lindsell Train D Acc
+behaved exactly as Appendix A/B predicted (no proxies are configured yet in the live identifier mapping
+file). See `specs/012-var-calculation-runs/quickstart.md` §9–10 for the full record.
+
+Deviations from this proposal, found during implementation:
+- **Scenario-day inclusion counts the source actually used**, not just an instrument's own observation:
+  a position using its proxy on a day counts as covered if the *proxy* was observed that day (§3.4/§3.8
+  revised; found via `/speckit-analyze`). Without this, heavy proxy use would wrongly exclude otherwise-
+  good scenario days.
+- **Sparse-instrument density is measured only from an instrument's first observed price**, not over the
+  whole window: a short-history instrument is never treated as "sparse" just because it hasn't existed
+  for the full look-back (§3.8 revised; same analysis pass). FR-009 (short history) and FR-010 (sparse
+  pricing) are now clearly distinct failure modes.
+- **New FR-033**: every error this feature introduces, and every run record, carries a `correlation_id`
+  (constitution Principle IV). The *existing* endpoints' shared `ProblemDetail` still lacks one — see the
+  follow-up item below.
+- `mypy`'s `python_version` was bumped from `3.11` to `3.12` in `pyproject.toml`: numpy 2.5's own `.pyi`
+  stubs use PEP 695 syntax that mypy only parses under 3.12+, and numpy is this feature's first direct
+  import of it. No runtime-syntax effect (research.md §14b).
+- A real-data bug was found and fixed during implementation (not a design deviation, but worth recording
+  per the project's "live testing catches what unit tests miss" lesson, feature 004): `VarRepository`
+  crashed merging a freshly computed timezone-aware `computed_at` with one already round-tripped through
+  CSV (naive) on a second commit to the same account. Fixed by normalising datetime columns to naive UTC
+  consistently on read and merge.
+
+**Follow-up for a later feature**: add `correlation_id` to the *existing* endpoints' shared
+`ProblemDetail`/`_problem` helper in `app/main.py` (currently only this feature's three new error types
+carry one — plan.md's Complexity Tracking table records this as an inherited, not newly introduced, gap).
+
 ```text
 /speckit-specify Add a historical-simulation Value at Risk (VaR) calculation to the risk endpoint group, precomputed into a
 per-account store by asynchronous calculation runs. For every business date in an account's position ladder, take the
@@ -600,6 +634,7 @@ banner with the number of missing dates. Periodicity controls do not apply to th
 | **E. PAS `014-var-contributions`** | `GET …/risk/var/contributions?date=&lookback=&confidence=&group_by=position\|theme` (standalone, incremental, component ES/VaR, marginal); `POST /v1/risk/var/evaluations` for what-if holdings or **combined accounts** (union of exposures); persist the aligned returns snapshot from runs. |
 | **F. Browser `027-risk-var-contributions`** | Contribution waterfall / treemap for a selected date; what-if toggles to remove positions. |
 | **G. PAS `015-var-filtered-hs`** | Volatility-scaled (EWMA λ = 0.94) historical simulation as a second `method`, backtested side by side. Also automatic proxy-scale estimation from overlapping observations at each instrument's own sampling frequency, shown on the status endpoint next to the configured value. |
+| **H. PAS correlation-id-everywhere** | Add `correlation_id` to the shared `ProblemDetail`/`_problem` helper in `app/main.py`, so every *existing* endpoint's error response carries one (feature 012 added it only to its own three new error types; this closes the inherited gap recorded in that feature's plan.md Complexity Tracking table). |
 
 ---
 

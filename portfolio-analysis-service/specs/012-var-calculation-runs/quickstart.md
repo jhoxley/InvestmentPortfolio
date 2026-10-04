@@ -110,8 +110,54 @@ Confirmed working end to end against real data:
 - `refresh-var.ps1` against an unreachable `-BaseUrl` also failed cleanly with exit 1.
 
 Not exercised live (needs market-data-web-service with feature 009 running, which was
-outside this session's setup): a successful run producing real VaR/ES numbers, the
-409-conflict path under real HTTP latency (the synthetic race is covered by
+outside this session's setup): the 409-conflict path under real HTTP latency (the
+synthetic race is covered by
 `TestCreateRunAdmission.test_concurrent_requests_produce_exactly_one_winner`), and the
 `run_end_to_end.ps1` Phase 7 insertion itself (parse-checked with
 `[System.Management.Automation.Language.Parser]::ParseFile`, but not run end to end).
+
+## 10. T062 live validation (2026-10-04, market-data-web-service running)
+
+Started market-data-web-service on `127.0.0.1:8001` (feature `009-observed-prices-fill-none`
+is present in this repo) alongside portfolio-analysis-service, and ran **full** VaR
+calculations against the real, already-ingested HL-ISA and HL-SIPP ladders.
+
+| Account | Dates computed | Wall time | SC-003 target |
+|---|---|---|---|
+| HL-ISA | 2,140 | ~14s | < 60s ✅ |
+| HL-SIPP | 2,721 | 31s | < 60s ✅ |
+
+`GET .../risk/var/status` for HL-ISA returned in 78ms (SC-007 target < 2s ✅); `POST
+.../risk/var/runs` was acknowledged in 183–222ms (SC-002 target < 1s ✅, for both
+accounts).
+
+Confirmed for every non-`insufficient` row in both accounts' `estimates.csv`
+(6,159 rows for HL-ISA; the equivalent check also passed for HL-SIPP):
+- **VaR99 ≥ VaR97.5 ≥ VaR95** holds exactly.
+- **ES ≥ VaR at the same confidence level** holds exactly, at all three levels.
+
+Per-instrument treatment (`instruments.csv`), with no `var_proxy` entries configured in
+the live `InvestmentDataStatic.json` (the proposal's recommended proxies have not been
+added there), confirms the rescale fallback behaves exactly as the proposal's Appendix A
+predicted:
+- HL-ISA: Lindsell Train Global Equity D Acc (`0P0001WUUI.L`, ~5.4% of the account) is
+  `actual` at 1y but `rescaled` at 2y/5y -- it has under 2 years of real history.
+- HL-SIPP: Scottish Widows Pension, WisdomTree Battery Metals, BlackRock Next Gen
+  Healthcare and Man Japan CoreAlpha are `rescaled` at 2y (the first three are the exact
+  short/sparse-history instruments the proposal identified); 5y quality is mostly
+  `degraded`/`insufficient` because most SIPP holdings were bought too recently for 5
+  years of real history -- again matching the proposal's analysis.
+- Confirms the inverse of the original checklist item: "Lindsell Train D Acc shows
+  `2y: proxied` **once its proxy is configured**" cannot be observed without that
+  configuration step (a user action, out of scope for this feature); what's observed
+  instead is the documented, correct fallback (`rescaled`) in its absence.
+
+The outlier detector caught genuine data-quality findings in real data, not just
+synthetic cases: a −99.0% one-day "return" for JPMorgan Emerging Markets C Acc on
+2024-12-17 (almost certainly a bad print or corporate action, not a real market move)
+in both accounts, and a cluster of ±25-57% jumps for IFSL Marlborough UK Micro-Cap
+Growth through 2022 consistent with that fund being priced far less often than daily
+and the gaps landing on monthly boundaries.
+
+Both services and all test data created during this validation were stopped/removed
+afterwards; nothing from this section's runs is committed.

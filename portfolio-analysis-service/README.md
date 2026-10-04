@@ -16,6 +16,9 @@ The service accepts an XLSX file describing the historical trading and income ac
 | Retrieve ladder summary (metadata) | `GET /v1/accounts/{account}/ladder` | Available |
 | Download the full ladder as XLSX | `GET /v1/accounts/{account}/ladder/download` | Available |
 | Daily return histogram and distribution statistics (risk) | `GET /v1/accounts/{account}/risk/return-histogram` | Available |
+| Queue a historical-simulation VaR calculation run (risk) | `POST /v1/accounts/{account}/risk/var/runs` | Available |
+| Read a VaR run's status, or list an account's runs | `GET /v1/accounts/{account}/risk/var/runs[/{run_id}]` | Available |
+| VaR coverage, freshness and per-instrument treatment (risk) | `GET /v1/accounts/{account}/risk/var/status` | Available |
 | Liveness probe | `GET /health` | Available |
 | Readiness probe | `GET /ready` | Available |
 
@@ -29,6 +32,7 @@ The service accepts an XLSX file describing the historical trading and income ac
 - **Idempotency:** Submitting the same file twice is a no-op (SHA-256 checksum match). The response indicates `status: unchanged` with HTTP 200.
 - **Merge guard:** Submitting a *different* file for an account that already has a stored ladder returns HTTP 409. Merge/replace is not yet supported.
 - **Local file store:** Ladders are written to `data/{account_name}/ladder.xlsx` and `meta.json`. The store is human-readable and suitable for manual inspection.
+- **Risk — VaR calculation runs:** `POST /v1/accounts/{account}/risk/var/runs` (`mode: "full"` or `"missing"`, optional `start`/`end`) queues a historical-simulation Value-at-Risk calculation and returns 202 immediately with a run resource; the calculation itself runs in the background, one run at a time across all accounts. `GET .../risk/var/runs/{run_id}` reads a run's status (`queued`/`running`/`succeeded`/`failed`); `GET .../risk/var/runs?limit=` lists an account's runs, newest first. A second request for an account that already has an active run gets HTTP 409, linking to that run. `mode: "missing"` (the default) recomputes only dates with no estimate, a changed fingerprint (holdings or configuration), or a now-resolvable pending outcome — a no-op `missing` run after nothing has changed computes 0 dates and makes no market-data calls. Results are stored per account under `data/{account}/var/` (`estimates.csv`, `outcomes.csv`, `instruments.csv`, `meta.json`, `runs/{run_id}.json`). For every business date, VaR and Expected Shortfall are computed at 95%/97.5%/99% for 1Y/2Y/5Y look-backs from the historical simple returns of that date's holdings (observed prices only, via market-data-web-service's `fill=none`, never gap-filled); missing or sparse price history falls back to a configured proxy instrument, then to a value-weighted rescale of the account's other holdings. A run that cannot reach market-data-web-service, or finds it does not support observed-only history, fails closed (`market_data_unavailable` / `observed_history_unsupported`) rather than silently using filled prices. Any run still `queued`/`running` when the service restarts is marked `failed` with reason `interrupted`. `GET /v1/accounts/{account}/risk/var/status` reports the computed date range against the ladder's own range, missing/stale/pending counts, the last run, and each instrument's observed-history treatment (`actual`/`proxied`/`rescaled`) per look-back, without reading the ladder file itself. See `docs/proposals/value-at-risk.md` for the full methodology.
 
 ---
 
@@ -72,6 +76,35 @@ data:
 ```
 
 To redirect the data store to a different path, edit this file before starting the server. The directory is created automatically on startup if it does not exist.
+
+The VaR calculation (`var:`) is entirely optional to configure — every field has a sensible default matching `docs/proposals/value-at-risk.md`:
+
+```yaml
+var:
+  methodology_version: "1.0.0"
+  lookbacks: {"1y": 260, "2y": 520, "5y": 1300}
+  confidence_levels_bp: [9500, 9750, 9900]        # 95%, 97.5%, 99%
+  min_observed_share_per_scenario: 0.5            # scenario days below this coverage are excluded
+  sparse_density_threshold: 0.8                   # below this, an instrument is treated as sparse (proxy "always")
+  outlier_abs_return: 0.25                        # |return| above this is reported as a warning
+  quality:
+    ok_max_rescaled_pct: 5
+    ok_max_proxied_pct: 25
+    insufficient_min_scenario_ratio: 0.8
+    insufficient_max_rescaled_pct: 20
+  excluded_returns:                               # configured bad prices to treat as missing
+    - identifier: "GB0031348658"
+      date: "2026-02-10"
+```
+
+Instruments needing a proxy (short or sparse price history) are configured per instrument in the identifier mapping file (`identifier_mapping.path`), not in `config.yaml`:
+
+```json
+{ "name": "Scottish Widows Pension", "isin": "SWPENSION", "ticker": "",
+  "var_proxy": "GB00B08HD927", "var_proxy_mode": "always", "var_proxy_scale": 1.0 }
+```
+
+`var_proxy` is the identifier whose returns stand in for this instrument's; `var_proxy_mode` is `"fill_gaps"` (default — use the proxy only where this instrument has no return) or `"always"`; `var_proxy_scale` (default `1.0`) is a static multiplier applied to the proxy's returns. All three fields are optional and backward-compatible with existing mapping entries.
 
 ---
 
@@ -265,6 +298,12 @@ if response.status_code == 422:
 | 422 | `empty-date-range` | Earliest activity date is within T-2 (too recent to produce any ladder rows) |
 | 404 | `account-not-found` | No ladder stored for this account |
 | 409 | `merge-not-supported` | A different file was submitted for an account that already has a ladder |
+| 422 | `invalid-var-run-request` | Malformed run body, unknown `mode`, start after end, or `limit` outside 1-100 |
+| 409 | `var-run-in-progress` | The account already has a queued or running VaR run (`_links.active_run` names it) |
+| 404 | `var-run-not-found` | No VaR run with that id exists for this account |
+| 502 | `market-data-service-unavailable` | market-data-web-service request failed (network error, non-2xx, timeout) |
+
+The three VaR-specific error types above also include a `correlation_id` field, matching the id logged against the triggering request and (for a run failure) the run's own `failure.correlation_id`.
 
 ---
 
@@ -384,14 +423,25 @@ portfolio-analysis-service/
 ├── app/
 │   ├── api/
 │   │   ├── health.py          # GET /health, GET /ready
-│   │   └── ladder.py          # POST/GET /v1/accounts/{name}/ladder[/download]
+│   │   ├── ladder.py          # POST/GET /v1/accounts/{name}/ladder[/download]
+│   │   └── risk_var.py        # POST/GET /v1/accounts/{name}/risk/var/runs[/{id}], GET .../status
 │   ├── models/
-│   │   └── ladder.py          # Pydantic response models (IngestionSummary, LadderSummary, ProblemDetail)
+│   │   ├── ladder.py          # Pydantic response models (IngestionSummary, LadderSummary, ProblemDetail)
+│   │   └── var.py             # VarRun, VarRunRequest, VarStatus, RunWarning, RunFailure, ...
 │   ├── repositories/
-│   │   └── ladder_repository.py  # Filesystem read/write (ladder.xlsx + meta.json)
+│   │   ├── ladder_repository.py  # Filesystem read/write (ladder.xlsx + meta.json)
+│   │   └── var_repository.py     # Filesystem read/write (var/estimates.csv, outcomes.csv, ...)
 │   ├── services/
 │   │   ├── ingestion_service.py  # Orchestration: checksum → validate → expand → persist
-│   │   └── ladder_expander.py    # Business-day expansion and forward-fill logic
+│   │   ├── ladder_expander.py    # Business-day expansion and forward-fill logic
+│   │   └── var/                  # Historical-simulation VaR calculation (feature 012)
+│   │       ├── engine.py               # Pure: rank_k, var_es, scenario_pnl, estimate, hypothetical_pnl
+│   │       ├── exposures.py            # Ladder rows → per-date Exposure + proxy configs
+│   │       ├── return_panel.py         # Observed prices → business-day return grid; outliers/exclusions
+│   │       ├── fingerprint.py          # Config/holdings fingerprinting for incremental runs
+│   │       ├── run_scheduler.py        # Single-worker background execution of runs
+│   │       ├── var_run_service.py      # Orchestrates one run end to end
+│   │       └── var_status_service.py   # Coverage/freshness status (never reads the ladder)
 │   ├── validators/
 │   │   └── ledger.py          # Schema validation for incoming XLSX files
 │   ├── config.py              # Settings loaded from config.yaml
