@@ -24,7 +24,13 @@
                create_capital_ledger step) to the portfolio-analysis-service
                capital ingestion endpoint.
 
-      Phase 7  Start the Investment Portfolio Browser (Dash app) on
+      Phase 7  Queue a "missing" historical-simulation VaR calculation run (feature
+               012-var-calculation-runs) for each successfully ingested account, and
+               wait for each to finish via scripts\VarRefresh.psm1. A failure or
+               timeout is logged and marks the overall run unsuccessful, but does not
+               stop Phase 8 from starting the browser.
+
+      Phase 8  Start the Investment Portfolio Browser (Dash app) on
                localhost:$DashPort, configured to read the market-data-web-service
                and portfolio-analysis-service URLs started above, poll it until
                ready, and open it in the user's default browser.
@@ -50,6 +56,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+Import-Module (Join-Path $PSScriptRoot 'scripts\VarRefresh.psm1') -Force
 
 # -- Configuration -------------------------------------------------------------
 #
@@ -665,6 +673,9 @@ Write-Log "  Ingesting $($SubAccountLedgers.Count) ledger(s) into portfolio-anal
 
 $ingestSuccessCount = 0
 $ingestFailCount    = 0
+# Accounts whose position ladder ingested successfully this run -- used by Phase 7
+# to know which accounts have a ladder to compute VaR against.
+$script:IngestedAccounts = @()
 
 foreach ($ledger in $SubAccountLedgers) {
     Write-Log "" -Level Detail
@@ -685,6 +696,7 @@ foreach ($ledger in $SubAccountLedgers) {
 
     if ($ok) {
         $ingestSuccessCount++
+        $script:IngestedAccounts += $ledger.AccountName
         Write-Log "  Download: $AnalysisBaseUrl/v1/accounts/$($ledger.AccountName)/ladder/download" -Level Detail
     } else {
         $ingestFailCount++
@@ -736,10 +748,43 @@ Write-Log "" -Level Detail
 Write-Log "  Capital ledger ingestion summary: $capitalSuccessCount succeeded, $capitalFailCount failed." -Level Info
 
 # =============================================================================
-#  Phase 7  - Start Investment Portfolio Browser (Dash app)
+#  Phase 7  - Compute Value at Risk
 # =============================================================================
 
-Write-PhaseHeader 7 "Start Investment Portfolio Browser"
+Write-PhaseHeader 7 "Compute Value at Risk"
+
+$uniqueVarAccounts = @($script:IngestedAccounts | Select-Object -Unique)
+
+if ($uniqueVarAccounts.Count -eq 0) {
+    Write-Log "  No accounts were successfully ingested this run  - skipping VaR calculation." -Level Warn
+} else {
+    Write-Log "  Queuing a 'missing' VaR run for: $($uniqueVarAccounts -join ', ')" -Level Info
+
+    foreach ($accountName in $uniqueVarAccounts) {
+        Write-Log "" -Level Detail
+        Write-Log "  -- $accountName -----------------------------" -Level Info
+
+        $varResult = Invoke-VarRefresh -BaseUrl $AnalysisBaseUrl -AccountName $accountName `
+            -Mode 'missing' -TimeoutMinutes 15 -PollSeconds 2 `
+            -LogFunction { param($Message, $Level) Write-Log "  $Message" -Level $Level }
+
+        if ($varResult.Status -eq 'succeeded') {
+            Write-Log "  ${accountName}: VaR succeeded -- $($varResult.DatesComputed) date(s) computed, $($varResult.WarningCount) warning(s)." -Level OK
+            foreach ($warning in $varResult.Warnings) {
+                Write-Log "    warning: [$($warning.kind)] $($warning.identifier) $($warning.date): $($warning.message)" -Level Warn
+            }
+        } else {
+            Write-Log "  ${accountName}: VaR $($varResult.Status) -- $($varResult.FailureDetail)" -Level Error
+            $OverallSuccess = $false
+        }
+    }
+}
+
+# =============================================================================
+#  Phase 8  - Start Investment Portfolio Browser (Dash app)
+# =============================================================================
+
+Write-PhaseHeader 8 "Start Investment Portfolio Browser"
 
 if (-not (Test-Path $DashAppPython)) {
     Write-Log "Python not found in portfolio-browser venv: $DashAppPython" -Level Error

@@ -335,14 +335,14 @@ recomputes. Change the config → every date recomputes.
 
 **Independent Test**: Quickstart steps 5 and 7 (manual; see Complexity Tracking in plan.md).
 
-- [ ] T054 [US7] Create (repo root) `scripts/VarRefresh.psm1` exporting `Invoke-VarRefresh -BaseUrl -AccountName -Mode -TimeoutMinutes -PollSeconds -LogFunction`. It POSTs the run, adopts `_links.active_run` on 409, polls `GET` the run until `succeeded`/`failed` or timeout, and returns an object with Account, Status, DatesComputed, WarningCount, Warnings (first 5) and FailureDetail.
-- [ ] T055 [US7] Create (repo root) `refresh-var.ps1` with the parameters and defaults in contracts/scripts.md. It resolves accounts from `GET /v1/accounts` (those with `position_ladder`) when `-Accounts` is omitted, imports `scripts/VarRefresh.psm1`, refreshes the accounts sequentially, prints a summary table, and exits 1 if any failed or timed out, else 0.
-- [ ] T056 [US7] Modify (repo root) `run_end_to_end.ps1`:
+- [X] T054 [US7] Create (repo root) `scripts/VarRefresh.psm1` exporting `Invoke-VarRefresh -BaseUrl -AccountName -Mode -TimeoutMinutes -PollSeconds -LogFunction`. It POSTs the run, adopts `_links.active_run` on 409, polls `GET` the run until `succeeded`/`failed` or timeout, and returns an object with Account, Status, DatesComputed, WarningCount, Warnings (first 5) and FailureDetail.
+- [X] T055 [US7] Create (repo root) `refresh-var.ps1` with the parameters and defaults in contracts/scripts.md. It resolves accounts from `GET /v1/accounts` (those with `position_ladder`) when `-Accounts` is omitted, imports `scripts/VarRefresh.psm1`, refreshes the accounts sequentially, prints a summary table, and exits 1 if any failed or timed out, else 0.
+- [X] T056 [US7] Modify (repo root) `run_end_to_end.ps1`:
   - insert `Write-PhaseHeader 7 "Compute Value at Risk"` after Phase 6;
   - for each successfully ingested `$SubAccountLedgers` account, call `Invoke-VarRefresh` (mode `missing`, 15-minute timeout), logging through `Write-Log` (OK/Warn/Error levels) and setting `$OverallSuccess = $false` on failure;
   - renumber the browser phase to `Write-PhaseHeader 8`;
   - update the script's header comment listing the phases.
-- [ ] T057 [US7] Manually validate quickstart steps 5 and 7 against the running services, and record the outcome (accounts, dates computed, exit code) as a note at the end of `specs/012-var-calculation-runs/quickstart.md`.
+- [X] T057 [US7] Manually validate quickstart steps 5 and 7 against the running services, and record the outcome (accounts, dates computed, exit code) as a note at the end of `specs/012-var-calculation-runs/quickstart.md`.
 
 ---
 

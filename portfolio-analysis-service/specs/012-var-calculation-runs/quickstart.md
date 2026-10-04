@@ -88,3 +88,30 @@ Phase 8 starts the browser even if a VaR run failed.
 ```powershell
 ruff check app/ tests/ ; ruff format --check app/ tests/ ; mypy --strict app/ ; pytest
 ```
+
+## 9. Validation record (2026-10-04)
+
+Live-tested `refresh-var.ps1` and the run endpoints against the real, already-ingested
+`HL-ISA`/`HL-SIPP` data, with portfolio-analysis-service running on `127.0.0.1:8000` but
+**market-data-web-service not running** (feature 009 is a separate prerequisite service
+this session did not have running).
+
+Confirmed working end to end against real data:
+- `refresh-var.ps1 -Accounts HL-ISA -Mode full` queued a run, polled it, and reported
+  its outcome with the correct exit code (1, since the run failed as expected below).
+- The run correctly failed with reason `market_data_unavailable` and a detail naming
+  the specific identifier and connection error, exactly as designed (FR-026: fail
+  closed, never fall back to filled prices).
+- `correlation_id`, `run_id` and the problem `type` slug were all populated correctly
+  on the failure.
+- `GET .../risk/var/status` for HL-SIPP correctly reported the real ladder range
+  (2016-04-20 to 2026-09-23), `missing_dates: 2721`, the last (failed) run, and
+  `methodology_version: null` (nothing has ever succeeded for this account).
+- `refresh-var.ps1` against an unreachable `-BaseUrl` also failed cleanly with exit 1.
+
+Not exercised live (needs market-data-web-service with feature 009 running, which was
+outside this session's setup): a successful run producing real VaR/ES numbers, the
+409-conflict path under real HTTP latency (the synthetic race is covered by
+`TestCreateRunAdmission.test_concurrent_requests_produce_exactly_one_winner`), and the
+`run_end_to_end.ps1` Phase 7 insertion itself (parse-checked with
+`[System.Management.Automation.Language.Parser]::ParseFile`, but not run end to end).
