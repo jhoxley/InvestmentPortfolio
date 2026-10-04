@@ -64,3 +64,23 @@ class TestVarProblem:
 
         body = json.loads(response.body)
         assert body["correlation_id"] == ""
+
+    def test_invalid_var_query_includes_correlation_id(self) -> None:
+        """The 013 series/backtest/methods query-validation slug also carries correlation_id."""
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(correlation_id="corr-789")
+        try:
+            response = _var_problem(
+                _fake_request("/v1/accounts/acct/risk/var"),
+                422,
+                "invalid-var-query",
+                "Invalid VaR Query",
+                "lookback '3y' is not one of the configured look-backs: 1y, 2y, 5y",
+            )
+        finally:
+            structlog.contextvars.clear_contextvars()
+
+        body = json.loads(response.body)
+        assert body["correlation_id"] == "corr-789"
+        assert body["type"] == "https://portfolio-analysis/errors/invalid-var-query"
+        assert body["status"] == 422

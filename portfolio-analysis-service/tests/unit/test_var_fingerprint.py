@@ -39,8 +39,8 @@ class TestConfigFingerprint:
 
     def test_lookback_change_changes_fingerprint(self) -> None:
         """Changing the lookbacks mapping changes the fingerprint."""
-        a = config_fingerprint(VarSettings(lookbacks={"1y": 260}), {})
-        b = config_fingerprint(VarSettings(lookbacks={"1y": 261}), {})
+        a = config_fingerprint(VarSettings(lookbacks={"1y": 260}, headline_lookback="1y"), {})
+        b = config_fingerprint(VarSettings(lookbacks={"1y": 261}, headline_lookback="1y"), {})
         assert a != b
 
     def test_quality_threshold_change_changes_fingerprint(self) -> None:

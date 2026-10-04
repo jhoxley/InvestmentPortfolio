@@ -393,6 +393,26 @@ class InvalidVarRunRequestError(Exception):
         super().__init__(self.message)
 
 
+class InvalidVarQueryError(Exception):
+    """Raised when a VaR series/backtest query parameter fails validation (013).
+
+    Covers an unsupported `lookback`, `confidence`, `pnl_basis` or `min_quality` value on
+    the read-only series/backtest endpoints -- distinct from InvalidVarRunRequestError,
+    which covers the run-request body on the write-side endpoints (012).
+    """
+
+    def __init__(self, message: str, fields: list[str] | None = None) -> None:
+        """Initialise with a descriptive message and the offending fields.
+
+        Args:
+            message: Human-readable description naming the supported values.
+            fields: Names of the query parameters that failed validation.
+        """
+        self.message = message
+        self.fields = fields or []
+        super().__init__(self.message)
+
+
 class ObservedHistoryUnsupportedError(Exception):
     """Raised when market-data-service does not support observed-only (fill=none) history."""
 

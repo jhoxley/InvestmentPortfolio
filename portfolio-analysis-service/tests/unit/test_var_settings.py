@@ -48,6 +48,17 @@ class TestVarSettingsDefaults:
         """excluded_returns defaults to an empty list."""
         assert Settings().var.excluded_returns == []
 
+    def test_default_headline_lookback(self) -> None:
+        """headline_lookback defaults to '2y' (013-var-series-backtest-api)."""
+        assert Settings().var.headline_lookback == "2y"
+
+    def test_headline_lookback_must_be_a_configured_lookback(self) -> None:
+        """Constructing VarSettings with a headline_lookback outside `lookbacks` fails fast."""
+        from app.config import VarSettings
+
+        with pytest.raises(ValidationError):
+            VarSettings(headline_lookback="3y")
+
 
 class TestVarSettingsYamlOverride:
     """load_settings() applies a config.yaml var: section over the defaults."""
@@ -61,6 +72,7 @@ var:
   methodology_version: "1.1.0"
   lookbacks: {"1y": 260, "3y": 780}
   confidence_levels_bp: [9900]
+  headline_lookback: "1y"
 """,
             encoding="utf-8",
         )
@@ -68,6 +80,7 @@ var:
         assert settings.var.methodology_version == "1.1.0"
         assert settings.var.lookbacks == {"1y": 260, "3y": 780}
         assert settings.var.confidence_levels_bp == [9900]
+        assert settings.var.headline_lookback == "1y"
 
     def test_excluded_returns_parses_identifier_and_date(self, tmp_path: Path) -> None:
         """An excluded_returns entry parses into an ExcludedReturn(identifier, date)."""

@@ -114,7 +114,7 @@ def _service(
         observed_price_client=observed_client,  # type: ignore[arg-type]
         var_repo=var_repo,
         scheduler=scheduler,  # type: ignore[arg-type]
-        settings=VarSettings(lookbacks={"win": 1}),
+        settings=VarSettings(lookbacks={"win": 1}, headline_lookback="win"),
     )
 
 

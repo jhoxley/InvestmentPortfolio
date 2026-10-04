@@ -32,6 +32,7 @@ from app.exceptions import (
     InvalidAccountNameError,
     InvalidDateRangeError,
     InvalidProjectionRangeError,
+    InvalidVarQueryError,
     InvalidVarRunRequestError,
     MarketDataServiceError,
     MergeNotSupportedError,
@@ -590,3 +591,18 @@ async def invalid_var_run_request_handler(
     return _var_problem(
         request, 422, "invalid-var-run-request", "Invalid VaR Run Request", exc.message
     )
+
+
+@app.exception_handler(InvalidVarQueryError)
+async def invalid_var_query_handler(request: Request, exc: InvalidVarQueryError) -> JSONResponse:
+    """Handle InvalidVarQueryError with a 422 response (013-var-series-backtest-api).
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response with correlation_id.
+    """
+    logger.warning("invalid_var_query", fields=exc.fields, detail=exc.message)
+    return _var_problem(request, 422, "invalid-var-query", "Invalid VaR Query", exc.message)

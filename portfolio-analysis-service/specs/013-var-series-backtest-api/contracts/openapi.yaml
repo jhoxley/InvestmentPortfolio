@@ -1,0 +1,351 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Adds strictly read-only endpoints over feature 012's existing per-account VaR store:
+    a time series of previously computed VaR/ES estimates joined with realised outcomes, a
+    backtest (Kupiec, Christoffersen, traffic-light zone, VaR stability) against that series,
+    and a methods-discovery endpoint. None of these endpoints trigger a calculation.
+  version: "0.13.0"
+
+servers:
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+tags:
+  - name: Risk
+
+paths:
+  /accounts/{account_name}/risk/var:
+    parameters:
+      - $ref: "#/components/parameters/AccountName"
+      - $ref: "#/components/parameters/Start"
+      - $ref: "#/components/parameters/End"
+      - $ref: "#/components/parameters/Lookback"
+      - $ref: "#/components/parameters/Confidence"
+
+    get:
+      operationId: get_var_series
+      summary: Read an account's previously computed VaR/ES series and realised outcomes
+      description: >
+        Returns, for the resolved date range and one look-back, every stored estimate joined
+        with its realised outcome. Never triggers a calculation. If nothing has been computed
+        for the account at all, or none falls within the resolved range and look-back, returns
+        a successful empty series with links to the status and runs resources, not an error.
+      tags: [Risk]
+      responses:
+        "200":
+          description: Series (possibly empty)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VarSeriesResponse"
+        "404":
+          $ref: "#/components/responses/AccountNotFound"
+        "422":
+          $ref: "#/components/responses/ValidationProblem"
+
+  /accounts/{account_name}/risk/var/backtest:
+    parameters:
+      - $ref: "#/components/parameters/AccountName"
+      - $ref: "#/components/parameters/Start"
+      - $ref: "#/components/parameters/End"
+      - $ref: "#/components/parameters/Lookback"
+      - $ref: "#/components/parameters/Confidence"
+      - name: pnl_basis
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [hypothetical, ladder]
+          default: hypothetical
+      - name: min_quality
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [ok, degraded]
+          default: degraded
+        description: >
+          "insufficient"-quality and pending-outcome dates are always excluded from the
+          observation set regardless of this parameter.
+      - name: rolling
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+        description: When true, adds a 250-day rolling exception count series per confidence level.
+
+    get:
+      operationId: get_var_backtest
+      summary: Backtest an account's VaR estimates against realised outcomes
+      description: >
+        Returns, per requested confidence level, Kupiec proportion-of-failures, Christoffersen
+        independence and conditional-coverage likelihood ratios and p-values, a traffic-light
+        zone, exception dates, mean VaR and VaR stability. Transition chains used by the
+        independence/conditional-coverage statistics break where a date is excluded from the
+        observation set.
+      tags: [Risk]
+      responses:
+        "200":
+          description: Backtest result (zero observations if nothing qualifies)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VarBacktestResponse"
+        "404":
+          $ref: "#/components/responses/AccountNotFound"
+        "422":
+          $ref: "#/components/responses/ValidationProblem"
+
+  /risk/var/methods:
+    get:
+      operationId: get_var_methods
+      summary: Describe the supported VaR calculation method, look-backs, confidence levels and measures
+      description: Requires no account; always succeeds.
+      tags: [Risk]
+      responses:
+        "200":
+          description: Method description
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VarMethodsResponse"
+
+components:
+  parameters:
+    AccountName:
+      name: account_name
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9_-]{1,64}$"
+
+    Start:
+      name: start
+      in: query
+      required: false
+      schema: {type: string, format: date}
+      description: Resolved exactly as the performance endpoints resolve it.
+
+    End:
+      name: end
+      in: query
+      required: false
+      schema: {type: string, format: date}
+      description: Resolved exactly as the performance endpoints resolve it.
+
+    Lookback:
+      name: lookback
+      in: query
+      required: false
+      schema: {type: string, enum: [1y, 2y, 5y]}
+      description: Defaults to the configured headline look-back when omitted.
+
+    Confidence:
+      name: confidence
+      in: query
+      required: false
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: {type: number}
+      description: >
+        Repeatable; one or more of the configured confidence levels as percentages (95, 97.5,
+        99). Defaults to every configured level when omitted.
+
+  responses:
+    AccountNotFound:
+      description: No capital ledger or position ladder has been ingested for the account
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+    ValidationProblem:
+      description: >
+        Invalid account name (invalid-account-name), account without a position ladder
+        (missing-required-source), invalid date range (invalid-date-range), future end date
+        (future-end-date), or an unsupported lookback/confidence/pnl_basis/min_quality value
+        (invalid-var-query, carries correlation_id)
+      content:
+        application/problem+json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/VarProblemDetail"
+              - $ref: "#/components/schemas/ProblemDetail"
+
+  schemas:
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+
+    VarProblemDetail:
+      description: Problem details for this feature's new error type (adds correlation_id)
+      allOf:
+        - $ref: "#/components/schemas/ProblemDetail"
+        - type: object
+          required: [correlation_id]
+          properties:
+            correlation_id: {type: string}
+
+    ConfidenceLevelEstimate:
+      type: object
+      required: [confidence_bp, var_gbp, var_pct, es_gbp, es_pct, hypothetical_exception, ladder_exception]
+      properties:
+        confidence_bp: {type: integer}
+        var_gbp: {type: [number, "null"]}
+        var_pct: {type: [number, "null"]}
+        es_gbp: {type: [number, "null"]}
+        es_pct: {type: [number, "null"]}
+        hypothetical_exception: {type: [boolean, "null"]}
+        ladder_exception: {type: [boolean, "null"]}
+
+    VarSeriesEntry:
+      type: object
+      required:
+        - date
+        - outcome_date
+        - total_value_gbp
+        - scenario_count
+        - actual_mv_pct
+        - proxied_mv_pct
+        - rescaled_mv_pct
+        - quality
+        - levels
+      properties:
+        date: {type: string, format: date}
+        outcome_date: {type: string, format: date}
+        total_value_gbp: {type: number}
+        scenario_count: {type: integer}
+        actual_mv_pct: {type: number}
+        proxied_mv_pct: {type: number}
+        rescaled_mv_pct: {type: number}
+        quality: {type: string, enum: [ok, degraded, insufficient]}
+        quality_reason: {type: [string, "null"]}
+        hypothetical_pnl_gbp: {type: [number, "null"]}
+        ladder_pnl_gbp: {type: [number, "null"]}
+        levels:
+          type: array
+          items: {$ref: "#/components/schemas/ConfidenceLevelEstimate"}
+
+    VarSeriesResponse:
+      type: object
+      required: [account_name, lookback_code, lookback_days, from_date, to_date, series, _links]
+      properties:
+        account_name: {type: string}
+        lookback_code: {type: string}
+        lookback_days: {type: integer}
+        from_date: {type: string, format: date}
+        to_date: {type: string, format: date}
+        series:
+          type: array
+          items: {$ref: "#/components/schemas/VarSeriesEntry"}
+        _links:
+          type: object
+          required: [self, status, runs]
+          properties:
+            self: {type: string}
+            status: {type: string}
+            runs: {type: string}
+
+    RollingExceptionPoint:
+      type: object
+      required: [date, exception_count]
+      properties:
+        date: {type: string, format: date}
+        exception_count: {type: integer}
+
+    BacktestConfidenceResult:
+      type: object
+      required: [confidence_bp, observation_count, exception_count, exception_dates]
+      properties:
+        confidence_bp: {type: integer}
+        observation_count: {type: integer}
+        exception_count: {type: integer}
+        expected_exceptions: {type: [number, "null"]}
+        exception_rate: {type: [number, "null"]}
+        kupiec_lr: {type: [number, "null"]}
+        kupiec_p_value: {type: [number, "null"]}
+        christoffersen_independence_lr: {type: [number, "null"]}
+        christoffersen_independence_p_value: {type: [number, "null"]}
+        conditional_coverage_lr: {type: [number, "null"]}
+        conditional_coverage_p_value: {type: [number, "null"]}
+        zone: {type: [string, "null"], enum: [green, yellow, red]}
+        exception_dates:
+          type: array
+          items: {type: string, format: date}
+        mean_var_gbp: {type: [number, "null"]}
+        var_stability: {type: [number, "null"]}
+        rolling_exceptions:
+          type: [array, "null"]
+          items: {$ref: "#/components/schemas/RollingExceptionPoint"}
+
+    VarBacktestResponse:
+      type: object
+      required:
+        - account_name
+        - lookback_code
+        - lookback_days
+        - from_date
+        - to_date
+        - pnl_basis
+        - min_quality
+        - levels
+        - _links
+      properties:
+        account_name: {type: string}
+        lookback_code: {type: string}
+        lookback_days: {type: integer}
+        from_date: {type: string, format: date}
+        to_date: {type: string, format: date}
+        pnl_basis: {type: string, enum: [hypothetical, ladder]}
+        min_quality: {type: string, enum: [ok, degraded]}
+        levels:
+          type: array
+          items: {$ref: "#/components/schemas/BacktestConfidenceResult"}
+        _links:
+          type: object
+          required: [self, status, runs]
+          properties:
+            self: {type: string}
+            status: {type: string}
+            runs: {type: string}
+
+    MethodLookback:
+      type: object
+      required: [code, business_days, is_headline]
+      properties:
+        code: {type: string}
+        business_days: {type: integer}
+        is_headline: {type: boolean}
+
+    VarMethodsResponse:
+      type: object
+      required: [method, methodology_version, lookbacks, confidence_levels_bp, measures, _links]
+      properties:
+        method: {type: string}
+        methodology_version: {type: string}
+        lookbacks:
+          type: array
+          items: {$ref: "#/components/schemas/MethodLookback"}
+        confidence_levels_bp:
+          type: array
+          items: {type: integer}
+        measures:
+          type: array
+          items: {type: string}
+        _links:
+          type: object
+          required: [self]
+          properties:
+            self: {type: string}

@@ -4,7 +4,7 @@ import datetime as dt
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DataSettings(BaseModel):
@@ -83,6 +83,28 @@ class VarSettings(BaseModel):
     )
     quality: VarQualitySettings = VarQualitySettings()
     excluded_returns: list[ExcludedReturn] = Field(default_factory=list)
+    headline_lookback: str = Field(
+        default="2y",
+        description="Default look-back code used by the series/backtest endpoints "
+        "(013-var-series-backtest-api) when the caller omits one",
+    )
+
+    @model_validator(mode="after")
+    def _headline_lookback_is_configured(self) -> "VarSettings":
+        """Fail fast at construction time if headline_lookback isn't a key of lookbacks.
+
+        Returns:
+            self, unchanged, when valid.
+
+        Raises:
+            ValueError: If headline_lookback is not a key of lookbacks.
+        """
+        if self.headline_lookback not in self.lookbacks:
+            raise ValueError(
+                f"headline_lookback '{self.headline_lookback}' must be one of the "
+                f"configured lookbacks {sorted(self.lookbacks)}"
+            )
+        return self
 
 
 class Settings(BaseModel):
