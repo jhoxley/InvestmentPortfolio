@@ -47,11 +47,9 @@ def _none_if_nan(value: object) -> float | None:
         None if value is a float NaN, otherwise value cast to float, or None if value
         is itself None/NaT.
     """
-    if value is None:
+    if value is None or _is_nan(value):
         return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    return float(value)
+    return float(value)  # type: ignore[arg-type]
 
 
 class VarSeriesService:
@@ -171,7 +169,7 @@ class VarSeriesService:
         hypothetical_pnl_gbp = _none_if_nan(row.get("hypothetical_pnl_gbp"))
         ladder_pnl_gbp = _none_if_nan(row.get("ladder_pnl_gbp"))
         outcome_date = row.get("outcome_date")
-        if outcome_date is None or (isinstance(outcome_date, float) and math.isnan(outcome_date)):
+        if outcome_date is None or _is_nan(outcome_date):
             outcome_date = pd.Timestamp(row["date"]) + pd.offsets.BDay(1)
 
         levels = [
@@ -183,12 +181,12 @@ class VarSeriesService:
             date=pd.Timestamp(row["date"]).date(),
             outcome_date=pd.Timestamp(outcome_date).date(),
             total_value_gbp=total_value_gbp,
-            scenario_count=int(row["scenario_count"]),
-            actual_mv_pct=float(row["actual_mv_pct"]),
-            proxied_mv_pct=float(row["proxied_mv_pct"]),
-            rescaled_mv_pct=float(row["rescaled_mv_pct"]),
+            scenario_count=int(row["scenario_count"]),  # type: ignore[call-overload]
+            actual_mv_pct=float(row["actual_mv_pct"]),  # type: ignore[arg-type]
+            proxied_mv_pct=float(row["proxied_mv_pct"]),  # type: ignore[arg-type]
+            rescaled_mv_pct=float(row["rescaled_mv_pct"]),  # type: ignore[arg-type]
             quality=row["quality"],  # type: ignore[arg-type]
-            quality_reason=row.get("quality_reason") if row.get("quality_reason") else None,
+            quality_reason=_none_if_nan_str(row.get("quality_reason")),
             hypothetical_pnl_gbp=hypothetical_pnl_gbp,
             ladder_pnl_gbp=ladder_pnl_gbp,
             levels=levels,
@@ -216,8 +214,9 @@ class VarSeriesService:
         """
         var_gbp = _none_if_nan(row.get(f"var_{confidence_bp}_gbp"))
         es_gbp = _none_if_nan(row.get(f"es_{confidence_bp}_gbp"))
-        var_pct = var_gbp / total_value_gbp * 100 if var_gbp is not None and total_value_gbp else None
-        es_pct = es_gbp / total_value_gbp * 100 if es_gbp is not None and total_value_gbp else None
+        has_value = total_value_gbp != 0
+        var_pct = var_gbp / total_value_gbp * 100 if var_gbp is not None and has_value else None
+        es_pct = es_gbp / total_value_gbp * 100 if es_gbp is not None and has_value else None
 
         hypothetical_exception = (
             None

@@ -77,6 +77,71 @@ def _write_minimal_ladder(repo: LadderRepository, account: str, on: date) -> Non
     repo.write(account, df, meta)
 
 
+def _write_ladder_range(
+    repo: LadderRepository, account: str, from_date: date, to_date: date
+) -> None:
+    """Write a ladder spanning [from_date, to_date] for `account` (meta only matters).
+
+    AccountsService.get_summary() (used by resolve_window()) reads only meta.json, so
+    the written DataFrame only needs *a* row -- it never has to cover every business
+    day in the range.
+
+    Args:
+        repo: LadderRepository to write through.
+        account: Target account name.
+        from_date: The ladder's first date.
+        to_date: The ladder's last date.
+    """
+    df = pd.DataFrame(
+        [
+            {
+                "date": d,
+                "sub_account": "Equity A",
+                "book_cost": 0.0,
+                "quantity": 10.0,
+                "total_income": 0.0,
+                "price": 100.0,
+                "market_value": 1000.0,
+                "portfolio_weight": 1.0,
+                "position_return": 0.0,
+                "weighted_position_return": 0.0,
+            }
+            for d in (from_date, to_date)
+        ]
+    )
+    meta = AccountMeta(
+        account_name=account,
+        checksum="var-bt-bdd-test",
+        row_count=len(df),
+        from_date=from_date,
+        to_date=to_date,
+        sub_accounts=["Equity A"],
+        ingested_at=datetime.now(UTC),
+    )
+    repo.write(account, df, meta)
+
+
+def _bt_estimate(on: date, quality: str = "ok") -> dict[str, Any]:
+    """Build one backtest-scenario estimates.csv row at the fixed '2y' look-back."""
+    return _estimate_row(on, "2y", 520, quality=quality)
+
+
+def _bt_outcome(
+    on: date,
+    hypothetical_pnl_gbp: float | None = -10.0,
+    ladder_pnl_gbp: float | None = -10.0,
+    outcome_status: str = "realised",
+) -> dict[str, Any]:
+    """Build one backtest-scenario outcomes.csv row, one business day after `on`."""
+    return _outcome_row(
+        on,
+        (pd.Timestamp(on) + pd.offsets.BDay(1)).date(),
+        outcome_status=outcome_status,
+        hypothetical_pnl_gbp=hypothetical_pnl_gbp,
+        ladder_pnl_gbp=ladder_pnl_gbp,
+    )
+
+
 def _estimate_row(
     on: date,
     lookback_code: str,
@@ -159,7 +224,9 @@ def _outcome_row(
     }
 
 
-@given(parsers.parse('account "{account}" has a completed VaR run covering {on} at look-back "{code}"'))
+@given(
+    parsers.parse('account "{account}" has a completed VaR run covering {on} at look-back "{code}"')
+)
 def completed_run_covering_date(
     account: str, on: str, code: str, ladder_repo: LadderRepository, var_repo: VarRepository
 ) -> None:
@@ -205,11 +272,7 @@ def completed_estimates_multi_lookback(
     )
 
 
-@given(
-    parsers.parse(
-        'account "{account}" has a completed estimate for {on} at 95%, 97.5% and 99%'
-    )
-)
+@given(parsers.parse('account "{account}" has a completed estimate for {on} at 95%, 97.5% and 99%'))
 def completed_estimate_all_confidence(
     account: str, on: str, ladder_repo: LadderRepository, var_repo: VarRepository
 ) -> None:
@@ -224,17 +287,15 @@ def completed_estimate_all_confidence(
     )
 
 
-@given(parsers.parse('account "{account}" has an ingested position ladder but no completed VaR run'))
+@given(
+    parsers.parse('account "{account}" has an ingested position ladder but no completed VaR run')
+)
 def ladder_only_no_var_run(account: str, ladder_repo: LadderRepository) -> None:
     """Seed only a ladder; the VaR store for this account stays empty."""
     _write_minimal_ladder(ladder_repo, account, date(2026, 3, 2))
 
 
-@given(
-    parsers.parse(
-        "a stored estimate for {on} with 95% VaR of {var_gbp:d} GBP"
-    )
-)
+@given(parsers.parse("a stored estimate for {on} with 95% VaR of {var_gbp:d} GBP"))
 def stored_estimate_with_var(
     on: str, var_gbp: int, context: dict[str, Any], ladder_repo: LadderRepository
 ) -> None:
@@ -334,8 +395,11 @@ def request_series_with_confidence_string(
 
 
 @given(parsers.parse("a request with start {start} and end {end}"))
-def record_invalid_range(start: str, end: str, context: dict[str, Any]) -> None:
-    """Record an explicit start/end pair for the next series request."""
+def record_invalid_range(
+    start: str, end: str, context: dict[str, Any], ladder_repo: LadderRepository
+) -> None:
+    """Record an explicit start/end pair for the next series request against a real account."""
+    _write_minimal_ladder(ladder_repo, "var-acct", date(2026, 3, 2))
     context["start"] = start
     context["end"] = end
 
@@ -350,8 +414,10 @@ def account_with_only_capital_ledger(app_client: TestClient) -> None:
     write_capital_only(CapitalRepository(data_dir=settings.data.directory), "capital-only-acct")
 
 
-@when(parsers.parse('the VaR series is requested for that account'))
-def request_series_for_capital_only_account(context: dict[str, Any], app_client: TestClient) -> None:
+@when(parsers.parse("the VaR series is requested for that account"))
+def request_series_for_capital_only_account(
+    context: dict[str, Any], app_client: TestClient
+) -> None:
     """Issue the series request for the capital-only account seeded above."""
     context["response"] = app_client.get("/v1/accounts/capital-only-acct/risk/var")
 
@@ -500,3 +566,310 @@ def assert_rejected_missing_source(context: dict[str, Any]) -> None:
     resp = context["response"]
     assert resp.status_code == 422
     assert resp.json()["type"].endswith("missing-required-source")
+
+
+# --- User Story 2: Backtest -------------------------------------------------------
+
+
+@given(
+    parsers.parse(
+        'account "{account}" has {n:d} days of {pct}% VaR estimates and hypothetical outcomes'
+    )
+)
+def seed_bt_days(
+    account: str,
+    n: int,
+    pct: str,
+    context: dict[str, Any],
+    ladder_repo: LadderRepository,
+    var_repo: VarRepository,
+) -> None:
+    """Seed n consecutive 'ok'-quality days, no exceptions yet."""
+    days = pd.bdate_range(start=date(2025, 1, 2), periods=n)
+    context["bt_account"] = account
+    context["bt_days"] = days
+    _write_ladder_range(ladder_repo, account, days[0].date(), days[-1].date())
+    estimates = [_bt_estimate(d.date()) for d in days]
+    outcomes = [_bt_outcome(d.date()) for d in days]
+    _commit(var_repo, account, pd.DataFrame(estimates), pd.DataFrame(outcomes))
+
+
+@given(parsers.parse("exactly {n:d} of those days have a loss larger than that day's {pct}% VaR"))
+def inject_bt_exceptions(
+    n: int, pct: str, context: dict[str, Any], var_repo: VarRepository
+) -> None:
+    """Re-commit the seeded days with exactly n exceptions (the first n days)."""
+    account: str = context["bt_account"]
+    days: pd.DatetimeIndex = context["bt_days"]
+    estimates = [_bt_estimate(d.date()) for d in days]
+    outcomes = [
+        _bt_outcome(d.date(), hypothetical_pnl_gbp=-200.0 if i < n else -10.0)
+        for i, d in enumerate(days)
+    ]
+    _commit(var_repo, account, pd.DataFrame(estimates), pd.DataFrame(outcomes))
+
+
+@when(parsers.parse('the backtest is requested for "{account}" at {pct}% confidence'))
+def request_backtest_at_confidence(
+    account: str, pct: str, context: dict[str, Any], app_client: TestClient
+) -> None:
+    """Issue the backtest request for a single confidence level."""
+    context["response"] = app_client.get(
+        f"/v1/accounts/{account}/risk/var/backtest", params={"confidence": pct}
+    )
+
+
+@then(parsers.parse("the reported observation count is {n:d} and the exception count is {x:d}"))
+def assert_observation_and_exception_count(n: int, x: int, context: dict[str, Any]) -> None:
+    """Check the first level's observation and exception counts."""
+    level = context["response"].json()["levels"][0]
+    assert level["observation_count"] == n
+    assert level["exception_count"] == x
+
+
+@given(parsers.parse('account "{account}" has both hypothetical and ladder outcomes stored'))
+def seed_bt_basic(
+    account: str, context: dict[str, Any], ladder_repo: LadderRepository, var_repo: VarRepository
+) -> None:
+    """Seed 10 'ok'-quality days with both PnL bases equal (no disagreement yet)."""
+    days = pd.bdate_range(start=date(2025, 1, 2), periods=10)
+    context["bt_account"] = account
+    context["bt_days"] = days
+    _write_ladder_range(ladder_repo, account, days[0].date(), days[-1].date())
+    estimates = [_bt_estimate(d.date()) for d in days]
+    outcomes = [_bt_outcome(d.date()) for d in days]
+    _commit(var_repo, account, pd.DataFrame(estimates), pd.DataFrame(outcomes))
+
+
+@given("the two PnL bases disagree on whether one day is an exception")
+def make_bt_pnl_bases_disagree(context: dict[str, Any], var_repo: VarRepository) -> None:
+    """Re-commit so day index 3's hypothetical PnL is an exception but ladder PnL is not."""
+    account: str = context["bt_account"]
+    days: pd.DatetimeIndex = context["bt_days"]
+    estimates = [_bt_estimate(d.date()) for d in days]
+    outcomes = [
+        _bt_outcome(
+            d.date(), hypothetical_pnl_gbp=-200.0 if i == 3 else -10.0, ladder_pnl_gbp=-10.0
+        )
+        for i, d in enumerate(days)
+    ]
+    _commit(var_repo, account, pd.DataFrame(estimates), pd.DataFrame(outcomes))
+
+
+@when(parsers.parse('the backtest is requested for "{account}" with no pnl_basis parameter'))
+def request_backtest_no_pnl_basis(
+    account: str, context: dict[str, Any], app_client: TestClient
+) -> None:
+    """Issue the backtest request without a pnl_basis parameter."""
+    context["response"] = app_client.get(f"/v1/accounts/{account}/risk/var/backtest")
+
+
+@when(parsers.parse('the backtest is requested for "{account}" with pnl_basis "{basis}"'))
+def request_backtest_with_pnl_basis(
+    account: str, basis: str, context: dict[str, Any], app_client: TestClient
+) -> None:
+    """Issue the backtest request with an explicit (possibly unsupported) pnl_basis."""
+    context["response"] = app_client.get(
+        f"/v1/accounts/{account}/risk/var/backtest", params={"pnl_basis": basis}
+    )
+
+
+@then("the exception count reflects the hypothetical PnL basis")
+def assert_exception_reflects_hypothetical(context: dict[str, Any]) -> None:
+    """Check the 95% level's exception count reflects hypothetical PnL (the default)."""
+    level = context["response"].json()["levels"][0]
+    assert level["confidence_bp"] == 9500
+    assert level["exception_count"] == 1
+
+
+@then("the exception count reflects the ladder PnL basis instead")
+def assert_exception_reflects_ladder(context: dict[str, Any]) -> None:
+    """Check the 95% level's exception count reflects ladder PnL instead."""
+    level = context["response"].json()["levels"][0]
+    assert level["confidence_bp"] == 9500
+    assert level["exception_count"] == 0
+
+
+@given(
+    parsers.parse(
+        'account "{account}" has {ok:d} "ok" days and {deg:d} "degraded" days '
+        "in the requested range"
+    )
+)
+def seed_ok_and_degraded_days(
+    account: str,
+    ok: int,
+    deg: int,
+    context: dict[str, Any],
+    ladder_repo: LadderRepository,
+    var_repo: VarRepository,
+) -> None:
+    """Seed ok 'ok'-quality days followed by deg 'degraded'-quality days."""
+    days = pd.bdate_range(start=date(2025, 1, 2), periods=ok + deg)
+    context["bt_account"] = account
+    context["bt_days"] = days
+    _write_ladder_range(ladder_repo, account, days[0].date(), days[-1].date())
+    estimates = [
+        _bt_estimate(d.date(), quality="ok" if i < ok else "degraded") for i, d in enumerate(days)
+    ]
+    outcomes = [_bt_outcome(d.date()) for d in days]
+    _commit(var_repo, account, pd.DataFrame(estimates), pd.DataFrame(outcomes))
+
+
+@given(
+    parsers.parse(
+        'account "{account}" has {ok:d} "ok" days and {insuf:d} "insufficient" days '
+        "in the requested range"
+    )
+)
+def seed_ok_and_insufficient_days(
+    account: str,
+    ok: int,
+    insuf: int,
+    context: dict[str, Any],
+    ladder_repo: LadderRepository,
+    var_repo: VarRepository,
+) -> None:
+    """Seed ok 'ok'-quality days followed by insuf 'insufficient'-quality days."""
+    days = pd.bdate_range(start=date(2025, 1, 2), periods=ok + insuf)
+    context["bt_account"] = account
+    context["bt_days"] = days
+    _write_ladder_range(ladder_repo, account, days[0].date(), days[-1].date())
+    estimates = [
+        _bt_estimate(d.date(), quality="ok" if i < ok else "insufficient")
+        for i, d in enumerate(days)
+    ]
+    outcomes = [_bt_outcome(d.date()) for d in days]
+    _commit(var_repo, account, pd.DataFrame(estimates), pd.DataFrame(outcomes))
+
+
+@when(parsers.parse('the backtest is requested for "{account}" with a minimum quality of "{q}"'))
+def request_backtest_min_quality(
+    account: str, q: str, context: dict[str, Any], app_client: TestClient
+) -> None:
+    """Issue the backtest request with an explicit (possibly unsupported) min_quality."""
+    context["response"] = app_client.get(
+        f"/v1/accounts/{account}/risk/var/backtest", params={"min_quality": q}
+    )
+
+
+@when(parsers.parse('the backtest is requested for "{account}" with no minimum quality parameter'))
+def request_backtest_no_min_quality(
+    account: str, context: dict[str, Any], app_client: TestClient
+) -> None:
+    """Issue the backtest request without a min_quality parameter."""
+    context["response"] = app_client.get(f"/v1/accounts/{account}/risk/var/backtest")
+
+
+@then(parsers.parse("the reported observation count is {n:d}"))
+def assert_observation_count(n: int, context: dict[str, Any]) -> None:
+    """Check the first level's observation count."""
+    level = context["response"].json()["levels"][0]
+    assert level["observation_count"] == n
+
+
+@then(parsers.parse("the reported observation count is {n:d}, not {m:d}"))
+def assert_observation_count_not(n: int, m: int, context: dict[str, Any]) -> None:
+    """Check the first level's observation count equals n, not m."""
+    level = context["response"].json()["levels"][0]
+    assert level["observation_count"] == n
+    assert level["observation_count"] != m
+
+
+@given(parsers.parse('account "{account}" has {n:d} days of estimates and outcomes'))
+def seed_n_days(
+    account: str,
+    n: int,
+    context: dict[str, Any],
+    ladder_repo: LadderRepository,
+    var_repo: VarRepository,
+) -> None:
+    """Seed n consecutive 'ok'-quality days with no exceptions."""
+    days = pd.bdate_range(start=date(2024, 1, 2), periods=n)
+    context["bt_account"] = account
+    context["bt_days"] = days
+    _write_ladder_range(ladder_repo, account, days[0].date(), days[-1].date())
+    estimates = [_bt_estimate(d.date()) for d in days]
+    outcomes = [_bt_outcome(d.date()) for d in days]
+    _commit(var_repo, account, pd.DataFrame(estimates), pd.DataFrame(outcomes))
+
+
+@when(parsers.parse('the backtest is requested for "{account}" with the rolling series enabled'))
+def request_backtest_rolling(account: str, context: dict[str, Any], app_client: TestClient) -> None:
+    """Issue the backtest request with the rolling exception series enabled."""
+    context["response"] = app_client.get(
+        f"/v1/accounts/{account}/risk/var/backtest", params={"rolling": "true"}
+    )
+
+
+@then(
+    "the response includes a 250-day rolling exception count for each requested date "
+    "from the 250th day onward"
+)
+def assert_rolling_series_present(context: dict[str, Any]) -> None:
+    """Check the rolling series has exactly (N - 250 + 1) points."""
+    level = context["response"].json()["levels"][0]
+    days: pd.DatetimeIndex = context["bt_days"]
+    rolling = level["rolling_exceptions"]
+    assert rolling is not None
+    assert len(rolling) == len(days) - 250 + 1
+
+
+@then("the request is rejected with a client error naming the supported pnl_basis values")
+def assert_rejected_pnl_basis(context: dict[str, Any]) -> None:
+    """Check a 422 invalid-var-query response naming hypothetical/ladder."""
+    resp = context["response"]
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["type"].endswith("invalid-var-query")
+    assert "hypothetical" in body["detail"]
+    assert "ladder" in body["detail"]
+
+
+@then("the request is rejected with a client error naming the supported min_quality values")
+def assert_rejected_min_quality(context: dict[str, Any]) -> None:
+    """Check a 422 invalid-var-query response naming ok/degraded."""
+    resp = context["response"]
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["type"].endswith("invalid-var-query")
+    assert "ok" in body["detail"]
+    assert "degraded" in body["detail"]
+
+
+# --- User Story 3: Methods --------------------------------------------------------
+
+
+@when("the VaR methods are requested")
+def request_var_methods(context: dict[str, Any], app_client: TestClient) -> None:
+    """Issue the methods request (no account)."""
+    context["response"] = app_client.get("/v1/risk/var/methods")
+
+
+@then("the response lists all three look-back codes with their business-day lengths")
+def assert_methods_lookbacks(context: dict[str, Any]) -> None:
+    """Check every configured look-back code and its business-day length."""
+    body = context["response"].json()
+    codes = {lb["code"]: lb["business_days"] for lb in body["lookbacks"]}
+    assert codes == {"1y": 260, "2y": 520, "5y": 1300}
+
+
+@then("it lists all three confidence levels")
+def assert_methods_confidence(context: dict[str, Any]) -> None:
+    """Check every configured confidence level is listed."""
+    body = context["response"].json()
+    assert body["confidence_levels_bp"] == [9500, 9750, 9900]
+
+
+@then("it names the headline look-back")
+def assert_methods_headline(context: dict[str, Any]) -> None:
+    """Check exactly one look-back is marked as the headline."""
+    body = context["response"].json()
+    headline = [lb for lb in body["lookbacks"] if lb["is_headline"]]
+    assert len(headline) == 1
+
+
+@then(parsers.parse("the response is {status:d} regardless of which accounts have been ingested"))
+def assert_methods_status(status: int, context: dict[str, Any]) -> None:
+    """Check the methods response's status code."""
+    assert context["response"].status_code == status

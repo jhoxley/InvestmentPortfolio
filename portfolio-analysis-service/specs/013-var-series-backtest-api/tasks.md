@@ -50,7 +50,7 @@ executed — this feature never triggers one).
 
 **Purpose**: Empty test/feature-file skeletons everything else fills in. No new dependencies.
 
-- [ ] T001 Create empty test modules `tests/unit/test_var_backtest_stats.py`,
+- [X] T001 Create empty test modules `tests/unit/test_var_backtest_stats.py`,
   `tests/unit/test_var_window.py`, `tests/unit/test_var_series_service.py`,
   `tests/unit/test_var_backtest_service.py`, `tests/unit/test_var_methods_service.py`,
   `tests/unit/test_risk_var_series_openapi.py`; `tests/features/var_series_backtest_api.feature`
@@ -69,32 +69,32 @@ helper that every story's endpoint depends on.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T002 [P] Write a unit test in `tests/unit/test_var_settings.py` (extend the existing file)
+- [X] T002 [P] Write a unit test in `tests/unit/test_var_settings.py` (extend the existing file)
   asserting `VarSettings().headline_lookback == "2y"` and that constructing
   `VarSettings(headline_lookback="3y")` (not a key of `lookbacks`) raises `ValidationError` at
   construction time.
-- [ ] T003 Add `headline_lookback: str = "2y"` to `VarSettings` in `app/config.py` with a
+- [X] T003 Add `headline_lookback: str = "2y"` to `VarSettings` in `app/config.py` with a
   `model_validator(mode="after")` asserting it is a key of `self.lookbacks` (research.md §10),
   making T002 pass.
-- [ ] T004 [P] Write a unit test in `tests/unit/test_var_problem_details.py` (extend the existing
+- [X] T004 [P] Write a unit test in `tests/unit/test_var_problem_details.py` (extend the existing
   file from feature 012) asserting `InvalidVarQueryError(message=..., fields=[...])` produces,
   through the FastAPI test client, a 422 `application/problem+json` body with
   `type` ending `invalid-var-query`, the given `detail`, and a non-empty `correlation_id`.
-- [ ] T005 Add `InvalidVarQueryError(message: str, fields: list[str] | None = None)` to
+- [X] T005 Add `InvalidVarQueryError(message: str, fields: list[str] | None = None)` to
   `app/exceptions.py`, following `InvalidVarRunRequestError`'s existing shape (research.md §2),
   and register its handler in `app/main.py` using the existing `_var_problem()` helper
   (422, slug `invalid-var-query`, title `"Invalid VaR Query"`), making T004 pass.
-- [ ] T006 [P] Write a unit test in `tests/unit/test_var_window.py`: given a fake
+- [X] T006 [P] Write a unit test in `tests/unit/test_var_window.py`: given a fake
   `AccountsService` whose `get_summary()` returns ladder metadata and a fake
   `LadderRepository` whose `read_full_df()` raises `AssertionError` if called,
   `resolve_window()` returns the correct resolved start/end without raising, and raises
   `AccountNotFoundError` / `MissingRequiredSourceError` / `FutureEndDateError` /
   `InvalidDateRangeError` in the same cases `DailyReturnSeriesLoader.load()` does.
-- [ ] T007 Create `app/services/var/var_window.py`: a frozen `WindowResolution` dataclass
+- [X] T007 Create `app/services/var/var_window.py`: a frozen `WindowResolution` dataclass
   (`resolved_start`, `resolved_end`, `ladder_from_date`) and `resolve_window(accounts_service,
   date_resolver, account_name, start, end, today, attribute_label) -> WindowResolution`
   (research.md §1), making T006 pass.
-- [ ] T008 [P] Create `app/models/var_series.py` per data-model.md: `ConfidenceLevelEstimate`,
+- [X] T008 [P] Create `app/models/var_series.py` per data-model.md: `ConfidenceLevelEstimate`,
   `VarSeriesEntry`, `VarSeriesResponse`, `RollingExceptionPoint`, `BacktestConfidenceResult`,
   `VarBacktestResponse`, `MethodLookback`, `VarMethodsResponse` (`PnlBasis` and
   `TrafficLightZone` type aliases; `_links` aliased via `ConfigDict(populate_by_name=True)`,
@@ -123,7 +123,7 @@ response correctly, and an account with nothing seeded returns `200` with an emp
 
 ### Tests for User Story 1 (write first, must fail)
 
-- [ ] T009 [P] [US1] Write `tests/unit/test_var_series_service.py` against a `VarRepository`
+- [X] T009 [P] [US1] Write `tests/unit/test_var_series_service.py` against a `VarRepository`
   pointed at `tmp_path`, seeded directly via `commit()` (no run service involved). Cover:
   a date with a full `ok`-quality estimate at one look-back/confidence returns exact values
   (SC-001); only the requested look-back's row is returned when multiple look-backs are stored
@@ -137,20 +137,20 @@ response correctly, and an account with nothing seeded returns `200` with an emp
   `VarRepository` test double (or spy) whose `commit()` and `write_run()` raise `AssertionError`
   if called, and assert `get_series()` never calls either — this endpoint must be provably
   read-only, not just read-only by omission.
-- [ ] T010 [P] [US1] Add the five Gherkin scenarios from spec.md's User Story 1 to
+- [X] T010 [P] [US1] Add the five Gherkin scenarios from spec.md's User Story 1 to
   `tests/features/var_series_backtest_api.feature` under an `@us1` tag, and implement their step
   definitions in `tests/steps/var_series_backtest_api_steps.py`, seeding the store through
   `VarRepository.commit()` directly in `Given` steps.
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] Create `app/services/var/var_series_service.py`: `VarSeriesService.get_series(
+- [X] T011 [US1] Create `app/services/var/var_series_service.py`: `VarSeriesService.get_series(
   account_name, start, end, lookback, confidence_levels_bp, today) -> VarSeriesResponse`. Uses
   `resolve_window()` (T007) for validation/defaulting, reads
   `VarRepository.read_estimates()`/`read_outcomes()`, joins on `date`, filters to the resolved
   range and requested look-back, builds `VarSeriesEntry`/`ConfidenceLevelEstimate` per
   research.md §4–§5, and always includes `status`/`runs` in `_links` (making T009 pass).
-- [ ] T012 [US1] Add `GET /accounts/{account_name}/risk/var` to `app/api/risk_var.py`: query
+- [X] T012 [US1] Add `GET /accounts/{account_name}/risk/var` to `app/api/risk_var.py`: query
   params `start`, `end`, `lookback` (defaults to `settings.var.headline_lookback`), `confidence`
   (repeatable percentages, parsed and validated against `settings.var.confidence_levels_bp`,
   raising `InvalidVarQueryError` naming the supported values on an unsupported `lookback` or
@@ -159,7 +159,7 @@ response correctly, and an account with nothing seeded returns `200` with an emp
   `var_series_request` event logging `account_name`, `lookback`, confidence levels requested and
   the returned row count, mirroring `risk_service.py`'s `return_histogram_request` event
   (making T010's scenarios pass).
-- [ ] T013 [US1] Add the series endpoint's paths/schemas from `contracts/openapi.yaml` to
+- [X] T013 [US1] Add the series endpoint's paths/schemas from `contracts/openapi.yaml` to
   `tests/unit/test_risk_var_series_openapi.py`: assert `GET /v1/accounts/{account_name}/risk/var`
   is present in the live `/openapi.json`, with the `VarSeriesResponse` schema's required fields.
 
@@ -182,7 +182,7 @@ N=250, 99% exactly (SC-003).
 
 ### Tests for User Story 2 (write first, must fail)
 
-- [ ] T014 [P] [US2] Write `tests/unit/test_var_backtest_stats.py` covering, against hand-worked
+- [X] T014 [P] [US2] Write `tests/unit/test_var_backtest_stats.py` covering, against hand-worked
   values from `docs/proposals/value-at-risk.md` §4.3 and spec.md's scenarios, every numeric
   assertion compared **within 1e-9 relative tolerance** for decimals and **exactly** for
   integers/strings (SC-002):
@@ -198,7 +198,7 @@ N=250, 99% exactly (SC-003).
   holdings-changed transitions and returns `None` with fewer than 2 qualifying log-changes.
   `rolling_exception_counts(indicators, window=250)` returns `[]` for fewer than 250 entries and
   one point per date from the 250th entry onward otherwise.
-- [ ] T015 [P] [US2] Write `tests/unit/test_var_backtest_service.py` against a seeded
+- [X] T015 [P] [US2] Write `tests/unit/test_var_backtest_service.py` against a seeded
   `VarRepository`. Cover: exception count matches the number of stored days where the chosen
   PnL basis's loss exceeds that day's stored VaR (spec.md scenario); `pnl_basis="ladder"` versus
   the default `"hypothetical"` changes which days count as exceptions when the two disagree;
@@ -212,24 +212,24 @@ N=250, 99% exactly (SC-003).
   equals the mean of `var_gbp` over the observation set exactly (FR-013). **FR-023 guard**: pass
   a `VarRepository` test double whose `commit()` and `write_run()` raise `AssertionError` if
   called, and assert `get_backtest()` never calls either.
-- [ ] T016 [P] [US2] Add the eight Gherkin scenarios from spec.md's User Story 2 to
+- [X] T016 [P] [US2] Add the eight Gherkin scenarios from spec.md's User Story 2 to
   `tests/features/var_series_backtest_api.feature` under an `@us2` tag, with step definitions in
   `tests/steps/var_series_backtest_api_steps.py`.
 
 ### Implementation for User Story 2
 
-- [ ] T017 [US2] Create `app/services/var/backtest.py`: pure functions `kupiec_pof`,
+- [X] T017 [US2] Create `app/services/var/backtest.py`: pure functions `kupiec_pof`,
   `christoffersen_independence`, `conditional_coverage`, `traffic_light_zone`, `var_stability`,
   `rolling_exception_counts`, implementing research.md §8 exactly (stdlib `math.erfc`,
   `math.exp`, `math.lgamma` only; no numpy/pandas dependency in this module, mirroring
   `engine.py`'s pure-function convention), making T014 pass.
-- [ ] T018 [US2] Create `app/services/var/var_backtest_service.py`: `VarBacktestService.
+- [X] T018 [US2] Create `app/services/var/var_backtest_service.py`: `VarBacktestService.
   get_backtest(account_name, start, end, lookback, confidence_levels_bp, pnl_basis, min_quality,
   rolling, today) -> VarBacktestResponse`. Uses `resolve_window()` (T007), reads
   `VarRepository.read_estimates()`/`read_outcomes()`, builds the observation set per research.md
   §6, calls `backtest.py`'s functions (T017) per confidence level, and always includes
   `status`/`runs` in `_links` (making T015 pass).
-- [ ] T019 [US2] Add `GET /accounts/{account_name}/risk/var/backtest` to `app/api/risk_var.py`:
+- [X] T019 [US2] Add `GET /accounts/{account_name}/risk/var/backtest` to `app/api/risk_var.py`:
   query params `start`, `end`, `lookback`, `confidence` (same parsing as T012), `pnl_basis`
   (`hypothetical`|`ladder`, default `hypothetical`), `min_quality` (`ok`|`degraded`, default
   `degraded`), `rolling` (bool, default `false`) — an unsupported `pnl_basis` or `min_quality`
@@ -237,7 +237,7 @@ N=250, 99% exactly (SC-003).
   `_get_var_backtest_service` dependency factory; a structlog `var_backtest_request` event
   logging `account_name`, `lookback`, `pnl_basis`, `min_quality`, and each confidence level's
   `observation_count`/`exception_count` (making T016's scenarios pass).
-- [ ] T020 [US2] Extend `tests/unit/test_risk_var_series_openapi.py` to assert the backtest
+- [X] T020 [US2] Extend `tests/unit/test_risk_var_series_openapi.py` to assert the backtest
   endpoint's path and `VarBacktestResponse` schema are present in the live `/openapi.json`.
 
 **Checkpoint**: User Stories 1 AND 2 both work independently — the backtest endpoint reproduces
@@ -255,23 +255,23 @@ it lists the configured look-backs (with the headline marked), confidence levels
 
 ### Tests for User Story 3 (write first, must fail)
 
-- [ ] T021 [P] [US3] Write `tests/unit/test_var_methods_service.py`: `build_methods_response(
+- [X] T021 [P] [US3] Write `tests/unit/test_var_methods_service.py`: `build_methods_response(
   VarSettings())` returns one `MethodLookback` per configured look-back with `business_days`
   matching `settings.lookbacks`, exactly one with `is_headline=True` matching
   `settings.headline_lookback`, `confidence_levels_bp` equal to `settings.
   confidence_levels_bp`, a non-empty static `measures` list, and `_links.self` set — with no
   repository or I/O dependency (pass only `VarSettings`).
-- [ ] T022 [P] [US3] Add the two Gherkin scenarios from spec.md's User Story 3 to
+- [X] T022 [P] [US3] Add the two Gherkin scenarios from spec.md's User Story 3 to
   `tests/features/var_series_backtest_api.feature` under an `@us3` tag, with step definitions
   asserting the endpoint succeeds even when no account has ever been ingested in the test
   fixture's data directory.
 
 ### Implementation for User Story 3
 
-- [ ] T023 [US3] Create `app/services/var/var_methods_service.py`: `build_methods_response(
+- [X] T023 [US3] Create `app/services/var/var_methods_service.py`: `build_methods_response(
   settings: VarSettings) -> VarMethodsResponse`, a pure function per research.md §9, making T021
   pass.
-- [ ] T024 [US3] Add `GET /risk/var/methods` to `app/api/risk_var.py` (no account path
+- [X] T024 [US3] Add `GET /risk/var/methods` to `app/api/risk_var.py` (no account path
   parameter, no validation beyond FastAPI's own routing), depending only on `Settings` via
   `get_settings`, making T022's scenarios pass.
 
@@ -291,20 +291,20 @@ the new validation type) a `correlation_id` and a message naming the supported v
 
 ### Tests for User Story 4 (write first, must fail)
 
-- [ ] T025 [P] [US4] Add the five Gherkin scenarios from spec.md's User Story 4 to
+- [X] T025 [P] [US4] Add the five Gherkin scenarios from spec.md's User Story 4 to
   `tests/features/var_series_backtest_api.feature` under an `@us4` tag, with step definitions
   asserting: an unsupported `lookback` → 422 `invalid-var-query` naming `1y`/`2y`/`5y`; an
   unsupported `confidence` → 422 `invalid-var-query` naming the configured percentages; an
   unknown account → 404 `account-not-found`; start after end → 422 `invalid-date-range`; an
   account with only a capital ledger (no position ladder) → 422
   `missing-required-source`, all consistent with the performance endpoints (FR-024, SC-006).
-- [ ] T026 [P] [US4] Extend `tests/unit/test_var_series_service.py` and
+- [X] T026 [P] [US4] Extend `tests/unit/test_var_series_service.py` and
   `tests/unit/test_var_backtest_service.py` with the same five cases at the service layer
   (bypassing the router), asserting the exact exception type raised in each case.
 
 ### Implementation for User Story 4
 
-- [ ] T027 [US4] Review `app/api/risk_var.py`'s query-parameter validation added in T012/T019;
+- [X] T027 [US4] Review `app/api/risk_var.py`'s query-parameter validation added in T012/T019;
   ensure every `InvalidVarQueryError` message explicitly lists the currently configured valid
   values (not a generic "invalid value" message), satisfying FR-009/FR-021/SC-006. Adjust
   messages only if T025/T026 reveal a gap — this story should require no new production code
@@ -320,18 +320,18 @@ passes.
 
 **Purpose**: Documentation and final verification across all four stories.
 
-- [ ] T028 [P] Write `tests/unit/test_var_series_performance.py` (SC-004): seed ~2,700 dates ×
+- [X] T028 [P] Write `tests/unit/test_var_series_performance.py` (SC-004): seed ~2,700 dates ×
   3 look-backs × 3 confidence levels into `estimates.csv`/`outcomes.csv` via `VarRepository.
   commit()` (mirroring feature 012's `test_performance.py` seeding pattern), then assert
   `VarSeriesService.get_series()` and `VarBacktestService.get_backtest()` (with `rolling=True`)
   each return in under 2 seconds — the budget is achievable because neither reads the ladder
   file (research.md §1).
-- [ ] T029 [P] Update `README.md`: add the three new endpoints to the capability table; document
+- [X] T029 [P] Update `README.md`: add the three new endpoints to the capability table; document
   `var.headline_lookback` alongside the existing `var:` config block; note the `invalid-var-query`
   error type in the error-type table.
-- [ ] T030 [P] Run every step of `quickstart.md` manually against a running service with at
+- [X] T030 [P] Run every step of `quickstart.md` manually against a running service with at
   least one completed feature-012 run, confirming each expected response shape.
-- [ ] T031 Run `mypy --strict app/`, `ruff check app/ tests/`, `ruff format --check`, and the
+- [X] T031 Run `mypy --strict app/`, `ruff check app/ tests/`, `ruff format --check`, and the
   full `pytest` suite; fix any failure before marking this feature complete.
 
 ---

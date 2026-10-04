@@ -32,6 +32,7 @@ class TestVarSeriesResponse:
     """VarSeriesResponse.model_dump(by_alias=True) produces the HATEOAS _links key."""
 
     def test_links_alias_round_trips(self) -> None:
+        """model_dump(by_alias=True) exposes _links, not the Python-side `links` name."""
         entry = VarSeriesEntry(
             date=date(2026, 3, 2),
             outcome_date=date(2026, 3, 3),
@@ -60,6 +61,7 @@ class TestVarSeriesResponse:
         assert "links" not in dumped
 
     def test_nullable_confidence_fields_accept_none(self) -> None:
+        """Every ConfidenceLevelEstimate field accepts None for an insufficient-quality date."""
         level = _confidence_level(
             var_gbp=None,
             var_pct=None,
@@ -76,6 +78,7 @@ class TestVarBacktestResponse:
     """VarBacktestResponse.model_dump(by_alias=True) produces the HATEOAS _links key."""
 
     def test_links_alias_round_trips_and_nullable_fields_accept_none(self) -> None:
+        """_links round-trips and every nullable backtest field accepts None."""
         result = BacktestConfidenceResult(
             confidence_bp=9900,
             observation_count=0,
@@ -111,6 +114,7 @@ class TestVarBacktestResponse:
         assert dumped["levels"][0]["rolling_exceptions"] is None
 
     def test_rolling_exceptions_accepts_a_list(self) -> None:
+        """rolling_exceptions accepts a populated list of RollingExceptionPoint."""
         result = BacktestConfidenceResult(
             confidence_bp=9900,
             observation_count=300,
@@ -137,6 +141,7 @@ class TestVarMethodsResponse:
     """VarMethodsResponse.model_dump(by_alias=True) produces the HATEOAS _links key."""
 
     def test_links_alias_round_trips(self) -> None:
+        """model_dump(by_alias=True) exposes _links for the methods response too."""
         response = VarMethodsResponse(
             method="historical-simulation",
             methodology_version="1.0.0",

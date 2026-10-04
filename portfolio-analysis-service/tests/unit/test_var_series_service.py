@@ -98,7 +98,9 @@ def _outcome_row(
     return row
 
 
-def _commit(var_repo: VarRepository, account: str, estimates: list[dict], outcomes: list[dict]) -> None:
+def _commit(
+    var_repo: VarRepository, account: str, estimates: list[dict], outcomes: list[dict]
+) -> None:
     var_repo.commit(
         account,
         estimates=pd.DataFrame(estimates),
@@ -116,6 +118,7 @@ def _commit(var_repo: VarRepository, account: str, estimates: list[dict], outcom
 
 @pytest.fixture()
 def repos(tmp_path: Path) -> tuple[LadderRepository, CapitalRepository, VarRepository]:
+    """Return fresh ladder/capital/var repositories over the same temp data directory."""
     return (
         LadderRepository(data_dir=tmp_path),
         CapitalRepository(data_dir=tmp_path),
@@ -127,6 +130,7 @@ def _service(
     repos: tuple[LadderRepository, CapitalRepository, VarRepository],
     settings: VarSettings | None = None,
 ) -> VarSeriesService:
+    """Wire a VarSeriesService over the given repositories."""
     ladder_repo, capital_repo, var_repo = repos
     return VarSeriesService(
         accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
@@ -136,6 +140,8 @@ def _service(
 
 
 class TestGetSeriesHappyPath:
+    """get_series() against a seeded store returns exactly the stored figures."""
+
     def test_exact_values_match_stored_estimate_and_outcome(
         self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
     ) -> None:
@@ -183,7 +189,12 @@ class TestGetSeriesHappyPath:
         )
 
         response = _service(repos).get_series(
-            account_name="acct", start=None, end=None, lookback="1y", confidence_levels_bp=None, today=(on + pd.offsets.BDay(1)).date()
+            account_name="acct",
+            start=None,
+            end=None,
+            lookback="1y",
+            confidence_levels_bp=None,
+            today=(on + pd.offsets.BDay(1)).date(),
         )
 
         assert response.lookback_code == "1y"
@@ -193,13 +204,19 @@ class TestGetSeriesHappyPath:
     def test_only_requested_confidence_levels_appear(
         self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
     ) -> None:
+        """Requesting a single confidence level returns only that level's entry."""
         ladder_repo, _, var_repo = repos
         on = date(2026, 3, 2)
         _write_ladder(ladder_repo, "acct", on)
         _commit(var_repo, "acct", [_estimate_row(on)], [_outcome_row(on)])
 
         response = _service(repos).get_series(
-            account_name="acct", start=None, end=None, lookback="2y", confidence_levels_bp=[9500], today=(on + pd.offsets.BDay(1)).date()
+            account_name="acct",
+            start=None,
+            end=None,
+            lookback="2y",
+            confidence_levels_bp=[9500],
+            today=(on + pd.offsets.BDay(1)).date(),
         )
 
         assert [lvl.confidence_bp for lvl in response.series[0].levels] == [9500]
@@ -207,13 +224,19 @@ class TestGetSeriesHappyPath:
     def test_omitting_confidence_returns_every_configured_level(
         self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
     ) -> None:
+        """Omitting confidence_levels_bp returns every configured confidence level."""
         ladder_repo, _, var_repo = repos
         on = date(2026, 3, 2)
         _write_ladder(ladder_repo, "acct", on)
         _commit(var_repo, "acct", [_estimate_row(on)], [_outcome_row(on)])
 
         response = _service(repos).get_series(
-            account_name="acct", start=None, end=None, lookback="2y", confidence_levels_bp=None, today=(on + pd.offsets.BDay(1)).date()
+            account_name="acct",
+            start=None,
+            end=None,
+            lookback="2y",
+            confidence_levels_bp=None,
+            today=(on + pd.offsets.BDay(1)).date(),
         )
 
         assert {lvl.confidence_bp for lvl in response.series[0].levels} == {9500, 9750, 9900}
@@ -228,7 +251,12 @@ class TestGetSeriesHappyPath:
         _commit(var_repo, "acct", [_estimate_row(on, quality="insufficient")], [_outcome_row(on)])
 
         response = _service(repos).get_series(
-            account_name="acct", start=None, end=None, lookback="2y", confidence_levels_bp=None, today=(on + pd.offsets.BDay(1)).date()
+            account_name="acct",
+            start=None,
+            end=None,
+            lookback="2y",
+            confidence_levels_bp=None,
+            today=(on + pd.offsets.BDay(1)).date(),
         )
 
         entry = response.series[0]
@@ -246,12 +274,15 @@ class TestGetSeriesHappyPath:
         ladder_repo, _, var_repo = repos
         on = date(2026, 3, 2)
         _write_ladder(ladder_repo, "acct", on)
-        _commit(
-            var_repo, "acct", [_estimate_row(on)], [_outcome_row(on, outcome_status="pending")]
-        )
+        _commit(var_repo, "acct", [_estimate_row(on)], [_outcome_row(on, outcome_status="pending")])
 
         response = _service(repos).get_series(
-            account_name="acct", start=None, end=None, lookback="2y", confidence_levels_bp=None, today=(on + pd.offsets.BDay(1)).date()
+            account_name="acct",
+            start=None,
+            end=None,
+            lookback="2y",
+            confidence_levels_bp=None,
+            today=(on + pd.offsets.BDay(1)).date(),
         )
 
         entry = response.series[0]
@@ -264,6 +295,7 @@ class TestGetSeriesHappyPath:
     def test_hypothetical_exception_flag_is_strict_loss_exceeding_var(
         self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
     ) -> None:
+        """hypothetical_exception is True only when that PnL's loss strictly exceeds VaR."""
         ladder_repo, _, var_repo = repos
         on = date(2026, 3, 2)
         _write_ladder(ladder_repo, "acct", on)
@@ -275,7 +307,12 @@ class TestGetSeriesHappyPath:
         )
 
         response = _service(repos).get_series(
-            account_name="acct", start=None, end=None, lookback="2y", confidence_levels_bp=[9500], today=(on + pd.offsets.BDay(1)).date()
+            account_name="acct",
+            start=None,
+            end=None,
+            lookback="2y",
+            confidence_levels_bp=[9500],
+            today=(on + pd.offsets.BDay(1)).date(),
         )
 
         level = response.series[0].levels[0]
@@ -298,11 +335,18 @@ class TestGetSeriesHappyPath:
         var_repo.write_run = _fail  # type: ignore[method-assign]
 
         _service(repos).get_series(
-            account_name="acct", start=None, end=None, lookback="2y", confidence_levels_bp=None, today=(on + pd.offsets.BDay(1)).date()
+            account_name="acct",
+            start=None,
+            end=None,
+            lookback="2y",
+            confidence_levels_bp=None,
+            today=(on + pd.offsets.BDay(1)).date(),
         )
 
 
 class TestGetSeriesEmptyStore:
+    """get_series() for an account with no computed VaR data returns an empty series."""
+
     def test_no_estimates_at_all_returns_empty_series_with_links(
         self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
     ) -> None:
@@ -316,7 +360,7 @@ class TestGetSeriesEmptyStore:
             end=None,
             lookback="2y",
             confidence_levels_bp=None,
-            today=date(2026, 3, 2),
+            today=date(2026, 3, 3),
         )
 
         assert response.series == []
@@ -330,6 +374,7 @@ class TestGetSeriesValidation:
     def test_unknown_account_raises_account_not_found(
         self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
     ) -> None:
+        """An account with no ingested resource at all raises AccountNotFoundError."""
         with pytest.raises(AccountNotFoundError):
             _service(repos).get_series(
                 account_name="missing",
@@ -343,6 +388,7 @@ class TestGetSeriesValidation:
     def test_capital_only_account_raises_missing_required_source(
         self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
     ) -> None:
+        """An account with only a capital ledger (no position ladder) raises the same error."""
         from tests.risk_helpers import write_capital_only
 
         _, capital_repo, _ = repos
@@ -361,6 +407,7 @@ class TestGetSeriesValidation:
     def test_future_end_date_raises(
         self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
     ) -> None:
+        """An end date later than today raises FutureEndDateError."""
         ladder_repo, _, _ = repos
         _write_ladder(ladder_repo, "acct", date(2026, 3, 2))
 
@@ -377,6 +424,7 @@ class TestGetSeriesValidation:
     def test_start_after_end_raises_invalid_date_range(
         self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
     ) -> None:
+        """A start date after the end date raises InvalidDateRangeError."""
         ladder_repo, _, _ = repos
         _write_ladder(ladder_repo, "acct", date(2026, 3, 2))
 

@@ -11,8 +11,8 @@ from app.exceptions import (
     InvalidDateRangeError,
     MissingRequiredSourceError,
 )
-from app.services.var.var_window import resolve_window
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
+from app.services.var.var_window import resolve_window
 
 
 @dataclass
