@@ -117,6 +117,9 @@ class EstimateResult:
         quality: "ok" / "degraded" / "insufficient" per the configured thresholds.
         quality_reason: Empty unless degraded or insufficient.
         levels: One ConfidenceLevelResult per requested confidence level.
+        position_treatments: Held identifier to its worst treatment ("actual" /
+            "proxied" / "rescaled") used on any retained scenario day -- the same
+            precedence the coverage percentages use.
     """
 
     scenario_count: int
@@ -128,6 +131,9 @@ class EstimateResult:
     quality: Quality
     quality_reason: str
     levels: list[ConfidenceLevelResult] = field(default_factory=list)
+    position_treatments: dict[str, Literal["actual", "proxied", "rescaled"]] = field(
+        default_factory=dict
+    )
 
 
 def _window_slice(panel: ReturnPanel, as_of_row: int, lookback_days: int) -> tuple[int, int]:
@@ -305,6 +311,21 @@ def estimate(
         worst = provenance[included].max(axis=0)
     else:
         worst = np.full(n_positions, _ACTUAL, dtype=int)
+
+    treatment_label: dict[int, Literal["actual", "proxied", "rescaled"]] = {
+        _ACTUAL: "actual",
+        _PROXY: "proxied",
+        _RESCALED: "rescaled",
+    }
+    worst_code_by_identifier: dict[str, int] = {}
+    for i, position in enumerate(exposure.positions):
+        code = int(worst[i])
+        existing = worst_code_by_identifier.get(position.identifier, _ACTUAL)
+        worst_code_by_identifier[position.identifier] = max(existing, code)
+    position_treatments: dict[str, Literal["actual", "proxied", "rescaled"]] = {
+        identifier: treatment_label[code] for identifier, code in worst_code_by_identifier.items()
+    }
+
     rescaled_value = float(values[worst == _RESCALED].sum()) if n_positions > 0 else 0.0
     proxied_value = float(values[worst == _PROXY].sum()) if n_positions > 0 else 0.0
     rescaled_mv_pct = (
@@ -357,6 +378,7 @@ def estimate(
         quality=quality,
         quality_reason=reason,
         levels=levels,
+        position_treatments=position_treatments,
     )
 
 

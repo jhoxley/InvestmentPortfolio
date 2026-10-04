@@ -312,18 +312,18 @@ recomputes. Change the config → every date recomputes.
 
 ### Tests for User Story 6 (write first, must fail) ⚠️
 
-- [ ] T048 [P] [US6] Add to `tests/unit/test_var_return_panel.py`: `find_outliers(panel, threshold)` lists (identifier, date, return) for |r| > 0.25, and not at exactly 0.25; `apply_exclusions(panel, exclusions)` sets the cell to NaN and `observed` to False, and records an `excluded_price` warning for each exclusion that matched.
-- [ ] T049 [P] [US6] Write `tests/unit/test_var_status_service.py`:
+- [X] T048 [P] [US6] Add to `tests/unit/test_var_return_panel.py`: `find_outliers(panel, threshold)` lists (identifier, date, return) for |r| > 0.25, and not at exactly 0.25; `apply_exclusions(panel, exclusions)` sets the cell to NaN and `observed` to False, and records an `excluded_price` warning for each exclusion that matched.
+- [X] T049 [P] [US6] Write `tests/unit/test_var_status_service.py`:
   - status for an account with a ladder but no VaR data → `computed_range` null, `missing_dates` = ladder business-day count, `last_run` null, empty instruments;
   - after a stored run → ladder range from `meta.json`, computed range from `outcomes.csv`, missing = ladder business days without outcome rows, `pending_outcomes` count, `stale_dates_last_run` from the last successful run's `dates_stale`, instruments from `instruments.csv` with `treatment_by_lookback` keyed by look-back code, and warnings from the last successful run;
   - the ladder `.xlsx` is never opened (assert `LadderRepository.read_full_df` is not called).
-- [ ] T050 [P] [US6] Add the US6 scenarios from spec.md to `tests/features/var_calculation_runs.feature`, with steps in `tests/steps/var_calculation_runs_steps.py`.
+- [X] T050 [P] [US6] Add the US6 scenarios from spec.md to `tests/features/var_calculation_runs.feature`, with steps in `tests/steps/var_calculation_runs_steps.py`.
 
 ### Implementation for User Story 6
 
-- [ ] T051 [US6] Implement `find_outliers` and `apply_exclusions` in `app/services/var/return_panel.py` (making T048 pass). Call them in `VarRunService.execute`: exclusions before computing; outliers as warnings, logged with `var_outlier_detected`.
-- [ ] T052 [US6] In `app/services/var/var_run_service.py`, build and persist `instruments.csv` rows: identifier, sub-accounts, first/last observed dates, proxy settings, treatment per look-back at the latest computed date, and outlier count.
-- [ ] T053 [US6] Implement `VarStatusService` in `app/services/var/var_status_service.py` per research.md §11 (making T049 pass), and add `GET /v1/accounts/{account_name}/risk/var/status` in `app/api/risk_var.py`. Apply the same account validation and errors as the runs endpoints, return `_links` `self`/`runs`/`account`, and log `var_status_request`.
+- [X] T051 [US6] Implement `find_outliers` and `apply_exclusions` in `app/services/var/return_panel.py` (making T048 pass). Call them in `VarRunService.execute`: exclusions before computing; outliers as warnings, logged with `var_outlier_detected`.
+- [X] T052 [US6] In `app/services/var/var_run_service.py`, build and persist `instruments.csv` rows: identifier, sub-accounts, first/last observed dates, proxy settings, treatment per look-back at the latest computed date, and outlier count.
+- [X] T053 [US6] Implement `VarStatusService` in `app/services/var/var_status_service.py` per research.md §11 (making T049 pass), and add `GET /v1/accounts/{account_name}/risk/var/status` in `app/api/risk_var.py`. Apply the same account validation and errors as the runs endpoints, return `_links` `self`/`runs`/`account`, and log `var_status_request`.
 
 **Checkpoint**: The status endpoint and data-hygiene features work; US1–US6 BDD scenarios pass.
 

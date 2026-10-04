@@ -7,14 +7,16 @@ first day) that the grid's earliest rows can find a prior observed price to comp
 return from.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 
 import numpy as np
 import pandas as pd
 import structlog
 
+from app.config import ExcludedReturn
 from app.models.market_data import ObservedPriceHistory
+from app.models.var import RunWarning
 
 logger = structlog.get_logger(__name__)
 
@@ -94,3 +96,83 @@ def build_return_panel(
         observed=observed,
         first_observed=first_observed,
     )
+
+
+@dataclass(frozen=True)
+class OutlierObservation:
+    """One observed return whose magnitude exceeds the configured outlier threshold."""
+
+    identifier: str
+    date: date
+    value: float
+
+
+def find_outliers(panel: ReturnPanel, threshold: float) -> list[OutlierObservation]:
+    """List every observed return whose absolute value exceeds a threshold (FR-028).
+
+    Only genuinely observed cells (`panel.observed`) are considered -- zero-filled gap
+    days and NaN cells are never reported, regardless of magnitude (they have none).
+
+    Args:
+        panel: The return panel to scan.
+        threshold: Absolute return magnitude above which a return is an outlier
+            (strictly greater than; a return exactly at the threshold is not flagged).
+
+    Returns:
+        OutlierObservation entries, in grid-then-identifier order.
+    """
+    results: list[OutlierObservation] = []
+    for col, identifier in enumerate(panel.identifiers):
+        for row, d in enumerate(panel.grid):
+            if panel.observed[row, col] and abs(panel.returns[row, col]) > threshold:
+                results.append(
+                    OutlierObservation(
+                        identifier=identifier, date=d, value=float(panel.returns[row, col])
+                    )
+                )
+    return results
+
+
+def apply_exclusions(
+    panel: ReturnPanel, exclusions: list[ExcludedReturn]
+) -> tuple[ReturnPanel, list[RunWarning]]:
+    """Blank configured bad (identifier, date) prices, treating them as missing (FR-029).
+
+    Args:
+        panel: The return panel to apply exclusions to (not mutated).
+        exclusions: Configured (identifier, date) prices to exclude.
+
+    Returns:
+        (new_panel, warnings): a new ReturnPanel with each matched cell set to NaN and
+        unobserved (so the engine's proxy/rescale treatment picks it up as missing), and
+        one `excluded_price` RunWarning per exclusion that matched a real panel cell.
+        An exclusion naming an identifier or date outside the panel is a no-op.
+    """
+    returns = panel.returns.copy()
+    observed = panel.observed.copy()
+    warnings: list[RunWarning] = []
+    identifier_index = {identifier: i for i, identifier in enumerate(panel.identifiers)}
+    grid_index = {d: i for i, d in enumerate(panel.grid)}
+
+    for excluded in exclusions:
+        if excluded.identifier not in identifier_index or excluded.date not in grid_index:
+            continue
+        col = identifier_index[excluded.identifier]
+        row = grid_index[excluded.date]
+        previous = returns[row, col]
+        returns[row, col] = np.nan
+        observed[row, col] = False
+        warnings.append(
+            RunWarning(
+                kind="excluded_price",
+                identifier=excluded.identifier,
+                date=excluded.date,
+                value=None if np.isnan(previous) else float(previous),
+                message=(
+                    f"Excluded configured bad price for '{excluded.identifier}' on {excluded.date}."
+                ),
+            )
+        )
+
+    new_panel = replace(panel, returns=returns, observed=observed)
+    return new_panel, warnings

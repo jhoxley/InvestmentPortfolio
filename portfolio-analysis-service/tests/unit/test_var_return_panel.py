@@ -5,8 +5,9 @@ from datetime import date
 import numpy as np
 import pytest
 
+from app.config import ExcludedReturn
 from app.models.market_data import ObservedPriceHistory, PriceHistoryPoint
-from app.services.var.return_panel import build_return_panel
+from app.services.var.return_panel import apply_exclusions, build_return_panel, find_outliers
 
 
 def _history(points: list[tuple[date, float]]) -> ObservedPriceHistory:
@@ -132,3 +133,105 @@ class TestBuildReturnPanel:
         col_b = panel.identifiers.index("EQB.L")
         assert panel.returns[row_idx[date(2026, 3, 3)], col_a] == pytest.approx(0.1)
         assert panel.returns[row_idx[date(2026, 3, 3)], col_b] == pytest.approx(-0.02)
+
+
+class TestFindOutliers:
+    """find_outliers() lists observed returns exceeding a magnitude threshold."""
+
+    def test_finds_return_above_threshold(self) -> None:
+        """A return of +40% is found at threshold 0.25."""
+        panel = build_return_panel(
+            {"EQA.L": _history([(date(2026, 3, 2), 100.0), (date(2026, 3, 3), 140.0)])},
+            grid_start=date(2026, 3, 2),
+            grid_end=date(2026, 3, 3),
+        )
+        outliers = find_outliers(panel, threshold=0.25)
+        assert len(outliers) == 1
+        assert outliers[0].identifier == "EQA.L"
+        assert outliers[0].date == date(2026, 3, 3)
+        assert outliers[0].value == pytest.approx(0.4)
+
+    def test_return_below_threshold_not_found(self) -> None:
+        """A return of +10% is not found at threshold 0.25."""
+        panel = build_return_panel(
+            {"EQA.L": _history([(date(2026, 3, 2), 100.0), (date(2026, 3, 3), 110.0)])},
+            grid_start=date(2026, 3, 2),
+            grid_end=date(2026, 3, 3),
+        )
+        assert find_outliers(panel, threshold=0.25) == []
+
+    def test_return_exactly_at_threshold_not_found(self) -> None:
+        """A return of exactly +25% is not found (strictly greater than, per FR-028)."""
+        panel = build_return_panel(
+            {"EQA.L": _history([(date(2026, 3, 2), 100.0), (date(2026, 3, 3), 125.0)])},
+            grid_start=date(2026, 3, 2),
+            grid_end=date(2026, 3, 3),
+        )
+        assert find_outliers(panel, threshold=0.25) == []
+
+    def test_unobserved_days_never_count_as_outliers(self) -> None:
+        """NaN (pre-inception) and zero-filled gap days are never reported as outliers."""
+        panel = build_return_panel(
+            {"EQA.L": _history([(date(2026, 3, 4), 100.0)])},
+            grid_start=date(2026, 3, 2),
+            grid_end=date(2026, 3, 4),
+        )
+        assert find_outliers(panel, threshold=0.25) == []
+
+
+class TestApplyExclusions:
+    """apply_exclusions() blanks configured bad prices and warns about each match."""
+
+    def test_excluded_cell_becomes_nan_and_unobserved(self) -> None:
+        """An excluded (identifier, date) cell is set to NaN with observed False."""
+        panel = build_return_panel(
+            {"EQA.L": _history([(date(2026, 3, 2), 100.0), (date(2026, 3, 3), 140.0)])},
+            grid_start=date(2026, 3, 2),
+            grid_end=date(2026, 3, 3),
+        )
+        new_panel, _warnings = apply_exclusions(
+            panel, [ExcludedReturn(identifier="EQA.L", date=date(2026, 3, 3))]
+        )
+        row = new_panel.grid.index(date(2026, 3, 3))
+        col = new_panel.identifiers.index("EQA.L")
+        assert np.isnan(new_panel.returns[row, col])
+        assert not new_panel.observed[row, col]
+
+    def test_excluded_cell_produces_a_warning(self) -> None:
+        """A matched exclusion produces one excluded_price warning."""
+        panel = build_return_panel(
+            {"EQA.L": _history([(date(2026, 3, 2), 100.0), (date(2026, 3, 3), 140.0)])},
+            grid_start=date(2026, 3, 2),
+            grid_end=date(2026, 3, 3),
+        )
+        _new_panel, warnings = apply_exclusions(
+            panel, [ExcludedReturn(identifier="EQA.L", date=date(2026, 3, 3))]
+        )
+        assert len(warnings) == 1
+        assert warnings[0].kind == "excluded_price"
+        assert warnings[0].identifier == "EQA.L"
+        assert warnings[0].date == date(2026, 3, 3)
+
+    def test_non_matching_exclusion_produces_no_warning_and_no_change(self) -> None:
+        """An exclusion for an identifier/date not in the panel is a no-op."""
+        panel = build_return_panel(
+            {"EQA.L": _history([(date(2026, 3, 2), 100.0), (date(2026, 3, 3), 140.0)])},
+            grid_start=date(2026, 3, 2),
+            grid_end=date(2026, 3, 3),
+        )
+        new_panel, warnings = apply_exclusions(
+            panel, [ExcludedReturn(identifier="UNKNOWN", date=date(2026, 3, 3))]
+        )
+        assert warnings == []
+        np.testing.assert_array_equal(new_panel.returns, panel.returns)
+
+    def test_no_exclusions_leaves_panel_unchanged(self) -> None:
+        """An empty exclusion list returns an equivalent panel with no warnings."""
+        panel = build_return_panel(
+            {"EQA.L": _history([(date(2026, 3, 2), 100.0), (date(2026, 3, 3), 140.0)])},
+            grid_start=date(2026, 3, 2),
+            grid_end=date(2026, 3, 3),
+        )
+        new_panel, warnings = apply_exclusions(panel, [])
+        assert warnings == []
+        np.testing.assert_array_equal(new_panel.returns, panel.returns)

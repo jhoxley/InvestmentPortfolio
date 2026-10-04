@@ -697,3 +697,94 @@ def reprice_one_date(
     df.loc[target, "market_value"] = float(new_value)
     meta = ladder_repo.read_meta(account)
     ladder_repo.write(account, df, meta)
+
+
+# --- User Story 6: status, outliers, exclusions ---------------------------------
+
+
+@when(parsers.parse('the VaR status for "{account}" is requested'))
+def request_status(account: str, app_client: TestClient, run_context: dict[str, Any]) -> None:
+    """GET the account's VaR status."""
+    run_context["account"] = account
+    run_context["response"] = app_client.get(f"/v1/accounts/{account}/risk/var/status")
+
+
+@then("the status response has no computed range and no last run")
+def check_status_no_computed_range(run_context: dict[str, Any]) -> None:
+    """Assert the status body shows no computed range and no last run."""
+    body = run_context["response"].json()
+    assert body["computed_range"] is None
+    assert body["last_run"] is None
+
+
+@then(parsers.parse("the status response reports {expected:d} missing dates"))
+def check_status_missing_dates(expected: int, run_context: dict[str, Any]) -> None:
+    """Assert the status body's missing_dates count."""
+    assert run_context["response"].json()["missing_dates"] == expected
+
+
+@given(parsers.parse('"{sub_a}" has an observed return of "{pct}" on {as_of}'))
+def configure_extreme_return(
+    sub_a: str, pct: str, as_of: str, fake_market_data_service: FakeMarketDataService
+) -> None:
+    """Configure a two-point price series giving sub_a an extreme return on one day."""
+    pct_value = float(pct.rstrip("%")) / 100.0
+    out_d = date.fromisoformat(as_of)
+    base_d = pd.bdate_range(end=out_d, periods=2)[0].date()
+    points = [
+        PriceHistoryPoint(date=base_d, close=100.0),
+        PriceHistoryPoint(date=out_d, close=100.0 * (1.0 + pct_value)),
+    ]
+    fake_market_data_service.configure_observed_prices(sub_a, points)
+
+
+@then(parsers.parse('the run has an "{kind}" warning for "{identifier}" on {as_of}'))
+def check_run_warning(kind: str, identifier: str, as_of: str, run_context: dict[str, Any]) -> None:
+    """Assert the completed run's warnings include one of the given kind/identifier/date."""
+    run = run_context["run"]
+    assert any(
+        w["kind"] == kind and w["identifier"] == identifier and w["date"] == as_of
+        for w in run["warnings"]
+    ), run["warnings"]
+
+
+@then(parsers.parse('the status response has an "{kind}" warning for "{identifier}" on {as_of}'))
+def check_status_warning(
+    kind: str, identifier: str, as_of: str, run_context: dict[str, Any]
+) -> None:
+    """Assert the status body's warnings include one of the given kind/identifier/date."""
+    body = run_context["response"].json()
+    assert any(
+        w["kind"] == kind and w["identifier"] == identifier and w["date"] == as_of
+        for w in body["warnings"]
+    ), body["warnings"]
+
+
+@given(parsers.parse('{as_of} for "{sub_a}" is on the excluded-returns list'))
+def configure_excluded_return(sub_a: str, as_of: str) -> None:
+    """Add one (identifier, date) to the VaR settings' excluded_returns list."""
+    from app.config import ExcludedReturn
+
+    current = app.dependency_overrides[get_settings]()
+    excluded = [
+        *current.var.excluded_returns,
+        ExcludedReturn(identifier=sub_a, date=date.fromisoformat(as_of)),
+    ]
+    new_var = current.var.model_copy(update={"excluded_returns": excluded})
+    new_settings = current.model_copy(update={"var": new_var})
+    app.dependency_overrides[get_settings] = lambda: new_settings
+
+
+@then(
+    parsers.parse(
+        '"{sub_a}" is reported as proxied for look-back "{code}" in the VaR status for "{account}"'
+    )
+)
+def check_status_instrument_proxied(
+    sub_a: str, code: str, account: str, app_client: TestClient
+) -> None:
+    """Assert the status body's instrument list reports sub_a as proxied for one look-back."""
+    response = app_client.get(f"/v1/accounts/{account}/risk/var/status")
+    body = response.json()
+    instrument = next(i for i in body["instruments"] if i["identifier"] == sub_a)
+    assert instrument["treatment_by_lookback"].get(code) == "proxied", instrument

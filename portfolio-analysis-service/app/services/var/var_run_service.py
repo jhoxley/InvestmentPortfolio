@@ -48,7 +48,7 @@ from app.services.daily_portfolio_return import compute_daily_portfolio_return
 from app.services.var.engine import estimate, hypothetical_pnl
 from app.services.var.exposures import build_exposures, build_proxy_configs
 from app.services.var.fingerprint import config_fingerprint, row_fingerprint
-from app.services.var.return_panel import build_return_panel
+from app.services.var.return_panel import apply_exclusions, build_return_panel, find_outliers
 from app.services.var.run_scheduler import RunScheduler
 
 if TYPE_CHECKING:
@@ -422,9 +422,37 @@ class VarRunService:
                 # proxy" if this was someone's configured proxy).
 
         panel = build_return_panel(histories, grid_start=fetch_start, grid_end=fetch_end)
+        panel, exclusion_warnings = apply_exclusions(panel, self._settings.excluded_returns)
+        warnings.extend(exclusion_warnings)
+
+        outlier_count_by_identifier: dict[str, int] = {}
+        for outlier in find_outliers(panel, self._settings.outlier_abs_return):
+            outlier_count_by_identifier[outlier.identifier] = (
+                outlier_count_by_identifier.get(outlier.identifier, 0) + 1
+            )
+            warnings.append(
+                RunWarning(
+                    kind="outlier",
+                    identifier=outlier.identifier,
+                    date=outlier.date,
+                    value=outlier.value,
+                    message=(
+                        f"Observed return {outlier.value:+.1%} for '{outlier.identifier}' on "
+                        f"{outlier.date} exceeds the outlier threshold."
+                    ),
+                )
+            )
+            log.warning(
+                "var_outlier_detected",
+                identifier=outlier.identifier,
+                date=str(outlier.date),
+                value=outlier.value,
+            )
+
         row_by_date = {d: i for i, d in enumerate(panel.grid)}
 
         estimate_rows: list[dict[str, object]] = []
+        treatment_by_lookback: dict[str, dict[str, str]] = {}
         computed_at = datetime.now(UTC)
         for d in dates:
             exposure = exposures[d]
@@ -462,6 +490,10 @@ class VarRunService:
                     row[f"var_{p_bp}_gbp"] = level.var_gbp if level else None
                     row[f"es_{p_bp}_gbp"] = level.es_gbp if level else None
                 estimate_rows.append(row)
+                # Dates are iterated ascending, so the last write per (identifier, code)
+                # is always the latest computed date's treatment (per FR/T052).
+                for identifier, label in result.position_treatments.items():
+                    treatment_by_lookback.setdefault(identifier, {})[code] = label
 
         instrument_rows = [
             {
@@ -480,7 +512,11 @@ class VarRunService:
                 "proxy_scale": (
                     proxy_configs[identifier].scale if identifier in proxy_configs else 1.0
                 ),
-                "outlier_count": 0,
+                "outlier_count": outlier_count_by_identifier.get(identifier, 0),
+                **{
+                    f"treatment_{code}": treatment_by_lookback.get(identifier, {}).get(code)
+                    for code in lookbacks
+                },
             }
             for identifier in needed_identifiers
         ]

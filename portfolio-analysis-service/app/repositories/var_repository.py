@@ -280,14 +280,25 @@ class VarRepository:
     def read_instruments(self, account_name: str) -> pd.DataFrame:
         """Read the last successful run's per-instrument treatment summary.
 
+        Unlike estimates/outcomes, the instrument table's columns are not fixed: beyond
+        INSTRUMENT_COLUMNS it carries one dynamic treatment_<code> column per configured
+        look-back, so a stored file's own columns are read as-is rather than reindexed.
+
         Args:
             account_name: The account identifier.
 
         Returns:
-            DataFrame with INSTRUMENT_COLUMNS; empty (but correctly shaped) if nothing has
-            ever been committed.
+            DataFrame with INSTRUMENT_COLUMNS (plus any stored treatment_<code> columns);
+            empty (but correctly shaped to INSTRUMENT_COLUMNS) if nothing has ever been
+            committed.
         """
-        return _read_csv_or_empty(self._instruments_path(account_name), INSTRUMENT_COLUMNS)
+        path = self._instruments_path(account_name)
+        if not path.exists():
+            return _empty_frame(INSTRUMENT_COLUMNS)
+        df = pd.read_csv(path)
+        if df.empty:
+            return _empty_frame(INSTRUMENT_COLUMNS)
+        return _parse_date_columns(df)
 
     def read_meta(self, account_name: str) -> VarMeta | None:
         """Read the account's var/meta.json.
@@ -350,7 +361,14 @@ class VarRepository:
         if not merged_outcomes.empty:
             merged_outcomes = merged_outcomes.sort_values("date").reset_index(drop=True)
 
-        instruments_out = _parse_date_columns(instruments).reindex(columns=INSTRUMENT_COLUMNS)
+        # Unlike estimates/outcomes, the instrument table's columns are not fixed: it
+        # always carries the INSTRUMENT_COLUMNS base plus one dynamic treatment_<code>
+        # column per configured look-back (feature 012 User Story 6). Preserve whatever
+        # columns the caller supplies rather than reindexing to a fixed set.
+        instruments_out = _parse_date_columns(instruments)
+        instrument_columns = (
+            list(instruments_out.columns) if not instruments_out.empty else INSTRUMENT_COLUMNS
+        )
 
         tmp_paths: list[Path] = []
         try:
@@ -363,7 +381,7 @@ class VarRepository:
             )
             tmp_paths.append(outcomes_tmp)
             instruments_tmp = self._write_temp_csv(
-                var_dir, _format_for_csv(instruments_out), INSTRUMENT_COLUMNS
+                var_dir, _format_for_csv(instruments_out), instrument_columns
             )
             tmp_paths.append(instruments_tmp)
             meta_tmp = self._write_temp_json(var_dir, meta.model_dump(mode="json"))

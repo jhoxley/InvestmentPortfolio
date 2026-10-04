@@ -129,3 +129,30 @@ Feature: Historical-simulation VaR calculation runs
     When the market value for "Equity A" on 2026-03-04 is changed to 99999
     And a "missing" VaR run is requested for "var-acct" and completes
     Then the run reports 1 dates computed
+
+  @us6
+  Scenario: Status for an account never calculated
+    Given account "var-acct" holds "Equity A" with daily GBP prices from 2026-01-02 to 2026-03-06
+    When the VaR status for "var-acct" is requested
+    Then the status response has no computed range and no last run
+    And the status response reports 46 missing dates
+
+  @us6
+  Scenario: Extreme returns are reported as warnings
+    Given account "var-acct" holds "Equity A" with daily GBP prices from 2026-01-02 to 2026-03-06
+    And the VaR look-backs are configured as win:5
+    And "Equity A" has an observed return of "+40%" on 2026-03-04
+    When a full VaR run is requested for "var-acct" and completes
+    Then the run has an "outlier" warning for "Equity A" on 2026-03-04
+    When the VaR status for "var-acct" is requested
+    Then the status response has an "outlier" warning for "Equity A" on 2026-03-04
+
+  @us6
+  Scenario: Excluded bad prices are treated as missing
+    Given account "var-acct" holds "Equity A" with daily GBP prices from 2026-01-02 to 2026-03-06
+    And "Equity A" is configured with proxy "Benchmark", mode "fill_gaps" and scale 1.0
+    And "Benchmark" has daily GBP prices covering the 5-day window ending 2026-03-06
+    And the VaR look-backs are configured as win:5
+    And 2026-03-04 for "Equity A" is on the excluded-returns list
+    When a full VaR run is requested for "var-acct" and completes
+    Then "Equity A" is reported as proxied for look-back "win" in the VaR status for "var-acct"

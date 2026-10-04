@@ -442,3 +442,44 @@ class TestHypotheticalPnl:
         pnl = hypothetical_pnl(exposure, panel, outcome_row=0)
 
         assert pnl == pytest.approx(0.0)
+
+
+class TestPositionTreatments:
+    """estimate() reports each held identifier's worst treatment on any retained day."""
+
+    def test_actual_only_position_is_reported_as_actual(self) -> None:
+        """A position with real returns on every retained day is reported as 'actual'."""
+        exposure = _exposure([("A", "A", 100000.0)])
+        grid = [date(2026, 3, 2)]
+        panel = _panel(("A",), grid, np.array([[0.01]]), np.array([[True]]))
+
+        result = estimate(
+            exposure,
+            panel,
+            as_of_row=0,
+            lookback_days=1,
+            confidences_bp=(9500,),
+            settings=VarSettings(),
+        )
+
+        assert result.position_treatments == {"A": "actual"}
+
+    def test_rescaled_on_any_day_overrides_actual_elsewhere(self) -> None:
+        """A position rescaled on one day and actual on another is reported as 'rescaled'."""
+        exposure = _exposure([("A", "A", 60000.0), ("B", "B", 40000.0)])
+        grid = [date(2026, 3, 2), date(2026, 3, 3)]
+        returns = np.array([[0.01, 0.02], [np.nan, 0.03]])
+        observed = np.array([[True, True], [False, True]])
+        panel = _panel(("A", "B"), grid, returns, observed)
+
+        result = estimate(
+            exposure,
+            panel,
+            as_of_row=1,
+            lookback_days=2,
+            confidences_bp=(9500,),
+            settings=VarSettings(min_observed_share_per_scenario=0.0),
+        )
+
+        assert result.position_treatments["A"] == "rescaled"
+        assert result.position_treatments["B"] == "actual"

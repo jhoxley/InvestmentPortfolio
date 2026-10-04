@@ -19,7 +19,7 @@ from app.api.ladder import _get_identifier_mapping_repository
 from app.clients.market_data_client import ObservedPriceClient
 from app.config import Settings, get_settings
 from app.exceptions import InvalidVarRunRequestError, VarRunNotFoundError
-from app.models.var import VarRun, VarRunList, VarRunRequest
+from app.models.var import VarRun, VarRunList, VarRunRequest, VarStatus
 from app.repositories.capital_repository import CapitalRepository
 from app.repositories.identifier_mapping_repository import IdentifierMappingRepository
 from app.repositories.ladder_repository import LadderRepository
@@ -27,6 +27,7 @@ from app.repositories.var_repository import VarRepository
 from app.services.accounts_service import AccountsService
 from app.services.var.run_scheduler import RunScheduler
 from app.services.var.var_run_service import VarRunService
+from app.services.var.var_status_service import VarStatusService
 from app.validators.account_name import validate_account_name
 
 router = APIRouter(prefix="/v1", tags=["Risk"])
@@ -63,6 +64,28 @@ def _get_var_run_service(
         var_repo=var_repo,
         scheduler=scheduler,
         settings=settings.var,
+    )
+
+
+def _get_var_status_service(
+    ladder_repo: LadderRepository = Depends(get_ladder_repository),
+    capital_repo: CapitalRepository = Depends(get_capital_repository),
+    var_repo: VarRepository = Depends(get_var_repository),
+) -> VarStatusService:
+    """Dependency that returns a wired VarStatusService.
+
+    Args:
+        ladder_repo: LadderRepository instance (injected by FastAPI).
+        capital_repo: CapitalRepository instance (injected by FastAPI).
+        var_repo: VarRepository instance (injected by FastAPI).
+
+    Returns:
+        VarStatusService instance.
+    """
+    return VarStatusService(
+        ladder_repo=ladder_repo,
+        accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
+        var_repo=var_repo,
     )
 
 
@@ -211,3 +234,35 @@ async def list_var_runs(
         },
     )
     return JSONResponse(status_code=200, content=body.model_dump(by_alias=True, mode="json"))
+
+
+@router.get(
+    "/accounts/{account_name}/risk/var/status",
+    response_model=VarStatus,
+    summary="Report VaR coverage and freshness for an account",
+    responses={
+        404: {"description": "No capital ledger or position ladder found for this account"},
+        422: {"description": "Validation failed — invalid account name"},
+    },
+)
+async def get_var_status(
+    account_name: str,
+    service: VarStatusService = Depends(_get_var_status_service),
+) -> JSONResponse:
+    """Return the account's VaR coverage, freshness and per-instrument treatment.
+
+    Args:
+        account_name: Path parameter identifying the account.
+        service: Injected VarStatusService.
+
+    Returns:
+        200 with the VarStatus JSON body.
+
+    Raises:
+        InvalidAccountNameError: Account name fails pattern check.
+        AccountNotFoundError: No resource of any kind ingested for this account.
+        MissingRequiredSourceError: The account has no ingested position ladder.
+    """
+    validate_account_name(account_name)
+    status = service.get_status(account_name)
+    return JSONResponse(status_code=200, content=status.model_dump(by_alias=True, mode="json"))
