@@ -841,3 +841,225 @@ def test_get_return_histogram_raises_on_timeout() -> None:
             start=date(2024, 1, 2),
             end=date(2024, 12, 31),
         )
+
+
+# --- 026-var-risk-view: get_var_series / get_var_backtest / get_var_methods / get_var_status
+
+
+def test_get_var_series_success_and_never_sends_confidence() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/accounts/HL-SIPP/risk/var"
+        params = httpx.QueryParams(request.url.query)
+        assert params.get("start") == "2026-01-02"
+        assert params.get("end") == "2026-03-02"
+        assert params.get("lookback") == "2y"
+        assert "confidence" not in params  # research.md #1: always omitted
+        return httpx.Response(
+            200,
+            json={
+                "account_name": "HL-SIPP",
+                "lookback_code": "2y",
+                "lookback_days": 520,
+                "from_date": "2026-01-02",
+                "to_date": "2026-03-02",
+                "series": [],
+                "_links": {"self": "s", "status": "st", "runs": "r"},
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    response = client.get_var_series(
+        account_name="HL-SIPP",
+        start=date(2026, 1, 2),
+        end=date(2026, 3, 2),
+        lookback="2y",
+    )
+
+    assert response.account_name == "HL-SIPP"
+    assert response.lookback_code == "2y"
+    assert response.series == []
+
+
+def test_get_var_series_raises_on_error_status() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={
+                "type": "about:blank",
+                "title": "Not Found",
+                "status": 404,
+                "detail": "boom",
+                "instance": str(request.url),
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_var_series(
+            account_name="HL-SIPP", start=date(2026, 1, 2), end=date(2026, 3, 2), lookback="2y"
+        )
+
+
+def test_get_var_series_raises_on_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TimeoutException("timed out", request=request)
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_var_series(
+            account_name="HL-SIPP", start=date(2026, 1, 2), end=date(2026, 3, 2), lookback="2y"
+        )
+
+
+@pytest.mark.parametrize(
+    ("pnl_basis", "min_quality"),
+    [
+        ("hypothetical", "ok"),
+        ("hypothetical", "degraded"),
+        ("ladder", "ok"),
+        ("ladder", "degraded"),
+    ],
+)
+def test_get_var_backtest_sends_pnl_basis_and_min_quality_never_confidence(
+    pnl_basis: str, min_quality: str
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/accounts/HL-SIPP/risk/var/backtest"
+        params = httpx.QueryParams(request.url.query)
+        assert params.get("pnl_basis") == pnl_basis
+        assert params.get("min_quality") == min_quality
+        assert params.get("lookback") == "2y"
+        assert "confidence" not in params  # research.md #1: always omitted
+        return httpx.Response(
+            200,
+            json={
+                "account_name": "HL-SIPP",
+                "lookback_code": "2y",
+                "lookback_days": 520,
+                "from_date": "2026-01-02",
+                "to_date": "2026-03-02",
+                "pnl_basis": pnl_basis,
+                "min_quality": min_quality,
+                "levels": [],
+                "_links": {"self": "s", "status": "st", "runs": "r"},
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    response = client.get_var_backtest(
+        account_name="HL-SIPP",
+        start=date(2026, 1, 2),
+        end=date(2026, 3, 2),
+        lookback="2y",
+        pnl_basis=pnl_basis,
+        min_quality=min_quality,
+    )
+
+    assert response.pnl_basis == pnl_basis
+    assert response.min_quality == min_quality
+
+
+def test_get_var_backtest_raises_on_error_status() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            422,
+            json={
+                "type": "about:blank",
+                "title": "Invalid",
+                "status": 422,
+                "detail": "boom",
+                "instance": str(request.url),
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_var_backtest(
+            account_name="HL-SIPP",
+            start=date(2026, 1, 2),
+            end=date(2026, 3, 2),
+            lookback="2y",
+            pnl_basis="hypothetical",
+            min_quality="degraded",
+        )
+
+
+def test_get_var_methods_success_takes_no_account() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/risk/var/methods"
+        return httpx.Response(
+            200,
+            json={
+                "method": "historical-simulation",
+                "methodology_version": "1.0.0",
+                "lookbacks": [{"code": "2y", "business_days": 520, "is_headline": True}],
+                "confidence_levels_bp": [9500, 9750, 9900],
+                "measures": [],
+                "_links": {"self": "/v1/risk/var/methods"},
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    response = client.get_var_methods()
+
+    assert response.method == "historical-simulation"
+    assert response.confidence_levels_bp == [9500, 9750, 9900]
+
+
+def test_get_var_methods_raises_on_error_status() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            json={
+                "type": "about:blank",
+                "title": "Error",
+                "status": 500,
+                "detail": "boom",
+                "instance": str(request.url),
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_var_methods()
+
+
+def test_get_var_status_success() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/accounts/HL-SIPP/risk/var/status"
+        return httpx.Response(
+            200,
+            json={
+                "account_name": "HL-SIPP",
+                "computed_range": None,
+                "missing_dates": 2700,
+                "stale_dates_last_run": 0,
+                "pending_outcomes": 0,
+                "_links": {"self": "/v1/accounts/HL-SIPP/risk/var/status"},
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    response = client.get_var_status(account_name="HL-SIPP")
+
+    assert response.account_name == "HL-SIPP"
+    assert response.computed_range is None
+    assert response.missing_dates == 2700
+
+
+def test_get_var_status_raises_on_error_status() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={
+                "type": "about:blank",
+                "title": "Not Found",
+                "status": 404,
+                "detail": "boom",
+                "instance": str(request.url),
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    with pytest.raises(PortfolioAnalysisServiceError):
+        client.get_var_status(account_name="HL-SIPP")

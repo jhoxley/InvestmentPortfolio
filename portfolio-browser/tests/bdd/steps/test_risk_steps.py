@@ -27,7 +27,12 @@ from src.models.portfolio_analysis import (
     AccountResourceRange,
     AccountSummary,
     HistogramStatistics,
+    MethodLookback,
     ReturnHistogramResponse,
+    VarBacktestResponse,
+    VarMethodsResponse,
+    VarSeriesResponse,
+    VarStatusSummary,
 )
 from src.pages._risk_chart import bucket_histogram
 
@@ -142,6 +147,58 @@ class _FakeRiskClient:
             statistics=self._statistics,
             _links={},
         )
+
+    # --- 026-var-risk-view: the Value at Risk tab's background callbacks fire on every
+    # page load regardless of which tab is active, so this fake (used only by the
+    # histogram-tab scenarios) must still implement the Protocol's VaR methods. Safe,
+    # empty-store defaults -- these scenarios don't exercise the VaR tab itself.
+
+    def get_var_series(
+        self, account_name: str, start: date, end: date, lookback: str
+    ) -> VarSeriesResponse:
+        return VarSeriesResponse(
+            account_name=account_name,
+            lookback_code=lookback,
+            lookback_days=520,
+            from_date=start,
+            to_date=end,
+            series=[],
+            _links={},
+        )
+
+    def get_var_backtest(
+        self,
+        account_name: str,
+        start: date,
+        end: date,
+        lookback: str,
+        pnl_basis: str,
+        min_quality: str,
+    ) -> VarBacktestResponse:
+        return VarBacktestResponse(
+            account_name=account_name,
+            lookback_code=lookback,
+            lookback_days=520,
+            from_date=start,
+            to_date=end,
+            pnl_basis=pnl_basis,  # type: ignore[arg-type]
+            min_quality=min_quality,  # type: ignore[arg-type]
+            levels=[],
+            _links={},
+        )
+
+    def get_var_methods(self) -> VarMethodsResponse:
+        return VarMethodsResponse(
+            method="historical-simulation",
+            methodology_version="1.0.0",
+            lookbacks=[MethodLookback(code="2y", business_days=520, is_headline=True)],
+            confidence_levels_bp=[9500, 9750, 9900],
+            measures=[],
+            _links={"self": "/v1/risk/var/methods"},
+        )
+
+    def get_var_status(self, account_name: str) -> VarStatusSummary:
+        return VarStatusSummary(account_name=account_name, computed_range=None, missing_dates=0)
 
 
 def _install_stub_client(monkeypatch: Any, client: _FakeRiskClient) -> None:
@@ -355,7 +412,7 @@ def from_date_years_before_today(dash_duo, years):
     assert _current_from_date(dash_duo) == _years_before(date.today(), years).isoformat()
 
 
-@then("the \"from\" date on the Risk page is set to that account's earliest recorded date")
+@then('the "from" date on the Risk page is set to that account\'s earliest recorded date')
 def from_date_matches_earliest(dash_duo, stub_client):
     account = stub_client._accounts[0]
     assert _current_from_date(dash_duo) == _earliest_from_date(account).isoformat()

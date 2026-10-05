@@ -7,7 +7,9 @@ OpenAPI contract, verified against source rather than assumed.
 
 from __future__ import annotations
 
+import datetime as dt
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -150,4 +152,139 @@ class ReturnHistogramResponse(BaseModel):
     to_date: date
     histogram: list[tuple[int, int]]
     statistics: HistogramStatistics
+    links: dict[str, str] = Field(default_factory=dict, alias="_links")
+
+
+# --- 026-var-risk-view: client-side mirrors of portfolio-analysis-service's 012/013
+# response shapes (specs/012-var-calculation-runs, specs/013-var-series-backtest-api).
+
+
+class DateRange(BaseModel):
+    """An inclusive from/to date range."""
+
+    from_date: date
+    to_date: date
+
+
+class VarStatusSummary(BaseModel):
+    """A deliberate subset of 012's VarStatus: only what this view needs.
+
+    Extra fields the full VarStatus response carries (stale_dates_last_run,
+    pending_outcomes, last_run, instruments, warnings) are not modeled here and are
+    silently ignored by Pydantic's default `extra="ignore"` behaviour.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    account_name: str
+    computed_range: DateRange | None = None
+    missing_dates: int
+    links: dict[str, str] = Field(default_factory=dict, alias="_links")
+
+
+class ConfidenceLevelEstimate(BaseModel):
+    """One confidence level's VaR/ES and exception flags for a VarSeriesEntry."""
+
+    confidence_bp: int
+    var_gbp: float | None
+    var_pct: float | None
+    es_gbp: float | None
+    es_pct: float | None
+    hypothetical_exception: bool | None
+    ladder_exception: bool | None
+
+
+class VarSeriesEntry(BaseModel):
+    """One business date's previously computed VaR estimate joined with its outcome."""
+
+    date: dt.date
+    outcome_date: dt.date
+    total_value_gbp: float
+    scenario_count: int
+    actual_mv_pct: float
+    proxied_mv_pct: float
+    rescaled_mv_pct: float
+    quality: Literal["ok", "degraded", "insufficient"]
+    quality_reason: str | None
+    hypothetical_pnl_gbp: float | None
+    ladder_pnl_gbp: float | None
+    levels: list[ConfidenceLevelEstimate] = Field(default_factory=list)
+
+
+class VarSeriesResponse(BaseModel):
+    """Response body for GET /v1/accounts/{account_name}/risk/var."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    account_name: str
+    lookback_code: str
+    lookback_days: int
+    from_date: date
+    to_date: date
+    series: list[VarSeriesEntry] = Field(default_factory=list)
+    links: dict[str, str] = Field(default_factory=dict, alias="_links")
+
+
+class RollingExceptionPoint(BaseModel):
+    """One point of the optional 250-day rolling exception count series."""
+
+    date: dt.date
+    exception_count: int
+
+
+class BacktestConfidenceResult(BaseModel):
+    """One confidence level's backtest statistics over the requested observation set."""
+
+    confidence_bp: int
+    observation_count: int
+    exception_count: int
+    expected_exceptions: float | None
+    exception_rate: float | None
+    kupiec_lr: float | None
+    kupiec_p_value: float | None
+    christoffersen_independence_lr: float | None
+    christoffersen_independence_p_value: float | None
+    conditional_coverage_lr: float | None
+    conditional_coverage_p_value: float | None
+    zone: Literal["green", "yellow", "red"] | None
+    exception_dates: list[date] = Field(default_factory=list)
+    mean_var_gbp: float | None
+    var_stability: float | None
+    rolling_exceptions: list[RollingExceptionPoint] | None = None
+
+
+class VarBacktestResponse(BaseModel):
+    """Response body for GET /v1/accounts/{account_name}/risk/var/backtest."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    account_name: str
+    lookback_code: str
+    lookback_days: int
+    from_date: date
+    to_date: date
+    pnl_basis: Literal["hypothetical", "ladder"]
+    min_quality: Literal["ok", "degraded"]
+    levels: list[BacktestConfidenceResult] = Field(default_factory=list)
+    links: dict[str, str] = Field(default_factory=dict, alias="_links")
+
+
+class MethodLookback(BaseModel):
+    """One configured look-back's code, business-day length, and headline status."""
+
+    code: str
+    business_days: int
+    is_headline: bool
+
+
+class VarMethodsResponse(BaseModel):
+    """Response body for GET /v1/risk/var/methods."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    method: str
+    methodology_version: str
+    lookbacks: list[MethodLookback] = Field(default_factory=list)
+    confidence_levels_bp: list[int] = Field(default_factory=list)
+    measures: list[str] = Field(default_factory=list)
     links: dict[str, str] = Field(default_factory=dict, alias="_links")

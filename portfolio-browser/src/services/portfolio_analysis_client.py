@@ -22,6 +22,10 @@ from src.models.portfolio_analysis import (
     PositionTimeSeriesResponse,
     ReturnHistogramResponse,
     TimeSeriesResponse,
+    VarBacktestResponse,
+    VarMethodsResponse,
+    VarSeriesResponse,
+    VarStatusSummary,
 )
 
 logger = structlog.get_logger(__name__)
@@ -216,6 +220,74 @@ class PortfolioAnalysisClient(Protocol):
 
         Returns:
             The parsed ReturnHistogramResponse.
+        """
+        ...
+
+    def get_var_series(
+        self,
+        account_name: str,
+        start: date,
+        end: date,
+        lookback: str,
+    ) -> VarSeriesResponse:
+        """Return the previously computed VaR/ES series for an account (026-var-risk-view).
+
+        `confidence` is never sent — omitting it returns every configured level in one
+        response (research.md #1).
+
+        Args:
+            account_name: The account to request the series for.
+            start: Start of the requested window (inclusive).
+            end: End of the requested window (inclusive).
+            lookback: The look-back code (e.g. "1y", "2y", "5y").
+
+        Returns:
+            The parsed VarSeriesResponse.
+        """
+        ...
+
+    def get_var_backtest(
+        self,
+        account_name: str,
+        start: date,
+        end: date,
+        lookback: str,
+        pnl_basis: str,
+        min_quality: str,
+    ) -> VarBacktestResponse:
+        """Return the VaR backtest for an account at one (pnl_basis, min_quality) pair.
+
+        `confidence` is never sent — see get_var_series's own docstring.
+
+        Args:
+            account_name: The account to request the backtest for.
+            start: Start of the requested window (inclusive).
+            end: End of the requested window (inclusive).
+            lookback: The look-back code (e.g. "1y", "2y", "5y").
+            pnl_basis: "hypothetical" or "ladder".
+            min_quality: "ok" or "degraded".
+
+        Returns:
+            The parsed VarBacktestResponse.
+        """
+        ...
+
+    def get_var_methods(self) -> VarMethodsResponse:
+        """Return the configured VaR method, look-backs, confidence levels and measures.
+
+        Returns:
+            The parsed VarMethodsResponse.
+        """
+        ...
+
+    def get_var_status(self, account_name: str) -> VarStatusSummary:
+        """Return an account's VaR coverage/freshness summary.
+
+        Args:
+            account_name: The account to request status for.
+
+        Returns:
+            The parsed VarStatusSummary.
         """
         ...
 
@@ -459,9 +531,7 @@ class HttpPortfolioAnalysisClient:
                 connection error.
         """
         path = f"/v1/accounts/{account_name}/projection"
-        params: list[tuple[str, str | int | float | bool | None]] = [
-            ("return", r) for r in returns
-        ]
+        params: list[tuple[str, str | int | float | bool | None]] = [("return", r) for r in returns]
         params.append(("projection_date", str(projection_date)))
         if start is not None:
             params.append(("start", str(start)))
@@ -507,6 +577,104 @@ class HttpPortfolioAnalysisClient:
             log_context={"account_name": account_name},
         )
         return ReturnHistogramResponse.model_validate(payload)
+
+    def get_var_series(
+        self,
+        account_name: str,
+        start: date,
+        end: date,
+        lookback: str,
+    ) -> VarSeriesResponse:
+        """Return the previously computed VaR/ES series for an account (026-var-risk-view).
+
+        Args:
+            account_name: The account to request the series for.
+            start: Start of the requested window (inclusive).
+            end: End of the requested window (inclusive).
+            lookback: The look-back code (e.g. "1y", "2y", "5y").
+
+        Returns:
+            The parsed VarSeriesResponse.
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        path = f"/v1/accounts/{account_name}/risk/var"
+        params: list[tuple[str, str | int | float | bool | None]] = [
+            ("start", str(start)),
+            ("end", str(end)),
+            ("lookback", lookback),
+        ]
+        payload = self._get(path, params=params, log_context={"account_name": account_name})
+        return VarSeriesResponse.model_validate(payload)
+
+    def get_var_backtest(
+        self,
+        account_name: str,
+        start: date,
+        end: date,
+        lookback: str,
+        pnl_basis: str,
+        min_quality: str,
+    ) -> VarBacktestResponse:
+        """Return the VaR backtest for an account at one (pnl_basis, min_quality) pair.
+
+        Args:
+            account_name: The account to request the backtest for.
+            start: Start of the requested window (inclusive).
+            end: End of the requested window (inclusive).
+            lookback: The look-back code (e.g. "1y", "2y", "5y").
+            pnl_basis: "hypothetical" or "ladder".
+            min_quality: "ok" or "degraded".
+
+        Returns:
+            The parsed VarBacktestResponse.
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        path = f"/v1/accounts/{account_name}/risk/var/backtest"
+        params: list[tuple[str, str | int | float | bool | None]] = [
+            ("start", str(start)),
+            ("end", str(end)),
+            ("lookback", lookback),
+            ("pnl_basis", pnl_basis),
+            ("min_quality", min_quality),
+        ]
+        payload = self._get(path, params=params, log_context={"account_name": account_name})
+        return VarBacktestResponse.model_validate(payload)
+
+    def get_var_methods(self) -> VarMethodsResponse:
+        """Return the configured VaR method, look-backs, confidence levels and measures.
+
+        Returns:
+            The parsed VarMethodsResponse.
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        payload = self._get("/v1/risk/var/methods", params=None, log_context={})
+        return VarMethodsResponse.model_validate(payload)
+
+    def get_var_status(self, account_name: str) -> VarStatusSummary:
+        """Return an account's VaR coverage/freshness summary.
+
+        Args:
+            account_name: The account to request status for.
+
+        Returns:
+            The parsed VarStatusSummary.
+
+        Raises:
+            PortfolioAnalysisServiceError: On any non-2xx response, timeout, or
+                connection error.
+        """
+        path = f"/v1/accounts/{account_name}/risk/var/status"
+        payload = self._get(path, params=None, log_context={"account_name": account_name})
+        return VarStatusSummary.model_validate(payload)
 
     def _get(
         self,
