@@ -10,7 +10,18 @@ import structlog.contextvars
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.api import accounts, capital, health, ladder, timeseries
+from app.api import (
+    accounts,
+    capital,
+    health,
+    ladder,
+    performance,
+    position_timeseries,
+    projection,
+    risk,
+    risk_var,
+    timeseries,
+)
 from app.config import get_settings
 from app.exceptions import (
     AccountNotFoundError,
@@ -20,23 +31,37 @@ from app.exceptions import (
     IdentifierMappingError,
     InvalidAccountNameError,
     InvalidDateRangeError,
+    InvalidProjectionRangeError,
+    InvalidVarQueryError,
+    InvalidVarRunRequestError,
     MarketDataServiceError,
     MergeNotSupportedError,
     MissingRequiredSourceError,
     NoAttributesRequestedError,
+    PositionLadderNotIngestedError,
     PriceCoverageError,
     SchemaValidationError,
     UnsupportedAttributeError,
+    UnsupportedPeriodicityError,
+    VarRunInProgressError,
+    VarRunNotFoundError,
 )
 from app.logging_config import setup_logging
 from app.models.ladder import ProblemDetail
+from app.repositories.var_repository import VarRepository
+from app.services.var.run_scheduler import get_default_scheduler
+from app.services.var.var_run_service import recover_interrupted
 
 logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Configure logging, load settings, and ensure the data directory exists.
+    """Configure logging, load settings, ensure the data directory exists, and recover.
+
+    Any VaR run still recorded as queued or running at start-up is orphaned -- the
+    in-memory scheduler queue does not survive a restart -- so it is marked failed with
+    reason "interrupted" (FR-024) before the app starts serving requests.
 
     Args:
         app: The FastAPI application instance.
@@ -47,8 +72,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
     settings = get_settings()
     settings.data.directory.mkdir(parents=True, exist_ok=True)
-    logger.info("startup_complete", data_dir=str(settings.data.directory))
+    recovered = recover_interrupted(VarRepository(data_dir=settings.data.directory))
+    logger.info(
+        "startup_complete", data_dir=str(settings.data.directory), var_runs_recovered=recovered
+    )
     yield
+    get_default_scheduler().shutdown()
     logger.info("shutdown")
 
 
@@ -63,6 +92,11 @@ app.include_router(ladder.router)
 app.include_router(capital.router)
 app.include_router(timeseries.router)
 app.include_router(accounts.router)
+app.include_router(position_timeseries.router)
+app.include_router(performance.router)
+app.include_router(projection.router)
+app.include_router(risk.router)
+app.include_router(risk_var.router)
 app.include_router(health.router)
 
 
@@ -129,6 +163,46 @@ def _problem(
         content=problem.model_dump(),
         media_type="application/problem+json",
     )
+
+
+def _var_problem(
+    request: Request,
+    status: int,
+    type_slug: str,
+    title: str,
+    detail: str,
+    extra: dict[str, object] | None = None,
+) -> JSONResponse:
+    """Build an RFC 7807 problem response carrying a correlation_id (FR-033).
+
+    Used by this feature's three new error types in place of `_problem()`. The
+    correlation ID is read from the structlog contextvars the request-logging
+    middleware binds per request, so it matches the id recorded against the request's
+    own log lines and, for a run that later fails, the id stored on the run itself.
+
+    Args:
+        request: The originating request (used for the instance field).
+        status: HTTP status code.
+        type_slug: Slug appended to the base error URI.
+        title: Short human-readable summary.
+        detail: Full explanation of the error.
+        extra: Additional fields to merge into the response body (e.g. `_links`).
+
+    Returns:
+        JSONResponse with application/problem+json content type.
+    """
+    correlation_id = structlog.contextvars.get_contextvars().get("correlation_id", "")
+    body: dict[str, object] = {
+        "type": f"https://portfolio-analysis/errors/{type_slug}",
+        "title": title,
+        "status": status,
+        "detail": detail,
+        "instance": str(request.url.path),
+        "correlation_id": correlation_id,
+    }
+    if extra:
+        body.update(extra)
+    return JSONResponse(status_code=status, content=body, media_type="application/problem+json")
 
 
 @app.exception_handler(InvalidAccountNameError)
@@ -314,6 +388,23 @@ async def unsupported_attribute_handler(
     return _problem(request, 422, "unsupported-attribute", "Unsupported Attribute", exc.message)
 
 
+@app.exception_handler(UnsupportedPeriodicityError)
+async def unsupported_periodicity_handler(
+    request: Request, exc: UnsupportedPeriodicityError
+) -> JSONResponse:
+    """Handle UnsupportedPeriodicityError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning("unsupported_periodicity", requested=exc.requested, detail=exc.message)
+    return _problem(request, 422, "unsupported-periodicity", "Unsupported Periodicity", exc.message)
+
+
 @app.exception_handler(FutureEndDateError)
 async def future_end_date_handler(request: Request, exc: FutureEndDateError) -> JSONResponse:
     """Handle FutureEndDateError with a 422 response.
@@ -344,6 +435,30 @@ async def invalid_date_range_handler(request: Request, exc: InvalidDateRangeErro
     return _problem(request, 422, "invalid-date-range", "Invalid Date Range", exc.message)
 
 
+@app.exception_handler(InvalidProjectionRangeError)
+async def invalid_projection_range_handler(
+    request: Request, exc: InvalidProjectionRangeError
+) -> JSONResponse:
+    """Handle InvalidProjectionRangeError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning(
+        "invalid_projection_range",
+        start=str(exc.start),
+        projection_date=str(exc.projection_date),
+        detail=exc.message,
+    )
+    return _problem(
+        request, 422, "invalid-projection-range", "Invalid Projection Range", exc.message
+    )
+
+
 @app.exception_handler(MissingRequiredSourceError)
 async def missing_required_source_handler(
     request: Request, exc: MissingRequiredSourceError
@@ -367,6 +482,27 @@ async def missing_required_source_handler(
     return _problem(request, 422, "missing-required-source", "Missing Required Source", exc.message)
 
 
+@app.exception_handler(PositionLadderNotIngestedError)
+async def position_ladder_not_ingested_handler(
+    request: Request, exc: PositionLadderNotIngestedError
+) -> JSONResponse:
+    """Handle PositionLadderNotIngestedError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response.
+    """
+    logger.warning(
+        "position_ladder_not_ingested", account_name=exc.account_name, detail=exc.message
+    )
+    return _problem(
+        request, 422, "position-ladder-not-ingested", "Position Ladder Not Ingested", exc.message
+    )
+
+
 @app.exception_handler(MarketDataServiceError)
 async def market_data_service_error_handler(
     request: Request, exc: MarketDataServiceError
@@ -388,3 +524,85 @@ async def market_data_service_error_handler(
         "Market Data Service Unavailable",
         exc.message,
     )
+
+
+@app.exception_handler(VarRunInProgressError)
+async def var_run_in_progress_handler(request: Request, exc: VarRunInProgressError) -> JSONResponse:
+    """Handle VarRunInProgressError with a 409 response linking to the active run.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 409 Conflict response with correlation_id and _links.active_run.
+    """
+    logger.warning(
+        "var_run_in_progress",
+        account_name=exc.account_name,
+        active_run_id=exc.active_run_id,
+        detail=exc.message,
+    )
+    return _var_problem(
+        request,
+        409,
+        "var-run-in-progress",
+        "VaR Run In Progress",
+        exc.message,
+        extra={
+            "_links": {
+                "active_run": f"/v1/accounts/{exc.account_name}/risk/var/runs/{exc.active_run_id}"
+            }
+        },
+    )
+
+
+@app.exception_handler(VarRunNotFoundError)
+async def var_run_not_found_handler(request: Request, exc: VarRunNotFoundError) -> JSONResponse:
+    """Handle VarRunNotFoundError with a 404 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 404 Not Found response with correlation_id.
+    """
+    logger.info(
+        "var_run_not_found", account_name=exc.account_name, run_id=exc.run_id, detail=exc.message
+    )
+    return _var_problem(request, 404, "var-run-not-found", "VaR Run Not Found", exc.message)
+
+
+@app.exception_handler(InvalidVarRunRequestError)
+async def invalid_var_run_request_handler(
+    request: Request, exc: InvalidVarRunRequestError
+) -> JSONResponse:
+    """Handle InvalidVarRunRequestError with a 422 response.
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response with correlation_id.
+    """
+    logger.warning("invalid_var_run_request", fields=exc.fields, detail=exc.message)
+    return _var_problem(
+        request, 422, "invalid-var-run-request", "Invalid VaR Run Request", exc.message
+    )
+
+
+@app.exception_handler(InvalidVarQueryError)
+async def invalid_var_query_handler(request: Request, exc: InvalidVarQueryError) -> JSONResponse:
+    """Handle InvalidVarQueryError with a 422 response (013-var-series-backtest-api).
+
+    Args:
+        request: The originating HTTP request.
+        exc: The raised exception.
+
+    Returns:
+        RFC 7807 422 Unprocessable Entity response with correlation_id.
+    """
+    logger.warning("invalid_var_query", fields=exc.fields, detail=exc.message)
+    return _var_problem(request, 422, "invalid-var-query", "Invalid VaR Query", exc.message)

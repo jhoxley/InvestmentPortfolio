@@ -24,8 +24,20 @@
                create_capital_ledger step) to the portfolio-analysis-service
                capital ingestion endpoint.
 
+      Phase 7  Queue a "missing" historical-simulation VaR calculation run (feature
+               012-var-calculation-runs) for each successfully ingested account, and
+               wait for each to finish via scripts\VarRefresh.psm1. A failure or
+               timeout is logged and marks the overall run unsuccessful, but does not
+               stop Phase 8 from starting the browser.
+
+      Phase 8  Start the Investment Portfolio Browser (Dash app) on
+               localhost:$DashPort, configured to read the market-data-web-service
+               and portfolio-analysis-service URLs started above, poll it until
+               ready, and open it in the user's default browser.
+
     All steps are written to both the console and a timestamped log file.
-    Both service processes are terminated on script exit (success or failure).
+    All three service processes (market-data-web-service, portfolio-analysis-service,
+    and the Dash app) are terminated on script exit (success or failure).
 
 .PARAMETER SkipPipeline
     If set, Phase 1 (AccountPreparationPipeline) is skipped. Useful when the
@@ -45,35 +57,47 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot 'scripts\VarRefresh.psm1') -Force
+
 # -- Configuration -------------------------------------------------------------
 #
-# Ports  - each service must use a distinct port so both can run concurrently.
+# Ports  - each service must use a distinct port so all three can run concurrently.
 $MarketDataPort = 8001
 $AnalysisPort   = 8000
+$DashPort       = 8050
 
-# Hosts  - both services bind to loopback only (no external exposure).
+# Hosts  - all services bind to loopback only (no external exposure).
 $MarketDataHost = "127.0.0.1"
 $AnalysisHost   = "127.0.0.1"
+$DashAppHost    = "127.0.0.1"
 
 # Absolute paths to each service root.
 $RepoRoot              = $PSScriptRoot
 $PipelineDir           = Join-Path $RepoRoot "AccountPreparationPipeline"
 $MarketDataDir         = Join-Path $RepoRoot "market-data-web-service"
 $AnalysisDir           = Join-Path $RepoRoot "portfolio-analysis-service"
+$DashAppDir            = Join-Path $RepoRoot "portfolio-browser"
 
 # Executable paths inside each service's virtual environment.
 $PipelinePython        = Join-Path $PipelineDir  ".venv\Scripts\python.exe"
 $MarketDataUvicorn     = Join-Path $MarketDataDir ".venv\Scripts\uvicorn.exe"
 $AnalysisUvicorn       = Join-Path $AnalysisDir  ".venv\Scripts\uvicorn.exe"
+$DashAppPython         = Join-Path $DashAppDir  ".venv\Scripts\python.exe"
 
 # Health / readiness URLs.
 # NOTE: market-data-web-service has no dedicated /health endpoint; /openapi.json
 # is a reliable proxy  - FastAPI always serves it once the app is started.
 $MarketDataHealthUrl   = "http://${MarketDataHost}:${MarketDataPort}/openapi.json"
 $AnalysisHealthUrl     = "http://${AnalysisHost}:${AnalysisPort}/health"
+$DashAppUrl            = "http://${DashAppHost}:${DashPort}/"
+$DashAppHealthUrl      = $DashAppUrl
 
 # Ingestion endpoint base (portfolio-analysis-service).
 $AnalysisBaseUrl       = "http://${AnalysisHost}:${AnalysisPort}"
+
+# Base URLs the Dash app is configured to read from  - the same market-data-web-service
+# and portfolio-analysis-service instances started in Phases 3-4 above.
+$MarketDataBaseUrl     = "http://${MarketDataHost}:${MarketDataPort}"
 
 # Sub-account ledger files produced by run_pipeline.ps1 and the account names
 # they should be registered under in the portfolio-analysis-service.
@@ -649,6 +673,9 @@ Write-Log "  Ingesting $($SubAccountLedgers.Count) ledger(s) into portfolio-anal
 
 $ingestSuccessCount = 0
 $ingestFailCount    = 0
+# Accounts whose position ladder ingested successfully this run -- used by Phase 7
+# to know which accounts have a ladder to compute VaR against.
+$script:IngestedAccounts = @()
 
 foreach ($ledger in $SubAccountLedgers) {
     Write-Log "" -Level Detail
@@ -669,6 +696,7 @@ foreach ($ledger in $SubAccountLedgers) {
 
     if ($ok) {
         $ingestSuccessCount++
+        $script:IngestedAccounts += $ledger.AccountName
         Write-Log "  Download: $AnalysisBaseUrl/v1/accounts/$($ledger.AccountName)/ladder/download" -Level Detail
     } else {
         $ingestFailCount++
@@ -720,6 +748,104 @@ Write-Log "" -Level Detail
 Write-Log "  Capital ledger ingestion summary: $capitalSuccessCount succeeded, $capitalFailCount failed." -Level Info
 
 # =============================================================================
+#  Phase 7  - Compute Value at Risk
+# =============================================================================
+
+Write-PhaseHeader 7 "Compute Value at Risk"
+
+$uniqueVarAccounts = @($script:IngestedAccounts | Select-Object -Unique)
+
+if ($uniqueVarAccounts.Count -eq 0) {
+    Write-Log "  No accounts were successfully ingested this run  - skipping VaR calculation." -Level Warn
+} else {
+    Write-Log "  Queuing a 'missing' VaR run for: $($uniqueVarAccounts -join ', ')" -Level Info
+
+    foreach ($accountName in $uniqueVarAccounts) {
+        Write-Log "" -Level Detail
+        Write-Log "  -- $accountName -----------------------------" -Level Info
+
+        $varResult = Invoke-VarRefresh -BaseUrl $AnalysisBaseUrl -AccountName $accountName `
+            -Mode 'missing' -TimeoutMinutes 15 -PollSeconds 2 `
+            -LogFunction { param($Message, $Level) Write-Log "  $Message" -Level $Level }
+
+        if ($varResult.Status -eq 'succeeded') {
+            Write-Log "  ${accountName}: VaR succeeded -- $($varResult.DatesComputed) date(s) computed, $($varResult.WarningCount) warning(s)." -Level OK
+            foreach ($warning in $varResult.Warnings) {
+                Write-Log "    warning: [$($warning.kind)] $($warning.identifier) $($warning.date): $($warning.message)" -Level Warn
+            }
+        } else {
+            Write-Log "  ${accountName}: VaR $($varResult.Status) -- $($varResult.FailureDetail)" -Level Error
+            $OverallSuccess = $false
+        }
+    }
+}
+
+# =============================================================================
+#  Phase 8  - Start Investment Portfolio Browser (Dash app)
+# =============================================================================
+
+Write-PhaseHeader 8 "Start Investment Portfolio Browser"
+
+if (-not (Test-Path $DashAppPython)) {
+    Write-Log "Python not found in portfolio-browser venv: $DashAppPython" -Level Error
+    Write-Log "Run: cd portfolio-browser && python -m venv .venv && .venv\Scripts\pip install -e `".[dev]`"" -Level Detail
+    Stop-Services
+    exit 1
+}
+
+$dashStdout = Join-Path $LogDir "portfolio-browser.stdout.log"
+$dashStderr = Join-Path $LogDir "portfolio-browser.stderr.log"
+
+Write-Log "  Configuring Dash app to read from:" -Level Info
+Write-Log "    market-data-web-service    -> $MarketDataBaseUrl" -Level Detail
+Write-Log "    portfolio-analysis-service -> $AnalysisBaseUrl" -Level Detail
+
+# Passed to the child process via environment variables (pydantic-settings
+# reads these; env vars take precedence over any .env file in the app's
+# working directory). DEBUG is forced off so Dash/Werkzeug does not spawn a
+# reloader subprocess  - that would leave an orphan behind $dashProc.Kill().
+$env:HOST                          = $DashAppHost
+$env:PORT                          = "$DashPort"
+$env:DEBUG                         = "false"
+$env:MARKET_DATA_SERVICE_URL       = $MarketDataBaseUrl
+$env:PORTFOLIO_ANALYSIS_SERVICE_URL = $AnalysisBaseUrl
+
+Write-Log "  Launching: python app.py" -Level Info
+Write-Log "  Working dir : $DashAppDir" -Level Detail
+Write-Log "  stdout log  : $dashStdout" -Level Detail
+Write-Log "  stderr log  : $dashStderr" -Level Detail
+
+$dashProc = Start-Process `
+    -FilePath         $DashAppPython `
+    -ArgumentList     "app.py" `
+    -WorkingDirectory $DashAppDir `
+    -PassThru `
+    -NoNewWindow `
+    -RedirectStandardOutput $dashStdout `
+    -RedirectStandardError  $dashStderr
+
+$script:ServiceProcesses += $dashProc
+Write-Log "  Investment Portfolio Browser started (PID $($dashProc.Id))." -Level OK
+
+$dashHealthy = Wait-ForHealth `
+    -Url         $DashAppHealthUrl `
+    -ServiceName "Investment Portfolio Browser"
+
+if (-not $dashHealthy) {
+    Write-Log "Investment Portfolio Browser did not become healthy. Check: $dashStderr" -Level Error
+    $OverallSuccess = $false
+} else {
+    Write-Log "  Opening $DashAppUrl in the default browser..." -Level Info
+    try {
+        Start-Process $DashAppUrl
+        Write-Log "  Browser launch requested." -Level OK
+    } catch {
+        Write-Log "  Could not open the default browser automatically: $_" -Level Warn
+        Write-Log "  Open it manually: $DashAppUrl" -Level Detail
+    }
+}
+
+# =============================================================================
 #  Final Summary
 # =============================================================================
 
@@ -735,8 +861,9 @@ if ($OverallSuccess) {
 Write-Log ("=" * 72) -Level Phase
 Write-Log "" -Level Detail
 Write-Log "  Services are still running in the background:" -Level Info
-Write-Log "    market-data-web-service    PID $($mdwsProc.Id)  http://${MarketDataHost}:${MarketDataPort}/docs" -Level Detail
-Write-Log "    portfolio-analysis-service PID $($analysisProc.Id)  http://${AnalysisHost}:${AnalysisPort}/docs" -Level Detail
+Write-Log "    market-data-web-service       PID $($mdwsProc.Id)  http://${MarketDataHost}:${MarketDataPort}/docs" -Level Detail
+Write-Log "    portfolio-analysis-service    PID $($analysisProc.Id)  http://${AnalysisHost}:${AnalysisPort}/docs" -Level Detail
+Write-Log "    Investment Portfolio Browser  PID $($dashProc.Id)  $DashAppUrl" -Level Detail
 Write-Log "" -Level Detail
 Write-Log "  To stop services, press Ctrl+C or kill the PIDs above." -Level Detail
 Write-Log "  Log file: $LogFile" -Level Detail
@@ -747,11 +874,12 @@ if ($NonInteractive) {
     Write-Log "  Stop them with: Stop-Process -Id <PID> -Force" -Level Detail
     if ($OverallSuccess) { exit 0 } else { exit 1 }
 } else {
-    # Keep the script alive so the user can interact with the running services.
-    # Press any key (or Ctrl+C) to trigger the Exit handler and stop both processes.
+    # Keep the script alive so the user can interact with the running services
+    # (including the Dash app opened in their browser above). Press any key
+    # (or Ctrl+C) to trigger the Exit handler and stop all three processes.
     Write-Log "" -Level Detail
     Write-Host ""
-    Write-Host "  Press any key to stop both services and exit..." -ForegroundColor DarkCyan
+    Write-Host "  Press any key to stop all services and exit..." -ForegroundColor DarkCyan
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     Stop-Services
     if ($OverallSuccess) { exit 0 } else { exit 1 }

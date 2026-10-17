@@ -386,3 +386,330 @@ class TestTimeseriesSC003RejectionPerformance:
         elapsed = time.perf_counter() - start
         assert rejection.status_code == 422, f"Expected 422, got {rejection.status_code}"
         assert elapsed <= 1.0, f"SC-003 violated: rejection took {elapsed:.2f}s (limit 1s)"
+
+
+def _generate_multi_year_ladder_many_positions(years: int = 5, positions: int = 50) -> bytes:
+    """Generate a sparse position ladder with many positions spanning several years.
+
+    Args:
+        years: Number of years of history to generate (monthly rows per position,
+            enough to seed forward-fill across the full expanded range).
+        positions: Number of distinct non-Cash positions to generate.
+
+    Returns:
+        XLSX file contents as bytes.
+    """
+    end = date.today() - timedelta(days=200)
+    start = end - timedelta(days=365 * years)
+    dates = pd.bdate_range(start=start, end=end, freq="MS")
+    records = []
+    for sa in [f"Position-{i}" for i in range(positions)] + ["Cash"]:
+        for i, d in enumerate(dates.date):
+            records.append(
+                {
+                    "date": d,
+                    "sub_account": sa,
+                    "book_cost": 1000.0 + i,
+                    "quantity": 10.0,
+                    "total_income": float(i),
+                }
+            )
+    df = pd.DataFrame(records)
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    return buf.getvalue()
+
+
+class TestPositionTimeseriesSC001MultiPositionPerformance:
+    """Position Time Series API SC-001: 50 positions over 5 years completes within budget.
+
+    Threshold raised 10s -> 15s (feature 006): adding position_return/weighted_position_return
+    widened every stored ladder by 2 columns on top of feature 002's price/market_value/
+    portfolio_weight. openpyxl parses every cell in the sheet regardless of which columns are
+    actually requested, so full-ladder read time scales with total column count, not just
+    requested attributes — see specs/006-ladder-daily-returns/research.md for the investigation
+    (a `usecols`-based read optimization was attempted and measured to have no effect, since
+    openpyxl's XML parsing happens before pandas' column filtering).
+    """
+
+    def test_fifty_positions_five_years_within_budget(self, app_client: TestClient) -> None:
+        """GET all 50 positions' market_value over a 5-year range; assert completion in ≤15 s."""
+        account_name = "perf-test-position-sc001"
+        ladder_resp = app_client.post(
+            f"/v1/accounts/{account_name}/ladder",
+            files=_multipart(_generate_multi_year_ladder_many_positions(years=5, positions=50)),
+        )
+        assert ladder_resp.status_code == 201, f"Ladder setup failed: {ladder_resp.text}"
+
+        start = time.perf_counter()
+        resp = app_client.get(
+            f"/v1/accounts/{account_name}/position",
+            params=[("attribute", "market_value")],
+        )
+        elapsed = time.perf_counter() - start
+        assert resp.status_code == 200, f"Position request failed: {resp.text}"
+        assert len(resp.json()["positions"]) == 51, "Expected 50 positions plus Cash"
+        assert elapsed <= 15.0, f"SC-001 violated: position request took {elapsed:.2f}s (limit 15s)"
+
+
+class TestPositionTimeseriesSC004RejectionPerformance:
+    """Position Time Series API SC-004: each rejection path completes within 1 second."""
+
+    def test_unsupported_attribute_rejected_within_1_second(self, app_client: TestClient) -> None:
+        """GET with an unsupported attribute name; assert rejection completes in ≤1 s."""
+        account_name = "perf-test-position-sc004-attr"
+        resp = app_client.post(
+            f"/v1/accounts/{account_name}/ladder",
+            files=_multipart(_generate_multi_year_ladder_many_positions(years=1, positions=5)),
+        )
+        assert resp.status_code == 201, f"Ladder setup failed: {resp.text}"
+
+        start = time.perf_counter()
+        rejection = app_client.get(
+            f"/v1/accounts/{account_name}/position",
+            params=[("attribute", "capital")],
+        )
+        elapsed = time.perf_counter() - start
+        assert rejection.status_code == 422, f"Expected 422, got {rejection.status_code}"
+        assert elapsed <= 1.0, f"SC-004 violated: rejection took {elapsed:.2f}s (limit 1s)"
+
+    def test_unknown_account_rejected_within_1_second(self, app_client: TestClient) -> None:
+        """GET for a wholly unknown account; assert rejection completes in ≤1 s."""
+        start = time.perf_counter()
+        rejection = app_client.get(
+            "/v1/accounts/perf-test-position-sc004-unknown/position",
+            params=[("attribute", "market_value")],
+        )
+        elapsed = time.perf_counter() - start
+        assert rejection.status_code == 404, f"Expected 404, got {rejection.status_code}"
+        assert elapsed <= 1.0, f"SC-004 violated: rejection took {elapsed:.2f}s (limit 1s)"
+
+    def test_invalid_date_range_rejected_within_1_second(self, app_client: TestClient) -> None:
+        """GET with start after end; assert rejection completes in ≤1 s."""
+        account_name = "perf-test-position-sc004-daterange"
+        resp = app_client.post(
+            f"/v1/accounts/{account_name}/ladder",
+            files=_multipart(_generate_multi_year_ladder_many_positions(years=1, positions=5)),
+        )
+        assert resp.status_code == 201, f"Ladder setup failed: {resp.text}"
+
+        start = time.perf_counter()
+        rejection = app_client.get(
+            f"/v1/accounts/{account_name}/position",
+            params=[
+                ("attribute", "market_value"),
+                ("start", "2024-02-01"),
+                ("end", "2024-01-01"),
+            ],
+        )
+        elapsed = time.perf_counter() - start
+        assert rejection.status_code == 422, f"Expected 422, got {rejection.status_code}"
+        assert elapsed <= 1.0, f"SC-004 violated: rejection took {elapsed:.2f}s (limit 1s)"
+
+
+class TestVarPerformance:
+    """012-var-calculation-runs SC-002/SC-003/SC-004/SC-007: VaR run and status timing."""
+
+    _POSITIONS = 50
+    _DATES = 2700
+
+    def _write_var_ladder(self, repo: "object", account: str) -> None:
+        """Write a synthetic ladder covering _DATES business days x _POSITIONS positions.
+
+        Args:
+            repo: LadderRepository to write through.
+            account: Target account name.
+        """
+        import datetime as dt
+
+        import pandas as pd
+
+        from app.repositories.ladder_repository import AccountMeta
+
+        days = pd.bdate_range(end=date.today() - timedelta(days=4), periods=self._DATES)
+        sub_accounts = [f"Equity-{i}" for i in range(self._POSITIONS)]
+        rows = [
+            {
+                "date": d.date(),
+                "sub_account": sa,
+                "book_cost": 0.0,
+                "quantity": 10.0,
+                "total_income": 0.0,
+                "price": 100.0,
+                "market_value": 1000.0,
+                "portfolio_weight": 1.0 / self._POSITIONS,
+                "position_return": 0.0,
+                "weighted_position_return": 0.0,
+            }
+            for d in days
+            for sa in sub_accounts
+        ]
+        df = pd.DataFrame(rows)
+        meta = AccountMeta(
+            account_name=account,
+            checksum="perf-test",
+            row_count=len(df),
+            from_date=days[0].date(),
+            to_date=days[-1].date(),
+            sub_accounts=sub_accounts,
+            ingested_at=dt.datetime.now(dt.UTC),
+        )
+        repo.write(account, df, meta)
+
+    def test_full_run_completes_within_60_seconds(
+        self, tmp_path: "object", fake_market_data_service: FakeMarketDataService
+    ) -> None:
+        """SC-003: a full run over ~2,700 dates x 50 positions completes in <60s."""
+        from app.config import VarSettings
+        from app.models.market_data import IdentifierMappingEntry
+        from app.models.var import VarRunRequest
+        from app.repositories.capital_repository import CapitalRepository
+        from app.repositories.ladder_repository import LadderRepository
+        from app.repositories.var_repository import VarRepository
+        from app.services.accounts_service import AccountsService
+        from app.services.var.run_scheduler import InlineRunScheduler
+        from app.services.var.var_run_service import VarRunService
+
+        ladder_repo = LadderRepository(data_dir=tmp_path)
+        capital_repo = CapitalRepository(data_dir=tmp_path)
+        var_repo = VarRepository(data_dir=tmp_path)
+        self._write_var_ladder(ladder_repo, "perf-var-full")
+
+        class _FastMappingRepo:
+            def lookup(self, sub_account: str) -> IdentifierMappingEntry | None:
+                return IdentifierMappingEntry(name=sub_account, ticker=sub_account)
+
+            def entries(self) -> list[IdentifierMappingEntry]:
+                return []
+
+        service = VarRunService(
+            ladder_repo=ladder_repo,
+            accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
+            identifier_mapping_repo=_FastMappingRepo(),  # type: ignore[arg-type]
+            observed_price_client=fake_market_data_service.client(),  # type: ignore[arg-type]
+            var_repo=var_repo,
+            scheduler=InlineRunScheduler(),
+            settings=VarSettings(),
+        )
+
+        start = time.perf_counter()
+        run = service.create_run(
+            "perf-var-full", VarRunRequest(mode="full"), date.today(), "perf-corr-1"
+        )
+        elapsed = time.perf_counter() - start
+
+        final = var_repo.read_run("perf-var-full", run.run_id)
+        assert final is not None and final.status == "succeeded", final.failure if final else None
+        assert final.dates_computed == self._DATES
+        assert elapsed <= 60.0, f"SC-003 violated: full run took {elapsed:.2f}s (limit 60s)"
+
+        # SC-004: a following 'missing' run with nothing changed computes 0 dates, fast.
+        start = time.perf_counter()
+        second = service.create_run(
+            "perf-var-full", VarRunRequest(mode="missing"), date.today(), "perf-corr-2"
+        )
+        elapsed_missing = time.perf_counter() - start
+        second_final = var_repo.read_run("perf-var-full", second.run_id)
+        assert second_final is not None and second_final.status == "succeeded"
+        assert second_final.dates_computed == 0
+        assert elapsed_missing <= 15.0, (
+            f"SC-004 violated: no-op missing run took {elapsed_missing:.2f}s (limit 15s)"
+        )
+
+    def test_create_run_returns_in_under_1_second_regardless_of_run_duration(
+        self, tmp_path: "object", fake_market_data_service: FakeMarketDataService
+    ) -> None:
+        """SC-002: POST (create_run) is acknowledged in <1s even for a slow run."""
+        from app.config import VarSettings
+        from app.models.market_data import IdentifierMappingEntry
+        from app.models.var import VarRunRequest
+        from app.repositories.capital_repository import CapitalRepository
+        from app.repositories.ladder_repository import LadderRepository
+        from app.repositories.var_repository import VarRepository
+        from app.services.accounts_service import AccountsService
+        from app.services.var.run_scheduler import ThreadRunScheduler
+        from app.services.var.var_run_service import VarRunService
+
+        ladder_repo = LadderRepository(data_dir=tmp_path)
+        capital_repo = CapitalRepository(data_dir=tmp_path)
+        var_repo = VarRepository(data_dir=tmp_path)
+        self._write_var_ladder(ladder_repo, "perf-var-async")
+
+        class _FastMappingRepo:
+            def lookup(self, sub_account: str) -> IdentifierMappingEntry | None:
+                return IdentifierMappingEntry(name=sub_account, ticker=sub_account)
+
+            def entries(self) -> list[IdentifierMappingEntry]:
+                return []
+
+        scheduler = ThreadRunScheduler()
+        service = VarRunService(
+            ladder_repo=ladder_repo,
+            accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
+            identifier_mapping_repo=_FastMappingRepo(),  # type: ignore[arg-type]
+            observed_price_client=fake_market_data_service.client(),  # type: ignore[arg-type]
+            var_repo=var_repo,
+            scheduler=scheduler,
+            settings=VarSettings(),
+        )
+
+        start = time.perf_counter()
+        run = service.create_run(
+            "perf-var-async", VarRunRequest(mode="full"), date.today(), "perf-corr-3"
+        )
+        elapsed = time.perf_counter() - start
+
+        assert run.status == "queued"
+        assert elapsed <= 1.0, f"SC-002 violated: create_run took {elapsed:.2f}s (limit 1s)"
+        scheduler.shutdown()  # wait for the background run before the temp dir is torn down
+
+    def test_status_returns_in_under_2_seconds(
+        self, tmp_path: "object", fake_market_data_service: FakeMarketDataService
+    ) -> None:
+        """SC-007: status() returns in <2s without reading the ladder."""
+        from app.config import VarSettings
+        from app.models.market_data import IdentifierMappingEntry
+        from app.models.var import VarRunRequest
+        from app.repositories.capital_repository import CapitalRepository
+        from app.repositories.ladder_repository import LadderRepository
+        from app.repositories.var_repository import VarRepository
+        from app.services.accounts_service import AccountsService
+        from app.services.var.run_scheduler import InlineRunScheduler
+        from app.services.var.var_run_service import VarRunService
+        from app.services.var.var_status_service import VarStatusService
+
+        ladder_repo = LadderRepository(data_dir=tmp_path)
+        capital_repo = CapitalRepository(data_dir=tmp_path)
+        var_repo = VarRepository(data_dir=tmp_path)
+        self._write_var_ladder(ladder_repo, "perf-var-status")
+
+        class _FastMappingRepo:
+            def lookup(self, sub_account: str) -> IdentifierMappingEntry | None:
+                return IdentifierMappingEntry(name=sub_account, ticker=sub_account)
+
+            def entries(self) -> list[IdentifierMappingEntry]:
+                return []
+
+        run_service = VarRunService(
+            ladder_repo=ladder_repo,
+            accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
+            identifier_mapping_repo=_FastMappingRepo(),  # type: ignore[arg-type]
+            observed_price_client=fake_market_data_service.client(),  # type: ignore[arg-type]
+            var_repo=var_repo,
+            scheduler=InlineRunScheduler(),
+            settings=VarSettings(),
+        )
+        run_service.create_run(
+            "perf-var-status", VarRunRequest(mode="full"), date.today(), "perf-corr-4"
+        )
+
+        status_service = VarStatusService(
+            ladder_repo=ladder_repo,
+            accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
+            var_repo=var_repo,
+        )
+        start = time.perf_counter()
+        status_service.get_status("perf-var-status")
+        elapsed = time.perf_counter() - start
+
+        assert elapsed <= 2.0, f"SC-007 violated: status took {elapsed:.2f}s (limit 2s)"

@@ -16,6 +16,7 @@ from app.repositories.identifier_mapping_repository import IdentifierMappingRepo
 from app.repositories.ladder_repository import LadderRepository
 from app.services.ingestion_service import IngestionService
 from app.services.pricing_enrichment_service import PricingEnrichmentService
+from app.services.returns_enrichment_service import ReturnsEnrichmentService
 from app.validators.account_name import validate_account_name
 
 logger = structlog.get_logger(__name__)
@@ -83,7 +84,12 @@ def _get_ingestion_service(
     Returns:
         IngestionService instance.
     """
-    return IngestionService(repository=repository, enrichment_service=enrichment_service)
+    returns_service = ReturnsEnrichmentService()
+    return IngestionService(
+        repository=repository,
+        enrichment_service=enrichment_service,
+        returns_service=returns_service,
+    )
 
 
 @router.post(

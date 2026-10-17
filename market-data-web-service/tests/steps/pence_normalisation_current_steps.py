@@ -19,12 +19,14 @@ def pence_current_client(mock_inner_provider: MagicMock) -> Generator[TestClient
     from app.services.gap_fill import GapFillService
     from app.services.minor_unit import SubUnitNormaliser
     from app.services.pricing_service import PricingService
+    from app.services.series_fill import FillStrategyResolver, ObservedOnlyFiller
 
     def override() -> PricingService:
         return PricingService(
             provider=mock_inner_provider,
             gap_fill=GapFillService(),
             normaliser=SubUnitNormaliser(),
+            fill_resolver=FillStrategyResolver(GapFillService(), ObservedOnlyFiller()),
         )
 
     app.dependency_overrides[get_pricing_service] = override

@@ -406,3 +406,203 @@ def check_timeseries_entry_count(val_response: object, count: int) -> None:
     """Assert the timeseries response contains exactly the given number of entries."""
     entries = val_response.json()["entries"]
     assert len(entries) == count, f"Expected {count} entries, got {len(entries)}"
+
+
+# ---------------------------------------------------------------------------
+# Position time series endpoint edge cases
+# ---------------------------------------------------------------------------
+
+
+@given(
+    parsers.parse(
+        'account "{account_name}" has a position ladder starting 2020-01-02 for validation'
+    )
+)
+def val_ladder_fixed_start(account_name: str, app_client: TestClient) -> None:
+    """Ingest a position ladger with a single position starting on a fixed literal date."""
+    resp = app_client.post(
+        f"/v1/accounts/{account_name}/ladder",
+        files=_multipart(_val_ledger_bytes(date(2020, 1, 2))),
+    )
+    assert resp.status_code == 201, f"Ladder setup failed: {resp.text}"
+
+
+@given(
+    parsers.parse(
+        'account "{account_name}" has a position ladder with "Cash" and a '
+        'recently-opened "Late Corp" position for validation'
+    )
+)
+def val_ladder_with_late_position(account_name: str, app_client: TestClient) -> None:
+    """Ingest a ladger where Cash starts in 2020 and Late Corp only starts in mid-2022."""
+    df = pd.DataFrame(
+        {
+            "date": [date(2020, 1, 2), date(2022, 6, 1)],
+            "sub_account": ["Cash", "Late Corp"],
+            "book_cost": [1000.0, 500.0],
+            "quantity": [1000.0, 5.0],
+            "total_income": [0.0, 0.0],
+        }
+    )
+    resp = app_client.post(
+        f"/v1/accounts/{account_name}/ladder",
+        files=_multipart(_xlsx_bytes(df)),
+    )
+    assert resp.status_code == 201, f"Ladder setup failed: {resp.text}"
+
+
+@when(
+    parsers.parse(
+        'a position request is made for attribute "{attribute:w}" for position "{position}" '
+        'twice for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def request_position_twice(
+    attribute: str, position: str, account_name: str, app_client: TestClient
+) -> object:
+    """GET the position endpoint with the same position value supplied twice."""
+    return app_client.get(
+        f"/v1/accounts/{account_name}/position",
+        params=[("attribute", attribute), ("position", position), ("position", position)],
+    )
+
+
+@when(
+    parsers.parse(
+        'a position request is made for attribute "{attribute:w}" for position "{position}" '
+        'with start "{start}" and end "{end}" for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def request_position_with_start_end(
+    attribute: str, position: str, start: str, end: str, account_name: str, app_client: TestClient
+) -> object:
+    """GET the position endpoint for a single named position with an explicit date range."""
+    return app_client.get(
+        f"/v1/accounts/{account_name}/position",
+        params=[
+            ("attribute", attribute),
+            ("position", position),
+            ("start", start),
+            ("end", end),
+        ],
+    )
+
+
+@when(
+    parsers.parse(
+        'a position request is made for attribute "{attribute:w}" for position "{position}" '
+        'for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def request_position_by_name(
+    attribute: str, position: str, account_name: str, app_client: TestClient
+) -> object:
+    """GET the position endpoint for a single named position, no explicit date range."""
+    return app_client.get(
+        f"/v1/accounts/{account_name}/position",
+        params=[("attribute", attribute), ("position", position)],
+    )
+
+
+@when(
+    parsers.parse(
+        'a position request is made for attribute "{attribute:w}" with start "{start}" and '
+        'end "{end}" for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def request_position_no_name_with_start_end(
+    attribute: str, start: str, end: str, account_name: str, app_client: TestClient
+) -> object:
+    """GET the position endpoint with no position filter and an explicit date range."""
+    return app_client.get(
+        f"/v1/accounts/{account_name}/position",
+        params=[("attribute", attribute), ("start", start), ("end", end)],
+    )
+
+
+@then(parsers.parse("the position response lists exactly {count:d} position"))
+def check_position_count(val_response: object, count: int) -> None:
+    """Assert the response's positions field lists exactly the given number of positions."""
+    positions = val_response.json()["positions"]
+    assert len(positions) == count, f"Expected {count} positions, got {len(positions)}"
+
+
+@then("the position response contains zero entries")
+def check_position_zero_entries(val_response: object) -> None:
+    """Assert the position response succeeded with an empty entries list."""
+    assert val_response.json()["entries"] == []
+
+
+@then(parsers.parse("the position response contains exactly {count:d} entry"))
+def check_position_entry_count(val_response: object, count: int) -> None:
+    """Assert the position response contains exactly the given number of entries."""
+    entries = val_response.json()["entries"]
+    assert len(entries) == count, f"Expected {count} entries, got {len(entries)}"
+
+
+@given(
+    parsers.parse(
+        'account "{account_name}" has a position ladder where "{sub_account}" is divested '
+        "to zero quantity for validation"
+    )
+)
+def val_ladder_with_divested_position(
+    account_name: str, sub_account: str, app_client: TestClient
+) -> None:
+    """Ingest a ladger where a position's quantity reaches 0.0 on its closure date (FR-005)."""
+    df = pd.DataFrame(
+        {
+            "date": [date(2020, 1, 2), date(2020, 1, 3)],
+            "sub_account": [sub_account, sub_account],
+            "book_cost": [500.0, 0.0],
+            "quantity": [5.0, 0.0],
+            "total_income": [0.0, 0.0],
+        }
+    )
+    resp = app_client.post(
+        f"/v1/accounts/{account_name}/ladder",
+        files=_multipart(_xlsx_bytes(df)),
+    )
+    assert resp.status_code == 201, f"Ladder setup failed: {resp.text}"
+
+
+@then("the position response has no null position_return values")
+def check_position_return_not_null(val_response: object) -> None:
+    """Assert every entry's position_return is present and not null (FR-005 no-raise guard)."""
+    entries = val_response.json()["entries"]
+    assert entries, "expected at least one entry"
+    for entry in entries:
+        assert entry.get("position_return") is not None
+
+
+# ---------------------------------------------------------------------------
+# Performance endpoint validation (feature 007)
+# ---------------------------------------------------------------------------
+
+
+@when(
+    parsers.parse(
+        'a performance request is made for attribute "{attribute}" for account "{account_name}"'
+    ),
+    target_fixture="val_response",
+)
+def request_performance_attribute(
+    attribute: str, account_name: str, app_client: TestClient
+) -> object:
+    """GET the performance endpoint for a single attribute, no date range."""
+    return app_client.get(
+        f"/v1/accounts/{account_name}/performance", params=[("attribute", attribute)]
+    )
+
+
+@when(
+    parsers.parse('a performance request is made with no attribute for account "{account_name}"'),
+    target_fixture="val_response",
+)
+def request_performance_no_attribute(account_name: str, app_client: TestClient) -> object:
+    """GET the performance endpoint with zero attribute params."""
+    return app_client.get(f"/v1/accounts/{account_name}/performance")

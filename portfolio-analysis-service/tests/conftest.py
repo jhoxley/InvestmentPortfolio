@@ -10,11 +10,13 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.dependencies import get_observed_price_client, get_run_scheduler
 from app.api.ladder import _get_identifier_mapping_repository, _get_market_data_client
 from app.clients.market_data_client import HttpMarketDataClient
 from app.config import DataSettings, Settings, get_settings
 from app.main import app
 from app.models.market_data import IdentifierMappingEntry, PriceHistoryPoint
+from app.services.var.run_scheduler import InlineRunScheduler
 
 
 def _make_settings(data_dir: Path) -> Settings:
@@ -62,6 +64,8 @@ def app_client(
     app.dependency_overrides[_get_identifier_mapping_repository] = lambda: (
         fake_identifier_mapping_repository
     )
+    app.dependency_overrides[get_observed_price_client] = lambda: fake_market_data_service.client()
+    app.dependency_overrides[get_run_scheduler] = lambda: InlineRunScheduler()
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
@@ -138,7 +142,10 @@ class FakeMarketDataService:
         """Initialise with no configured overrides and an empty request log."""
         self.requests: list[httpx.Request] = []
         self._prices: dict[str, list[PriceHistoryPoint]] = {}
+        self._observed_prices: dict[str, list[PriceHistoryPoint]] = {}
         self._errors: dict[str, int] = {}
+        self._not_found: set[str] = set()
+        self._observed_unsupported = False
         self.transport = httpx.MockTransport(self._handle)
 
     def configure_prices(self, identifier: str, prices: list[PriceHistoryPoint]) -> None:
@@ -150,6 +157,35 @@ class FakeMarketDataService:
                 regardless of the requested date range (used to simulate gaps).
         """
         self._prices[identifier] = prices
+
+    def configure_observed_prices(self, identifier: str, points: list[PriceHistoryPoint]) -> None:
+        """Set the real (fill=none) observations to return for a given identifier.
+
+        Args:
+            identifier: The ticker or ISIN to configure.
+            points: The full set of real observations known for this identifier. A
+                fill=none request returns only the points within the requested range;
+                first_observed_date/last_observed_date are derived from this full set,
+                independent of the requested range (matching market-data-web-service's
+                feature 009 semantics).
+        """
+        self._observed_prices[identifier] = sorted(points, key=lambda p: p.date)
+
+    def configure_unsupported_observed_history(self) -> None:
+        """Make every fill=none request behave like an old, unsupporting service.
+
+        The response omits first_observed_date/last_observed_date entirely, which is
+        how HttpMarketDataClient detects a service that predates feature 009.
+        """
+        self._observed_unsupported = True
+
+    def configure_not_found(self, identifier: str) -> None:
+        """Configure a given identifier to return 404 (no price history at all).
+
+        Args:
+            identifier: The ticker or ISIN to configure as not found.
+        """
+        self._not_found.add(identifier)
 
     def configure_error(self, identifier: str, status_code: int = 502) -> None:
         """Configure a given identifier to return an HTTP error response.
@@ -182,16 +218,22 @@ class FakeMarketDataService:
         """
         self.requests.append(request)
         identifier = request.url.path.split("/")[2]
+        params = request.url.params
         if identifier in self._errors:
             return httpx.Response(self._errors[identifier], json={"detail": "simulated error"})
+        if identifier in self._not_found:
+            return httpx.Response(404, json={"detail": f"'{identifier}' not found"})
 
-        params = request.url.params
         currency = params.get("currency", "GBP")
+        from_date = date.fromisoformat(params["from"])
+        to_date = date.fromisoformat(params["to"])
+
+        if params.get("fill") == "none":
+            return self._handle_observed(identifier, currency, from_date, to_date)
+
         if identifier in self._prices:
             prices = self._prices[identifier]
         else:
-            from_date = date.fromisoformat(params["from"])
-            to_date = date.fromisoformat(params["to"])
             prices = []
             current = from_date
             while current <= to_date:
@@ -207,6 +249,45 @@ class FakeMarketDataService:
                 "prices": [{"date": p.date.isoformat(), "close": p.close} for p in prices],
             },
         )
+
+    def _handle_observed(
+        self, identifier: str, currency: str, from_date: date, to_date: date
+    ) -> httpx.Response:
+        """Build the fill=none response for one identifier.
+
+        Args:
+            identifier: The ticker or ISIN requested.
+            currency: The requested target currency.
+            from_date: Start of the requested range (inclusive).
+            to_date: End of the requested range (inclusive).
+
+        Returns:
+            A simulated observed-only httpx.Response.
+        """
+        if identifier in self._observed_prices:
+            full = self._observed_prices[identifier]
+            windowed = [p for p in full if from_date <= p.date <= to_date]
+            first_observed = full[0].date if full else None
+            last_observed = full[-1].date if full else None
+        else:
+            windowed = []
+            current = from_date
+            while current <= to_date:
+                if current.weekday() < 5:
+                    windowed.append(PriceHistoryPoint(date=current, close=100.0))
+                current += timedelta(days=1)
+            first_observed = from_date
+            last_observed = to_date
+
+        body: dict[str, object] = {
+            "ticker": identifier,
+            "currency": currency,
+            "prices": [{"date": p.date.isoformat(), "close": p.close} for p in windowed],
+        }
+        if not self._observed_unsupported:
+            body["first_observed_date"] = first_observed.isoformat() if first_observed else None
+            body["last_observed_date"] = last_observed.isoformat() if last_observed else None
+        return httpx.Response(200, json=body)
 
     def client(self, timeout_seconds: float = 5.0) -> HttpMarketDataClient:
         """Build an HttpMarketDataClient wired to this fake's mock transport.
@@ -237,7 +318,14 @@ class FakeIdentifierMappingRepository:
         self._overrides: dict[str, IdentifierMappingEntry | None] = {}
 
     def set_entry(
-        self, sub_account: str, *, ticker: str | None = None, isin: str | None = None
+        self,
+        sub_account: str,
+        *,
+        ticker: str | None = None,
+        isin: str | None = None,
+        var_proxy: str | None = None,
+        var_proxy_mode: str = "fill_gaps",
+        var_proxy_scale: float = 1.0,
     ) -> None:
         """Configure an explicit mapping entry for a sub-account.
 
@@ -245,9 +333,17 @@ class FakeIdentifierMappingRepository:
             sub_account: The sub-account name to configure.
             ticker: The ticker to return, if any.
             isin: The ISIN to return, if any.
+            var_proxy: VaR proxy identifier, if any.
+            var_proxy_mode: "fill_gaps" or "always".
+            var_proxy_scale: Static multiplier on the proxy's returns.
         """
         self._overrides[sub_account] = IdentifierMappingEntry(
-            name=sub_account, ticker=ticker, isin=isin
+            name=sub_account,
+            ticker=ticker,
+            isin=isin,
+            var_proxy=var_proxy,
+            var_proxy_mode=var_proxy_mode,  # type: ignore[arg-type]
+            var_proxy_scale=var_proxy_scale,
         )
 
     def set_missing(self, sub_account: str) -> None:
@@ -271,6 +367,16 @@ class FakeIdentifierMappingRepository:
         if sub_account in self._overrides:
             return self._overrides[sub_account]
         return IdentifierMappingEntry(name=sub_account, ticker=sub_account)
+
+    def entries(self) -> list[IdentifierMappingEntry]:
+        """Return every configured entry (mirrors IdentifierMappingRepository.entries()).
+
+        Returns:
+            The explicitly configured, non-missing entries. Unlike `lookup()`, this does
+            not synthesise a default entry for sub-accounts that were never configured --
+            there is no "every sub-account in the universe" to enumerate for a fake.
+        """
+        return [entry for entry in self._overrides.values() if entry is not None]
 
 
 @pytest.fixture()

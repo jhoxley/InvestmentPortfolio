@@ -36,6 +36,10 @@ class PriceHistoryResponse(BaseModel):
     ticker: str
     currency: str
     prices: list[PricePoint]
+    # Additive (feature 009): the instrument's known observation window, independent of the
+    # requested range. Nullable so the model stays valid when the service knows no window.
+    first_observed_date: date | None = None
+    last_observed_date: date | None = None
 
 
 class TickerResolutionResponse(BaseModel):

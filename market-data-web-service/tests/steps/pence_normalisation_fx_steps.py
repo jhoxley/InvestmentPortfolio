@@ -29,12 +29,14 @@ def pence_fx_client(
     from app.services.gap_fill import GapFillService
     from app.services.minor_unit import SubUnitNormaliser
     from app.services.pricing_service import PricingService
+    from app.services.series_fill import FillStrategyResolver, ObservedOnlyFiller
 
     def override_pricing() -> PricingService:
         return PricingService(
             provider=mock_inner_provider,
             gap_fill=GapFillService(),
             normaliser=SubUnitNormaliser(),
+            fill_resolver=FillStrategyResolver(GapFillService(), ObservedOnlyFiller()),
         )
 
     def override_currency() -> CurrencyService:

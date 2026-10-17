@@ -1,0 +1,55 @@
+app_name: "Investment Portfolio Browser"
+
+build_info:
+  version: "0.1.0"
+  published_date: "2026-07-13"
+
+nav_sections:
+  - key: overview
+    label: Overview
+    order: 1
+    is_default: true
+  - key: positions
+    label: Positions
+    order: 2
+  - key: performance
+    label: Performance
+    order: 3
+  - key: projection
+    label: Projection
+    order: 4
+  - key: risk
+    label: Risk
+    order: 5
+
+periodicity:
+  label: "Periodicity"
+  options:
+    - { key: day,     label: day,     value: day }
+    - { key: week,    label: week,    value: week }
+    - { key: month,   label: month,   value: month }
+    - { key: quarter, label: quarter, value: quarter }
+    # The UI reads "year" beside day/week/month/quarter; the analysis service
+    # calls this interval "annual". This is the only place the two vocabularies
+    # differ, kept in data rather than code so it stays visible.
+    - { key: year,    label: year,    value: annual }
+  thresholds:
+    day_max_years: 1
+    month_max_years: 3
+    quarter_max_years: 5
+
+projection:
+  horizons:
+    - { key: 1y,  label: "1Y",  years: 1 }
+    - { key: 5y,  label: "5Y",  years: 5 }
+    - { key: 10y, label: "10Y", years: 10 }
+    - { key: 20y, label: "20Y", years: 20 }
+  # `key` is the exact string portfolio-analysis-service's projection endpoint expects for
+  # its `return` query parameter — the same names its performance endpoint already uses
+  # (`ITD (Ann.)`/`1Y`/`3Y`/`5Y`), not a separate lowercase code. See specs/022-projection-page
+  # and portfolio-analysis-service's specs/009-projection-endpoint/research.md #2.
+  returns:
+    - { key: "ITD (Ann.)", label: "Ann. ITD" }
+    - { key: "1Y",         label: "1Y" }
+    - { key: "3Y",         label: "3Y" }
+    - { key: "5Y",         label: "5Y" }

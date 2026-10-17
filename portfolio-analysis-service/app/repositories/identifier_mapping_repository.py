@@ -88,3 +88,17 @@ class IdentifierMappingRepository:
         if entry is None:
             logger.debug("identifier_mapping_miss", sub_account=sub_account)
         return entry
+
+    def entries(self) -> list[IdentifierMappingEntry]:
+        """Return every configured mapping entry, loading the file lazily if needed.
+
+        Returns:
+            All entries in the mapping file, in file order.
+
+        Raises:
+            ValueError: If no mapping path is configured, the file does not exist, or it
+                is not valid JSON (same as `lookup()`).
+        """
+        if self._entries is None:
+            self._entries = self._load()
+        return list(self._entries.values())

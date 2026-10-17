@@ -12,6 +12,7 @@ from app.models.ladder import IngestionSummary, Links
 from app.repositories.ladder_repository import AccountMeta, LadderRepository
 from app.services.ladder_expander import LadderExpander
 from app.services.pricing_enrichment_service import PricingEnrichmentService
+from app.services.returns_enrichment_service import ReturnsEnrichmentService
 from app.validators.ledger import LedgerValidator
 
 logger = structlog.get_logger(__name__)
@@ -27,21 +28,27 @@ class IngestionService:
     4. Validate schema via LedgerValidator.
     5. Expand to daily ladder via LadderExpander.
     6. Enrich with price/market_value/portfolio_weight via PricingEnrichmentService.
-    7. Persist via LadderRepository.
-    8. Return IngestionSummary.
+    7. Enrich with position_return/weighted_position_return via ReturnsEnrichmentService.
+    8. Persist via LadderRepository.
+    9. Return IngestionSummary.
     """
 
     def __init__(
-        self, repository: LadderRepository, enrichment_service: PricingEnrichmentService
+        self,
+        repository: LadderRepository,
+        enrichment_service: PricingEnrichmentService,
+        returns_service: ReturnsEnrichmentService,
     ) -> None:
-        """Initialise with a LadderRepository and PricingEnrichmentService instance.
+        """Initialise with a LadderRepository and the two enrichment services.
 
         Args:
             repository: Repository for reading and writing ladder files.
             enrichment_service: Service that adds price/market_value/portfolio_weight.
+            returns_service: Service that adds position_return/weighted_position_return.
         """
         self._repository = repository
         self._enrichment_service = enrichment_service
+        self._returns_service = returns_service
         self._validator = LedgerValidator()
         self._expander = LadderExpander()
 
@@ -73,6 +80,7 @@ class IngestionService:
                 log.info("ingest_refresh", reason="checksum_match")
                 base_df = self._repository.read_ladder_df(account_name)
                 enriched_df = self._enrichment_service.enrich(base_df)
+                enriched_df = self._returns_service.enrich(enriched_df)
                 refreshed_meta = meta.model_copy(update={"ingested_at": datetime.now(UTC)})
                 self._repository.write(account_name, enriched_df, refreshed_meta)
                 log.info("ingest_refresh_complete", row_count=refreshed_meta.row_count)
@@ -92,6 +100,7 @@ class IngestionService:
 
         ladder_df = self._expander.expand(df, today)
         enriched_df = self._enrichment_service.enrich(ladder_df)
+        enriched_df = self._returns_service.enrich(enriched_df)
 
         sub_accounts: list[str] = sorted(ladder_df["sub_account"].unique().tolist())
         from_date: date = ladder_df["date"].min()

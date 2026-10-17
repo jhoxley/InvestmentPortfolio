@@ -1,0 +1,253 @@
+"""Composes header + sidebar + content frame + parameters bar (FR-004, FR-005, FR-008).
+
+The parameters bar is route-aware (016): on the Overview route it hosts real
+Account/date-range controls; on every other route it keeps 015's original
+static, disabled placeholder unchanged (research.md #7 in
+specs/016-link-real-portfolio).
+"""
+
+from __future__ import annotations
+
+import dash
+import dash_bootstrap_components as dbc
+from dash import Dash, Input, Output, dcc, html
+
+from config.content import ContentConfig, get_content_config
+from src.components.date_range_controls import build_account_date_controls
+from src.components.footer import build_footer
+from src.components.header import build_header
+from src.components.periodicity_controls import build_periodicity_control
+from src.components.sidebar import build_sidebar
+
+_CONTENT_WIDTH = 10  # out of 12 grid columns — the remainder of the sidebar's 2
+_OVERVIEW_PATH = "/"
+_POSITIONS_PATH = "/positions"
+_PERFORMANCE_PATH = "/performance"
+_PROJECTION_PATH = "/projection"
+_RISK_PATH = "/risk"
+
+
+def _build_static_parameters_bar() -> list:
+    """Illustrative, disabled placeholder controls (015 spec Assumptions; FR-005).
+
+    Rendered on every route except Overview.
+    """
+    account_selector = dbc.Select(
+        id="app-parameters-account",
+        options=[{"label": "All accounts", "value": "all"}],
+        value="all",
+        disabled=True,
+    )
+    date_range = dbc.Input(
+        id="app-parameters-daterange",
+        type="text",
+        value="Placeholder date range",
+        disabled=True,
+    )
+    return [
+        dbc.Col(
+            html.Label("Account", htmlFor="app-parameters-account"),
+            width="auto",
+        ),
+        dbc.Col(account_selector, width=3),
+        dbc.Col(
+            html.Label("Date range", htmlFor="app-parameters-daterange"),
+            width="auto",
+        ),
+        dbc.Col(date_range, width=3),
+    ]
+
+
+def _build_overview_parameters_bar() -> list:
+    """Real Account selector + From/To date pickers + shortcut buttons (016/017)
+    plus the shared Periodicity control (021).
+
+    Options/values are populated by a callback in src/pages/overview.py once
+    the page has fetched /v1/accounts — this only builds the empty controls.
+    Shared with the Positions page (018) via
+    src/components/date_range_controls.py; the Periodicity control is shared
+    the same way via src/components/periodicity_controls.py, but with
+    Overview's own component ids (see that module's docstring for why ids
+    are page-scoped, not shared, unlike the account/date controls).
+    """
+    periodicity_config = get_content_config().periodicity
+    return [
+        *build_account_date_controls(),
+        *build_periodicity_control("overview", periodicity_config),
+    ]
+
+
+def _build_positions_parameters_bar() -> list:
+    """Real Account/From/To/shortcut controls (shared) + the Periodicity control
+    (021) + Positions-only controls (018).
+
+    Options/values are populated by callbacks in src/pages/positions.py once
+    the page has fetched /v1/accounts, /v1/positions/attributes, and
+    /v1/accounts/{account}/positions — this only builds the empty controls.
+    The Periodicity control uses this page's own component ids (see
+    src/components/periodicity_controls.py's docstring for why).
+    """
+    stacked_toggle = dbc.Switch(
+        id="positions-parameters-stacked-toggle",
+        label="Stacked area graph",
+        value=False,
+        className="d-inline-block",
+    )
+    position_filter = dcc.Dropdown(
+        id="positions-parameters-position-filter",
+        options=[],
+        value=[],
+        multi=True,
+        searchable=True,
+        placeholder="All positions",
+    )
+    periodicity_config = get_content_config().periodicity
+    return [
+        *build_account_date_controls(),
+        *build_periodicity_control("positions", periodicity_config),
+        dbc.Col(stacked_toggle, width="auto"),
+        dbc.Col(
+            html.Label("Positions", htmlFor="positions-parameters-position-filter"),
+            width="auto",
+        ),
+        dbc.Col(position_filter, width=4),
+    ]
+
+
+def _build_performance_parameters_bar() -> list:
+    """Real Account/From/To/shortcut controls only — no Performance-only controls (020).
+
+    Options/values are populated by callbacks in src/pages/performance.py
+    once the page has fetched /v1/accounts + /v1/performance/attributes —
+    this only builds the empty controls. The first shortcut button is
+    relabeled "ITD" (in place of "YtD") per spec Clarifications; no
+    stacked-area toggle or other chart-mode control is added (FR-005).
+    """
+    return build_account_date_controls(first_shortcut_label="ITD")
+
+
+def _build_projection_parameters_bar() -> list:
+    """Account selector + start-date picker + horizon buttons + calendar picker (022)
+    plus the shared Periodicity control (023).
+
+    Options/values are populated by callbacks in src/pages/projection.py
+    once the page has fetched /v1/accounts — this only builds the empty
+    controls. Unlike Overview/Positions/Performance, this page does not
+    reuse `build_account_date_controls()`: its date semantics are a single
+    "start date" plus a "projection target date" (set by either a horizon
+    button or the calendar picker), not a from/to range with shortcuts
+    (specs/022-projection-page/contracts/ui-contract.md). Return selection
+    (the toggle switches) lives in the page's own layout below the bar, not
+    here — mirroring where Performance's own measure toggles live. The
+    Periodicity control uses this page's own component ids (see
+    src/components/periodicity_controls.py's docstring for why).
+    """
+    projection_config = get_content_config().projection
+    periodicity_config = get_content_config().periodicity
+    account_selector = dbc.Select(id="app-parameters-account", options=[], value=None)
+    start_date = dcc.DatePickerSingle(id="projection-start-date", placeholder="Start date")
+    horizon_buttons = dbc.ButtonGroup(
+        [
+            dbc.Button(
+                horizon.label,
+                id=f"projection-horizon-{horizon.key}",
+                size="sm",
+                color="secondary",
+                outline=True,
+            )
+            for horizon in projection_config.horizons
+        ]
+    )
+    target_date = dcc.DatePickerSingle(id="projection-target-date", placeholder="Project to")
+    return [
+        dbc.Col(html.Label("Account", htmlFor="app-parameters-account"), width="auto"),
+        dbc.Col(account_selector, width=3),
+        dbc.Col(html.Label("Start date", htmlFor="projection-start-date"), width="auto"),
+        dbc.Col(start_date, width="auto"),
+        dbc.Col(horizon_buttons, width="auto"),
+        dbc.Col(html.Label("Project to", htmlFor="projection-target-date"), width="auto"),
+        dbc.Col(target_date, width="auto"),
+        *build_periodicity_control("projection", periodicity_config),
+        dbc.Col(
+            dbc.FormText(id="projection-date-validation", color="danger"),
+            width="auto",
+        ),
+    ]
+
+
+def _build_risk_parameters_bar() -> list:
+    """Real Account/From/To/shortcut controls, with a "10Y" first shortcut (024) and an
+    extra page-local "2Y" shortcut button (027).
+
+    Options/values are populated by callbacks in src/pages/risk.py once the
+    page has fetched /v1/accounts — this only builds the empty controls. The
+    first shortcut button is relabeled "10Y" (in place of "YtD"/"ITD"); the
+    page's own callback maps it to the new `SHORTCUT_10Y` code, the same
+    page-local remapping Performance already uses for its "ITD" label
+    (research.md #1). The trailing `FormText` mirrors Projection's own
+    `projection-date-validation` pattern for FR-007's inline message.
+
+    027: the extra "2Y" button (id `risk-shortcut-2y`) is added directly here, not via
+    the shared five-button `build_account_date_controls` component — every other page
+    using that component keeps its unchanged five-button layout. This one button makes
+    the Risk page's single range control cover every code the Value at Risk section's
+    server-reported look-backs can use (1y/2y/5y) as well as the histogram's own
+    existing 1Y/3Y/5Y/10Y/All range (research.md #5 in specs/027-risk-page-cleanup).
+    """
+    return [
+        *build_account_date_controls(first_shortcut_label="10Y"),
+        dbc.Col(
+            dbc.Button("2Y", id="risk-shortcut-2y", size="sm", color="secondary", outline=True),
+            width="auto",
+        ),
+        dbc.Col(
+            dbc.FormText(id="risk-date-validation", color="danger"),
+            width="auto",
+        ),
+    ]
+
+
+def _render_parameters_bar(pathname: str | None) -> list:
+    if pathname == _OVERVIEW_PATH:
+        return _build_overview_parameters_bar()
+    if pathname == _POSITIONS_PATH:
+        return _build_positions_parameters_bar()
+    if pathname == _PERFORMANCE_PATH:
+        return _build_performance_parameters_bar()
+    if pathname == _PROJECTION_PATH:
+        return _build_projection_parameters_bar()
+    if pathname == _RISK_PATH:
+        return _build_risk_parameters_bar()
+    return _build_static_parameters_bar()
+
+
+def build_shell(app: Dash, content: ContentConfig) -> html.Div:
+    parameters_bar = dbc.Row(
+        _build_static_parameters_bar(),
+        id="app-parameters-bar",
+        className="g-2 align-items-center border-bottom py-2 mb-3",
+    )
+    content_frame = dbc.Col(
+        [
+            parameters_bar,
+            html.Div(dash.page_container, id="app-page-content"),
+        ],
+        id="app-content-frame",
+        width=_CONTENT_WIDTH,
+    )
+    body = dbc.Row(
+        [build_sidebar(content), content_frame],
+        className="g-0",
+    )
+
+    # Registered here (not as a bare `@callback` at module level) so it is
+    # bound after `app` already exists — Dash Pages' internal routing
+    # component (`_pages_location`) is only guaranteed present once
+    # `Dash(use_pages=True)` has run, mirroring why `register_page` itself
+    # must run after app instantiation.
+    app.callback(
+        Output("app-parameters-bar", "children"),
+        Input("_pages_location", "pathname"),
+    )(_render_parameters_bar)
+
+    return html.Div([build_header(content), body, build_footer(content)])

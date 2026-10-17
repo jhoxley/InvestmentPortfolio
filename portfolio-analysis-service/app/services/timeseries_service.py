@@ -9,12 +9,14 @@ import pandas as pd
 import structlog
 
 from app.exceptions import AccountNotFoundError, MissingRequiredSourceError
+from app.models.periodicity import Periodicity
 from app.models.timeseries import TimeSeriesEntry, TimeSeriesResponse
 from app.repositories.capital_repository import CapitalRepository
 from app.repositories.ladder_repository import LadderRepository
 from app.services import timeseries_attributes
 from app.services.accounts_service import AccountsService
 from app.services.business_day_expansion import expand_business_days
+from app.services.periodicity_aggregation import aggregate_last_observation
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 
 logger = structlog.get_logger(__name__)
@@ -52,6 +54,7 @@ class TimeSeriesService:
         start: date | None,
         end: date | None,
         today: date,
+        periodicity: Periodicity = Periodicity.DAY,
     ) -> TimeSeriesResponse:
         """Build the requested time series for an account.
 
@@ -61,6 +64,8 @@ class TimeSeriesService:
             start: Caller-supplied start date, or None to default.
             end: Caller-supplied end date, or None to default.
             today: The current date.
+            periodicity: Calendar aggregation interval. The default reproduces the
+                per-business-day series exactly.
 
         Returns:
             Populated TimeSeriesResponse.
@@ -180,6 +185,8 @@ class TimeSeriesService:
         if "pnl" in attributes:
             merged["pnl"] = merged["income"] + merged["market_value"] - merged["book_value"]
 
+        merged = aggregate_last_observation(merged, periodicity, resolved_start)
+
         column_for_attribute = {
             "capital": "capital",
             "income": "income",
@@ -200,6 +207,7 @@ class TimeSeriesService:
             "timeseries_request",
             from_date=str(resolved_start),
             to_date=str(resolved_end),
+            periodicity=periodicity.value,
             row_count=len(entries),
         )
 
@@ -208,6 +216,7 @@ class TimeSeriesService:
             attributes=attributes,
             from_date=resolved_start,
             to_date=resolved_end,
+            periodicity=periodicity,
             entries=entries,
             _links={
                 "self": f"/v1/accounts/{account_name}/timeseries",

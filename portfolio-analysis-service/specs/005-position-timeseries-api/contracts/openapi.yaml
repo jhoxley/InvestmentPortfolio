@@ -1,0 +1,310 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Locally hosted API for portfolio analysis features. Adds read-only position-scoped
+    time series endpoints that read an account's ingested position ladder per sub-account
+    ("position"), plus supporting metadata and position-enumeration endpoints.
+  version: "0.5.0"
+
+servers:
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+paths:
+  /accounts/{account_name}/position:
+
+    get:
+      operationId: get_position_timeseries
+      summary: >
+        Retrieve a per-business-day time series of requested attributes for one or more
+        positions (sub-accounts) within an account
+      tags: [Position Timeseries]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+        - name: position
+          in: query
+          required: false
+          description: >
+            Repeated parameter; zero or more. Position names may contain spaces and symbols
+            and MUST be percent-encoded. Values with no match in the account's recorded
+            sub_accounts are silently ignored. If omitted entirely, every position recorded
+            for the account (including "Cash") is included.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: attribute
+          in: query
+          required: true
+          description: >
+            Repeated parameter; at least one required. One of market_value, income,
+            book_cost, pnl, close_price, quantity. Note: "capital" is not valid here.
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [market_value, income, book_cost, pnl, close_price, quantity]
+            minItems: 1
+          style: form
+          explode: true
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the account's own earliest recorded position-ladder date. Adjusted
+            forward to the next business day if it falls on a weekend.
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: >
+            Defaults to the business day before today. Must not be later than today.
+            Adjusted forward to the next business day if it falls on a weekend (capped at
+            today).
+      responses:
+        "200":
+          description: Position time series returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionTimeSeriesResponse"
+              example:
+                account_name: HL-SIPP
+                attributes: [market_value, quantity]
+                positions: ["Apple Inc", "Berkshire Hathaway Class B (BRK.B)"]
+                from_date: "2024-01-02"
+                to_date: "2024-01-10"
+                entries:
+                  - date: "2024-01-02"
+                    position: "Apple Inc"
+                    market_value: 5000.0
+                    quantity: 25.0
+                  - date: "2024-01-02"
+                    position: "Berkshire Hathaway Class B (BRK.B)"
+                    market_value: 12000.0
+                    quantity: 30.0
+                _links:
+                  self: >-
+                    /v1/accounts/HL-SIPP/position?attribute=market_value&attribute=quantity&start=2024-01-02&end=2024-01-10
+                  positions: "/v1/accounts/HL-SIPP/positions"
+                  attributes: "/v1/positions/attributes"
+                  accounts: "/v1/accounts"
+        "404":
+          description: No resource of any kind has been ingested for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: >
+            Validation failed — invalid account name, account known but no position ladder
+            ingested, no attribute supplied, an unsupported attribute name (including
+            "capital"), an invalid date range, a future end date, or a resolved start date
+            before the position ladder's earliest recorded date
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+  /accounts/{account_name}/positions:
+
+    get:
+      operationId: list_account_positions
+      summary: >
+        Enumerate every position (sub_account) recorded in an account's position ladder,
+        with each one's first/last recorded date
+      tags: [Position Timeseries]
+      parameters:
+        - name: account_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,64}$"
+      responses:
+        "200":
+          description: Positions returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionsResponse"
+              example:
+                account_name: HL-SIPP
+                positions:
+                  - position: "Apple Inc"
+                    from_date: "2020-03-02"
+                    to_date: "2026-07-08"
+                  - position: "Cash"
+                    from_date: "2016-04-20"
+                    to_date: "2026-07-08"
+                  - position: "Sold Corp"
+                    from_date: "2018-06-01"
+                    to_date: "2021-11-15"
+                _links:
+                  self: "/v1/accounts/HL-SIPP/positions"
+        "404":
+          description: No resource of any kind has been ingested for this account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: Account is known but has no ingested position ladder
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+  /positions/attributes:
+
+    get:
+      operationId: get_position_attribute_metadata
+      summary: Describe the attributes that can be requested from the position time series endpoint
+      tags: [Position Timeseries]
+      responses:
+        "200":
+          description: Attribute metadata returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttributeMetadataResponse"
+              example:
+                attributes:
+                  - name: market_value
+                    description: The position's market value on that date.
+                    source: position_ladder
+                  - name: pnl
+                    description: income + market_value - book_cost on that date, for this position.
+                    source: position_ladder
+                _links:
+                  self: "/v1/positions/attributes"
+
+components:
+  schemas:
+
+    PositionTimeSeriesEntry:
+      type: object
+      required: [date, position]
+      properties:
+        date:
+          type: string
+          format: date
+        position:
+          type: string
+      additionalProperties:
+        type: number
+        format: float
+      description: >
+        Additional properties are the requested attribute values (e.g. `market_value`,
+        `quantity`) — only requested attributes appear on each entry.
+
+    PositionTimeSeriesResponse:
+      type: object
+      required: [account_name, attributes, positions, from_date, to_date, entries, _links]
+      properties:
+        account_name:
+          type: string
+        attributes:
+          type: array
+          items:
+            type: string
+        positions:
+          type: array
+          items:
+            type: string
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/PositionTimeSeriesEntry"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    PositionSummary:
+      type: object
+      required: [position, from_date, to_date]
+      properties:
+        position:
+          type: string
+        from_date:
+          type: string
+          format: date
+        to_date:
+          type: string
+          format: date
+
+    PositionsResponse:
+      type: object
+      required: [account_name, positions, _links]
+      properties:
+        account_name:
+          type: string
+        positions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PositionSummary"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    AttributeDefinition:
+      type: object
+      required: [name, description, source]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        source:
+          type: string
+
+    AttributeMetadataResponse:
+      type: object
+      required: [attributes, _links]
+      properties:
+        attributes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttributeDefinition"
+        _links:
+          type: object
+          additionalProperties:
+            type: string
+
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string

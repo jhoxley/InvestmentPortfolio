@@ -242,6 +242,26 @@ class InvalidDateRangeError(Exception):
         super().__init__(self.message)
 
 
+class InvalidProjectionRangeError(Exception):
+    """Raised when a projection_date is not strictly later than the resolved start date."""
+
+    def __init__(self, start: date, projection_date: date, message: str | None = None) -> None:
+        """Initialise with the resolved start date and the requested projection date.
+
+        Args:
+            start: The resolved start date.
+            projection_date: The requested projection target date.
+            message: Optional override message.
+        """
+        self.start = start
+        self.projection_date = projection_date
+        self.message = message or (
+            f"Projection date {projection_date} is not later than the resolved start "
+            f"date {start}. A projection must run forward in time."
+        )
+        super().__init__(self.message)
+
+
 class MissingRequiredSourceError(Exception):
     """Raised when a requested attribute's required source is missing or insufficient."""
 
@@ -266,6 +286,21 @@ class MissingRequiredSourceError(Exception):
         super().__init__(self.message)
 
 
+class PositionLadderNotIngestedError(Exception):
+    """Raised when a known account has no ingested position ladder for this feature's endpoints."""
+
+    def __init__(self, account_name: str, message: str | None = None) -> None:
+        """Initialise with the account name that lacks a position ladder.
+
+        Args:
+            account_name: The account known to `/v1/accounts` but missing a ladder.
+            message: Optional override message.
+        """
+        self.account_name = account_name
+        self.message = message or f"Account '{account_name}' has no ingested position ladder."
+        super().__init__(self.message)
+
+
 class MarketDataServiceError(Exception):
     """Raised when a market-data-service request fails (network error, non-2xx, timeout)."""
 
@@ -281,5 +316,134 @@ class MarketDataServiceError(Exception):
         self.detail = detail
         self.message = message or (
             f"Market data service request failed for sub-account '{sub_account}': {detail}"
+        )
+        super().__init__(self.message)
+
+
+class UnsupportedPeriodicityError(Exception):
+    """Raised when a requested periodicity value isn't in the supported set."""
+
+    def __init__(
+        self, requested: str, supported: tuple[str, ...], message: str | None = None
+    ) -> None:
+        """Initialise with the rejected value and the supported set.
+
+        Args:
+            requested: The periodicity value that isn't supported.
+            supported: The full set of supported periodicity values.
+            message: Optional override message.
+        """
+        self.requested = requested
+        self.supported = supported
+        valid = ", ".join(supported)
+        self.message = message or (
+            f"Periodicity '{requested}' is not supported. Supported values: {valid}."
+        )
+        super().__init__(self.message)
+
+
+class VarRunInProgressError(Exception):
+    """Raised when a VaR run is requested for an account that already has an active run."""
+
+    def __init__(self, account_name: str, active_run_id: str, message: str | None = None) -> None:
+        """Initialise with the account and the run already in progress.
+
+        Args:
+            account_name: The account that already has a queued or running VaR run.
+            active_run_id: The identifier of the active run.
+            message: Optional override message.
+        """
+        self.account_name = account_name
+        self.active_run_id = active_run_id
+        self.message = message or (
+            f"Account '{account_name}' already has run '{active_run_id}' queued or running."
+        )
+        super().__init__(self.message)
+
+
+class VarRunNotFoundError(Exception):
+    """Raised when no VaR run with the given identifier exists for the account."""
+
+    def __init__(self, account_name: str, run_id: str, message: str | None = None) -> None:
+        """Initialise with the account and the run identifier that could not be found.
+
+        Args:
+            account_name: The account the run was requested under.
+            run_id: The run identifier that does not exist.
+            message: Optional override message.
+        """
+        self.account_name = account_name
+        self.run_id = run_id
+        self.message = message or f"No VaR run '{run_id}' exists for account '{account_name}'."
+        super().__init__(self.message)
+
+
+class InvalidVarRunRequestError(Exception):
+    """Raised when a VaR run request body or query parameters fail validation."""
+
+    def __init__(self, message: str, fields: list[str] | None = None) -> None:
+        """Initialise with a descriptive message and the offending fields.
+
+        Args:
+            message: Human-readable description of the validation failure.
+            fields: Names of the request fields that failed validation.
+        """
+        self.message = message
+        self.fields = fields or []
+        super().__init__(self.message)
+
+
+class InvalidVarQueryError(Exception):
+    """Raised when a VaR series/backtest query parameter fails validation (013).
+
+    Covers an unsupported `lookback`, `confidence`, `pnl_basis` or `min_quality` value on
+    the read-only series/backtest endpoints -- distinct from InvalidVarRunRequestError,
+    which covers the run-request body on the write-side endpoints (012).
+    """
+
+    def __init__(self, message: str, fields: list[str] | None = None) -> None:
+        """Initialise with a descriptive message and the offending fields.
+
+        Args:
+            message: Human-readable description naming the supported values.
+            fields: Names of the query parameters that failed validation.
+        """
+        self.message = message
+        self.fields = fields or []
+        super().__init__(self.message)
+
+
+class ObservedHistoryUnsupportedError(Exception):
+    """Raised when market-data-service does not support observed-only (fill=none) history."""
+
+    def __init__(self, identifier: str, message: str | None = None) -> None:
+        """Initialise with the identifier whose observed-history request lacked support markers.
+
+        Args:
+            identifier: The identifier requested when the unsupported response was received.
+            message: Optional override message.
+        """
+        self.identifier = identifier
+        self.message = message or (
+            "market-data-web-service does not support observed-only price history "
+            f"(fill=none) for '{identifier}'. VaR calculation requires feature "
+            "009-observed-price-history."
+        )
+        super().__init__(self.message)
+
+
+class InstrumentNotFoundError(Exception):
+    """Raised when market-data-service has no price history at all for an identifier."""
+
+    def __init__(self, identifier: str, message: str | None = None) -> None:
+        """Initialise with the identifier that could not be priced.
+
+        Args:
+            identifier: The identifier market-data-service could not find.
+            message: Optional override message.
+        """
+        self.identifier = identifier
+        self.message = message or (
+            f"market-data-web-service has no price history for '{identifier}'."
         )
         super().__init__(self.message)

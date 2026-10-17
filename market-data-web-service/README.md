@@ -46,7 +46,13 @@ The service implements all user stories from two feature specifications:
 **Feature 002 — As-Of Date on Current Price** (`specs/002-price-as-of-date/spec.md`):
 - **US1 — Know What Date a Price Is For** (P1): `as_of_date` field added to the current price response, reconciled with the most recent entry in the history endpoint
 
-All 12 acceptance scenarios are implemented as executable BDD tests (`pytest tests/ -v`).
+**Feature 009 — Observed-Only Price History** (`specs/009-observed-prices-fill-none/spec.md`):
+- **US1 — Observed-only history** (P1): `fill=none` returns real observations only, for correct return distributions
+- **US2 — Observation window** (P2): `first_observed_date` / `last_observed_date` on every history response
+- **US3 — No-earlier-data memory** (P2): repeat long-lookback requests stop re-fetching a known-empty pre-history segment
+- **US4 / US5** (P3): observed-only mode honoured for local fallback files and currency-converted series
+
+All acceptance scenarios are implemented as executable BDD tests (`pytest tests/ -v`).
 
 ---
 
@@ -113,6 +119,42 @@ Invoke-RestMethod "http://localhost:8000/securities/VOD.L/history?from=2024-01-0
 ```powershell
 Invoke-RestMethod "http://localhost:8000/securities/MSFT/history"
 ```
+
+**Observed prices only (no gap filling):**
+```powershell
+Invoke-RestMethod "http://localhost:8000/securities/AAPL/history?from=2025-01-02&to=2025-01-10&fill=none"
+```
+
+By default (`fill=all`) the history endpoint returns a price for **every** Mon–Fri business day in the
+requested range, carrying the last observation forward across holidays and data gaps. Pass `fill=none`
+to get back **only** the dates that carry a real market observation.
+
+This matters for any calculation that reads day-to-day changes as returns. Under `fill=all` a
+carried-forward flat price is indistinguishable from a genuine zero-return day, which silently
+understates volatility — and therefore risk. The Value-at-Risk calculation in
+`portfolio-analysis-service` uses `fill=none` for exactly this reason.
+
+Every history response also reports the instrument's known observation window:
+
+```json
+{
+  "ticker": "AAPL",
+  "currency": "USD",
+  "prices": [ ... ],
+  "first_observed_date": "2025-01-02",
+  "last_observed_date": "2025-01-08"
+}
+```
+
+`first_observed_date` and `last_observed_date` describe the instrument as far as the service knows,
+**not** the requested range — they may fall outside it. They are always derived from real observations,
+never from filled values, and are populated in both fill modes. Use `first_observed_date` to check an
+instrument has enough real history for a required lookback before attempting a calculation.
+
+> **Behaviour change in 0.1.3**: a requested range containing no observations now returns **404**, in both
+> fill modes. Previously a cached instrument queried over a range its cache held no rows for returned 200
+> with an empty `prices` list, which contradicted the documented contract. This is the only non-additive
+> change in this version; the two new response fields are additive and optional.
 
 Example response:
 ```json

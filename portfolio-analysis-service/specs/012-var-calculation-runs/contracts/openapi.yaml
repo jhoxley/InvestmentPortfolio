@@ -1,0 +1,368 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Adds historical-simulation Value at Risk (VaR) calculation runs to the "risk" endpoint group.
+    Runs are created asynchronously, execute one at a time in the background, and upsert
+    per-date VaR/Expected Shortfall estimates and realised outcomes into a per-account store.
+    A status resource reports coverage and freshness. Read endpoints for the VaR series and
+    backtests are a separate feature (013).
+  version: "0.12.0"
+
+servers:
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+tags:
+  - name: Risk
+
+paths:
+  /accounts/{account_name}/risk/var/runs:
+    parameters:
+      - $ref: "#/components/parameters/AccountName"
+
+    post:
+      operationId: create_var_run
+      summary: Queue a VaR calculation run for an account
+      description: >
+        Validates the request, rejects it if the account already has a queued or running run,
+        records a new run with status "queued", and returns immediately. The calculation runs in
+        the background; runs across all accounts execute one at a time in the order requested.
+        Mode "missing" computes only dates with no estimate, a changed fingerprint, or a pending
+        outcome; mode "full" recomputes every ladder date in the (optional) range.
+      tags: [Risk]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VarRunRequest"
+            examples:
+              missing:
+                value: {"mode": "missing"}
+              fullRange:
+                value: {"mode": "full", "start": "2026-03-02", "end": "2026-03-06"}
+      responses:
+        "202":
+          description: Run accepted and queued
+          headers:
+            Location:
+              description: URL of the run resource
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VarRun"
+        "404":
+          $ref: "#/components/responses/AccountNotFound"
+        "409":
+          description: The account already has a queued or running run
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailWithLinks"
+              example:
+                type: https://portfolio-analysis/errors/var-run-in-progress
+                title: VaR Run In Progress
+                status: 409
+                detail: Account 'HL-SIPP' already has run 6f1c… with status 'running'.
+                instance: /v1/accounts/HL-SIPP/risk/var/runs
+                correlation_id: 0b7e2c1e-5f0a-4b8e-9d0c-2f4f1f3c9a10
+                _links: {active_run: /v1/accounts/HL-SIPP/risk/var/runs/6f1c…}
+        "422":
+          $ref: "#/components/responses/ValidationProblem"
+
+    get:
+      operationId: list_var_runs
+      summary: List an account's VaR runs, newest first
+      tags: [Risk]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        "200":
+          description: Runs for the account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VarRunList"
+        "404":
+          $ref: "#/components/responses/AccountNotFound"
+        "422":
+          $ref: "#/components/responses/ValidationProblem"
+
+  /accounts/{account_name}/risk/var/runs/{run_id}:
+    parameters:
+      - $ref: "#/components/parameters/AccountName"
+      - name: run_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: get_var_run
+      summary: Read a VaR run's status and outcome
+      tags: [Risk]
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VarRun"
+        "404":
+          description: >
+            Unknown run (var-run-not-found, VarProblemDetail with correlation_id) or unknown
+            account (account-not-found, existing ProblemDetail)
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/VarProblemDetail"
+                  - $ref: "#/components/schemas/ProblemDetail"
+              example:
+                type: https://portfolio-analysis/errors/var-run-not-found
+                title: VaR Run Not Found
+                status: 404
+                detail: No VaR run '1234' exists for account 'HL-SIPP'.
+                instance: /v1/accounts/HL-SIPP/risk/var/runs/1234
+                correlation_id: 0b7e2c1e-5f0a-4b8e-9d0c-2f4f1f3c9a10
+
+  /accounts/{account_name}/risk/var/status:
+    parameters:
+      - $ref: "#/components/parameters/AccountName"
+    get:
+      operationId: get_var_status
+      summary: Report VaR coverage and freshness for an account
+      description: >
+        Compares the computed date range with the position ladder's range, counts missing dates
+        (ladder business days with no stored outcome), stale dates (as found by the most recent
+        successful run), and pending outcomes, summarises the last run, and lists each instrument's
+        history treatment per look-back as of the last successful run. Does not read the ladder
+        itself.
+      tags: [Risk]
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VarStatus"
+        "404":
+          $ref: "#/components/responses/AccountNotFound"
+        "422":
+          $ref: "#/components/responses/ValidationProblem"
+
+components:
+  parameters:
+    AccountName:
+      name: account_name
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9_-]{1,64}$"
+
+  responses:
+    AccountNotFound:
+      description: No capital ledger or position ladder has been ingested for the account
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+    ValidationProblem:
+      description: >
+        Invalid account name (invalid-account-name), account without a position ladder
+        (missing-required-source), or invalid run request (invalid-var-run-request: unknown mode,
+        malformed date, start after end; VarProblemDetail with correlation_id)
+      content:
+        application/problem+json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/VarProblemDetail"
+              - $ref: "#/components/schemas/ProblemDetail"
+
+  schemas:
+    VarRunRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [missing, full]
+          default: missing
+        start:
+          type: [string, "null"]
+          format: date
+          description: First as-of date to consider (clipped to the ladder range)
+        end:
+          type: [string, "null"]
+          format: date
+          description: Last as-of date to consider (clipped to the ladder range); must be >= start
+
+    RunWarning:
+      type: object
+      required: [kind, identifier, message]
+      properties:
+        kind:
+          type: string
+          enum: [outlier, proxy_unresolved, instrument_not_found, excluded_price]
+        identifier: {type: string}
+        date: {type: [string, "null"], format: date}
+        value: {type: [number, "null"], description: "Return as a decimal, for outliers"}
+        message: {type: string}
+
+    RunFailure:
+      type: object
+      required: [type, title, detail, reason, run_id, correlation_id]
+      properties:
+        type: {type: string}
+        title: {type: string}
+        detail: {type: string}
+        run_id: {type: string}
+        correlation_id: {type: string, description: Correlation ID of the request that created the run}
+        reason:
+          type: string
+          enum: [market_data_unavailable, observed_history_unsupported, interrupted, internal_error]
+
+    VarRun:
+      type: object
+      required: [run_id, account_name, mode, status, correlation_id, requested_at, warnings, _links]
+      properties:
+        run_id: {type: string}
+        account_name: {type: string}
+        mode: {type: string, enum: [missing, full]}
+        requested_start: {type: [string, "null"], format: date}
+        requested_end: {type: [string, "null"], format: date}
+        resolved_start: {type: [string, "null"], format: date}
+        resolved_end: {type: [string, "null"], format: date}
+        status: {type: string, enum: [queued, running, succeeded, failed]}
+        correlation_id: {type: string, description: Correlation ID of the creating POST request}
+        requested_at: {type: string, format: date-time}
+        started_at: {type: [string, "null"], format: date-time}
+        finished_at: {type: [string, "null"], format: date-time}
+        dates_selected: {type: integer}
+        dates_computed: {type: integer}
+        dates_skipped: {type: integer, description: Ladder dates in range that did not need computing}
+        dates_missing: {type: integer}
+        dates_stale: {type: integer}
+        outcomes_pending_filled: {type: integer}
+        warnings:
+          type: array
+          items: {$ref: "#/components/schemas/RunWarning"}
+        failure:
+          oneOf:
+            - $ref: "#/components/schemas/RunFailure"
+            - type: "null"
+        _links:
+          type: object
+          required: [self, account_runs, status]
+          properties:
+            self: {type: string}
+            account_runs: {type: string}
+            status: {type: string}
+
+    VarRunList:
+      type: object
+      required: [account_name, runs, _links]
+      properties:
+        account_name: {type: string}
+        runs:
+          type: array
+          items: {$ref: "#/components/schemas/VarRun"}
+        _links:
+          type: object
+          properties:
+            self: {type: string}
+            status: {type: string}
+
+    DateRange:
+      type: object
+      required: [from_date, to_date]
+      properties:
+        from_date: {type: string, format: date}
+        to_date: {type: string, format: date}
+
+    InstrumentTreatment:
+      type: object
+      required: [identifier, sub_accounts, treatment_by_lookback]
+      properties:
+        identifier: {type: string}
+        sub_accounts: {type: array, items: {type: string}}
+        first_observed_date: {type: [string, "null"], format: date}
+        last_observed_date: {type: [string, "null"], format: date}
+        proxy: {type: [string, "null"]}
+        proxy_mode: {type: string, enum: [fill_gaps, always]}
+        proxy_scale: {type: number}
+        treatment_by_lookback:
+          type: object
+          description: Look-back code (1y, 2y, 5y) to treatment at the latest computed date
+          additionalProperties:
+            type: string
+            enum: [actual, proxied, rescaled]
+        outlier_count: {type: integer}
+
+    VarStatus:
+      type: object
+      required: [account_name, ladder_range, missing_dates, stale_dates_last_run,
+                 pending_outcomes, instruments, _links]
+      properties:
+        account_name: {type: string}
+        ladder_range: {$ref: "#/components/schemas/DateRange"}
+        computed_range:
+          oneOf:
+            - $ref: "#/components/schemas/DateRange"
+            - type: "null"
+        missing_dates: {type: integer, description: Ladder business days with no stored outcome}
+        stale_dates_last_run: {type: integer, description: Stale dates found (and recomputed) by the last successful run}
+        pending_outcomes: {type: integer}
+        methodology_version: {type: [string, "null"]}
+        last_run:
+          oneOf:
+            - $ref: "#/components/schemas/VarRun"
+            - type: "null"
+        instruments:
+          type: array
+          items: {$ref: "#/components/schemas/InstrumentTreatment"}
+        warnings:
+          type: array
+          description: Warnings from the last successful run
+          items: {$ref: "#/components/schemas/RunWarning"}
+        _links:
+          type: object
+          required: [self, runs]
+          properties:
+            self: {type: string}
+            runs: {type: string}
+            account: {type: string}
+
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+
+    VarProblemDetail:
+      description: Problem details for this feature's new error types (adds correlation_id, FR-033)
+      allOf:
+        - $ref: "#/components/schemas/ProblemDetail"
+        - type: object
+          required: [correlation_id]
+          properties:
+            correlation_id: {type: string}
+
+    ProblemDetailWithLinks:
+      allOf:
+        - $ref: "#/components/schemas/VarProblemDetail"
+        - type: object
+          properties:
+            _links:
+              type: object
+              properties:
+                active_run: {type: string}

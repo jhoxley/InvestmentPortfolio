@@ -4,6 +4,8 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.periodicity import Periodicity
+
 
 class TimeSeriesEntry(BaseModel):
     """One row of a time series response.
@@ -27,7 +29,16 @@ class TimeSeriesResponse(BaseModel):
     attributes: list[str] = Field(description="Requested attribute names, in request order")
     from_date: date = Field(description="Resolved start date of the time series")
     to_date: date = Field(description="Resolved end date of the time series")
-    entries: list[TimeSeriesEntry] = Field(description="One entry per business day")
+    periodicity: Periodicity = Field(
+        default=Periodicity.DAY,
+        description=(
+            "The periodicity actually applied, including 'day' when it was defaulted. "
+            "Additive and optional — clients predating this field are unaffected."
+        ),
+    )
+    entries: list[TimeSeriesEntry] = Field(
+        description="One entry per business day, or one per calendar window when aggregated"
+    )
     links: dict[str, str] = Field(alias="_links", description="HATEOAS navigation links")
 
 
