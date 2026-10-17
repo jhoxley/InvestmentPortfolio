@@ -59,14 +59,13 @@ def test_confidence_control_defaults_to_every_level_selected() -> None:
     assert confidence.value == [9500, 9750, 9900]  # type: ignore[attr-defined]
 
 
-def test_lookback_control_options_and_default_to_headline() -> None:
+def test_no_lookback_control_is_rendered() -> None:
+    """027 FR-007: the Look-back dropdown is removed -- the page's single shared range
+    control (shortcut buttons + a new page-local "2Y" button) drives the look-back
+    instead (see research.md #5 in specs/027-risk-page-cleanup).
+    """
     block = build_controls(_METHODS)
-    lookback = _find(block, "risk-var-lookback")
-    assert lookback is not None
-    options = lookback.options  # type: ignore[attr-defined]
-    values = {opt["value"] for opt in options}
-    assert values == {"1y", "2y", "5y"}
-    assert lookback.value == "2y"  # type: ignore[attr-defined]
+    assert _find(block, "risk-var-lookback") is None
 
 
 def test_units_toggle_defaults_to_money() -> None:

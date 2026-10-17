@@ -36,7 +36,20 @@ SHORTCUT_5Y = "5y"
 # additive only — every existing page's shortcut codes are unchanged.
 SHORTCUT_10Y = "10y"
 SHORTCUT_ALL = "all"
-_SHORTCUT_YEAR_OFFSETS = {SHORTCUT_1Y: 1, SHORTCUT_3Y: 3, SHORTCUT_5Y: 5, SHORTCUT_10Y: 10}
+# Added by the Risk page (027) for its own extra "2Y" shortcut button, unifying the
+# histogram's range shortcuts with the Value at Risk section's server-reported look-back
+# codes (research.md #5 in specs/027-risk-page-cleanup). Lowercase to match the server's
+# own look-back code convention (e.g. "2y"). Deliberately NOT added to `_SHORTCUT_BUTTONS`
+# below — every other page keeps its existing five-button layout unchanged; the Risk page
+# renders this one itself, additively, alongside the shared five.
+SHORTCUT_2Y = "2y"
+_SHORTCUT_YEAR_OFFSETS = {
+    SHORTCUT_1Y: 1,
+    SHORTCUT_2Y: 2,
+    SHORTCUT_3Y: 3,
+    SHORTCUT_5Y: 5,
+    SHORTCUT_10Y: 10,
+}
 
 _SHORTCUT_BUTTONS = [
     ("overview-shortcut-ytd", "YtD"),

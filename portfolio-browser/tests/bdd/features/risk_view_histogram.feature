@@ -22,6 +22,11 @@ Feature: Return distribution on the Risk page
     Then the bar chart and the statistics table appear in the same row
     And the bar chart occupies the majority of that row's width
 
+  Scenario: The statistics table's return-based rows match the chart's percent scale
+    When the browser loads the Risk page and its content finishes loading
+    Then the table's "Mean" row matches the chart's mean reference line, in percent
+    And the table's "Count" row has no percent sign
+
   Scenario: An account with no observations in range shows a clear message
     Given portfolio-analysis-service has an account with no recorded return observations
     When the browser loads the Risk page and its content finishes loading

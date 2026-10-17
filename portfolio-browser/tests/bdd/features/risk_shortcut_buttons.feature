@@ -1,7 +1,7 @@
 Feature: Preset range shortcut buttons on the Risk page
   As a user of the Investment Portfolio Browser
-  I want one-click 10Y/1Y/3Y/5Y/All trailing windows on the Risk page
-  So that I can quickly compare volatility over different horizons (User Story 2)
+  I want one-click 10Y/1Y/2Y/3Y/5Y/All trailing windows on the Risk page
+  So that I can quickly compare volatility over different horizons (User Story 2; 027 User Story 3)
 
   Background:
     Given portfolio-analysis-service has an account with over ten years of recorded return history
@@ -15,6 +15,7 @@ Feature: Preset range shortcut buttons on the Risk page
     Examples:
       | label | expected                                  |
       | 1Y    | exactly 1 years before today              |
+      | 2Y    | exactly 2 years before today              |
       | 3Y    | exactly 3 years before today              |
       | 5Y    | exactly 5 years before today              |
       | 10Y   | exactly 10 years before today             |

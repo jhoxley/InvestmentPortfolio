@@ -8,11 +8,16 @@ Feature: Value at Risk backtest summary panel
 
   Scenario: The backtest panel reports the headline reliability figures
     Given the browser has loaded the Risk page and its content finished loading
-    When I select the "Value at Risk" tab
+    When the Value at Risk section finishes loading
     Then the backtest panel shows exceedances observed and expected, both p-values, a pass/fail rating, mean VaR and stability
 
   Scenario: The panel reflects the same confidence level as the chart
     Given the browser has loaded the Risk page and its content finished loading
-    When I select the "Value at Risk" tab
+    When the Value at Risk section finishes loading
     And I select only the 99% confidence level
     Then the backtest panel shows figures for the 99% confidence level only
+
+  Scenario: The panel shares the histogram table's visual style
+    Given the browser has loaded the Risk page and its content finished loading
+    When the Value at Risk section finishes loading
+    Then the backtest panel is rendered as a labelled table/grid matching the histogram's statistics table style

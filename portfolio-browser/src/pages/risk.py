@@ -1,6 +1,9 @@
-"""Risk page: return-histogram chart + statistics table for a real account (024).
+"""Risk page: return-histogram chart + statistics table, and a Value at Risk section,
+for a real account (024; 026; merged into one scrolling page with a single shared range
+control by 027 — see specs/027-risk-page-cleanup/contracts/ui-contract.md for the full,
+current contract).
 
-Callback graph (see specs/024-risk-return-histogram-page/contracts/ui-contract.md):
+Callback graph:
 
 1. `_fetch_accounts` — triggered by `risk-mount-trigger` (same mount-trigger
    pattern as Overview's/Positions'/Performance's own); fetches /v1/accounts,
@@ -18,11 +21,24 @@ Callback graph (see specs/024-risk-return-histogram-page/contracts/ui-contract.m
 6. `_render_histogram_and_table` — the single callback that (re-)fetches and
    renders both the chart and the table whenever the account, from-date, or
    to-date changes.
-7. `_apply_date_range_shortcut` — five `n_clicks` Inputs (the same shared
-   shortcut buttons Overview/Positions/Performance use); this page's own
-   `_SHORTCUT_CODE_BY_BUTTON_ID` maps the button labeled "10Y" to the new
-   `SHORTCUT_10Y` (not `SHORTCUT_YTD`/`SHORTCUT_ALL`) — the same page-local
-   remapping Performance already uses for its "ITD" label.
+7. `_apply_date_range_shortcut` — six `n_clicks` Inputs: the five shared
+   shortcut buttons Overview/Positions/Performance also use, plus this page's
+   own extra "2Y" button (`risk-shortcut-2y`, 027). `_SHORTCUT_CODE_BY_BUTTON_ID`
+   maps the button labeled "10Y" to `SHORTCUT_10Y` (not `SHORTCUT_YTD`/
+   `SHORTCUT_ALL`) — the same page-local remapping Performance already uses
+   for its "ITD" label — and maps the new button to `SHORTCUT_2Y`.
+8. `_derive_range_code` (027) — recomputes, from the current from/to dates,
+   which (if any) shortcut code they match, into `risk-range-code-store`.
+   This is the single control that both the histogram's own range and the
+   Value at Risk section's look-back are driven from (no separate "Look-back"
+   dropdown exists any more).
+9. `_fetch_var_methods` / `_fetch_var_data` / `_render_var_view` /
+   `_render_stale_banner` / `_track_last_nonempty_confidence` /
+   `_guard_confidence_selection` — the Value at Risk section's own callbacks
+   (026), now reading `risk-range-code-store` instead of a dedicated
+   look-back control; `_fetch_var_data` falls back to an empty-series payload
+   (rather than erroring or showing stale data) whenever the active code has
+   no matching server-reported look-back.
 """
 
 from __future__ import annotations
@@ -40,6 +56,7 @@ from dash.exceptions import PreventUpdate
 from config.settings import Settings
 from src.components.date_range_controls import (
     SHORTCUT_1Y,
+    SHORTCUT_2Y,
     SHORTCUT_3Y,
     SHORTCUT_5Y,
     SHORTCUT_10Y,
@@ -53,6 +70,7 @@ from src.models.portfolio_analysis import AccountSummary
 from src.pages import _var_controls
 from src.pages._risk_chart import build_figure
 from src.pages._risk_table import build_rows
+from src.pages._var_backtest_panel import STYLE_CELL, STYLE_HEADER
 from src.pages._var_backtest_panel import build_panel as build_var_backtest_panel
 from src.pages._var_chart import build_figures as build_var_figures
 from src.services.portfolio_analysis_client import (
@@ -80,12 +98,17 @@ _PAGE_SCOPE_INPUT = "risk-mount-trigger"
 # Must match src/layout/shell.py's shared shortcut button ids. The button
 # labeled "10Y" on this page shares the same DOM id as every other page's
 # first shortcut button — only its page-local *code mapping* differs.
+# "risk-shortcut-2y" (027) is this page's own extra button, rendered directly by this
+# module rather than by the shared five-button `build_account_date_controls` component
+# (research.md #5 in specs/027-risk-page-cleanup) — it unifies the histogram's range
+# shortcuts with the Value at Risk section's server-reported look-back codes.
 _SHORTCUT_CODE_BY_BUTTON_ID = {
     "overview-shortcut-ytd": SHORTCUT_10Y,
     "overview-shortcut-1y": SHORTCUT_1Y,
     "overview-shortcut-3y": SHORTCUT_3Y,
     "overview-shortcut-5y": SHORTCUT_5Y,
     "overview-shortcut-all": SHORTCUT_ALL,
+    "risk-shortcut-2y": SHORTCUT_2Y,
 }
 
 _REFRESH_DISABLED_IDS = [
@@ -95,7 +118,9 @@ _REFRESH_DISABLED_IDS = [
     *_SHORTCUT_CODE_BY_BUTTON_ID,
 ]
 
-_VAR_REFRESH_DISABLED_IDS = [*_REFRESH_DISABLED_IDS, "risk-var-lookback"]
+# 027: no longer adds "risk-var-lookback" (removed) -- the VaR refetch is driven by the
+# same shared range control as the histogram, so it disables the identical id set.
+_VAR_REFRESH_DISABLED_IDS = _REFRESH_DISABLED_IDS
 
 _STATISTIC_COLUMNS = [
     {"name": "statistic", "id": "statistic"},
@@ -175,8 +200,8 @@ def _render_chart_and_table(
         id="risk-statistics-table",
         columns=_STATISTIC_COLUMNS,
         data=build_rows(response.statistics),
-        style_cell={"textAlign": "left", "padding": "8px"},
-        style_header={"fontWeight": "bold"},
+        style_cell=STYLE_CELL,
+        style_header=STYLE_HEADER,
     )
     return chart, table
 
@@ -191,63 +216,53 @@ layout = html.Div(
         dcc.Store(id="risk-var-store"),
         dcc.Store(id="risk-var-methods-store"),
         dcc.Store(id="risk-var-confidence-last-nonempty"),
-        dbc.Tabs(
+        # Derived from the current from/to dates (see `_derive_range_code`) -- which, if
+        # any, of the shared shortcut codes the selected account's own date range
+        # matches right now. Drives the Value at Risk section's look-back (027).
+        dcc.Store(id="risk-range-code-store"),
+        # -- Return Histogram section (027 FR-002: rendered first) --
+        dbc.Row(
             [
-                dbc.Tab(
-                    label="Return Histogram",
-                    tab_id="risk-tab-histogram",
-                    children=dbc.Row(
-                        [
-                            dbc.Col(
-                                dcc.Loading(
-                                    html.Div(
-                                        _empty_state("Loading return histogram…"),
-                                        id="risk-chart-container",
-                                    )
-                                ),
-                                width=7,
-                            ),
-                            dbc.Col(
-                                dcc.Loading(html.Div(html.Div(), id="risk-table-container")),
-                                width=5,
-                            ),
-                        ]
+                dbc.Col(
+                    dcc.Loading(
+                        html.Div(
+                            _empty_state("Loading return histogram…"),
+                            id="risk-chart-container",
+                        )
                     ),
+                    width=7,
                 ),
-                dbc.Tab(
-                    label="Value at Risk",
-                    tab_id="risk-tab-var",
-                    children=html.Div(
-                        [
-                            html.Div(id="risk-var-stale-banner"),
-                            html.Div(
-                                _var_controls.build_controls(None), id="risk-var-controls-container"
+                dbc.Col(
+                    dcc.Loading(html.Div(html.Div(), id="risk-table-container")),
+                    width=5,
+                ),
+            ]
+        ),
+        # -- Value at Risk section (027 FR-002: rendered below the histogram, always
+        # mounted -- no tab gates its visibility) --
+        html.Div(
+            [
+                html.Div(id="risk-var-stale-banner"),
+                html.Div(_var_controls.build_controls(None), id="risk-var-controls-container"),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            dcc.Loading(
+                                html.Div(
+                                    _empty_state("Loading Value at Risk…"),
+                                    id="risk-var-chart-container",
+                                )
                             ),
-                            dbc.Row(
-                                [
-                                    dbc.Col(
-                                        dcc.Loading(
-                                            html.Div(
-                                                _empty_state("Loading Value at Risk…"),
-                                                id="risk-var-chart-container",
-                                            )
-                                        ),
-                                        width=9,
-                                    ),
-                                    dbc.Col(
-                                        dcc.Loading(
-                                            html.Div(html.Div(), id="risk-var-backtest-panel")
-                                        ),
-                                        width=3,
-                                    ),
-                                ]
-                            ),
-                        ],
-                        className="pt-3",
-                    ),
+                            width=9,
+                        ),
+                        dbc.Col(
+                            dcc.Loading(html.Div(html.Div(), id="risk-var-backtest-panel")),
+                            width=3,
+                        ),
+                    ]
                 ),
             ],
-            id="risk-tabs",
+            className="pt-3",
         ),
     ],
     className="p-3",
@@ -394,6 +409,7 @@ def _validate_date_range(
     Input("overview-shortcut-3y", "n_clicks"),
     Input("overview-shortcut-5y", "n_clicks"),
     Input("overview-shortcut-all", "n_clicks"),
+    Input("risk-shortcut-2y", "n_clicks"),
     Input(_PAGE_SCOPE_INPUT, "max_intervals"),
     State("app-parameters-account", "value"),
     State("risk-accounts-store", "data"),
@@ -405,6 +421,7 @@ def _apply_date_range_shortcut(
     _3y: int | None,
     _5y: int | None,
     _all: int | None,
+    _2y: int | None,
     _page_scope: int | None,
     account_name: str | None,
     accounts_data: list[dict[str, Any]] | None,
@@ -412,8 +429,13 @@ def _apply_date_range_shortcut(
     """Apply a Reporting Period Shortcut's date range.
 
     This page's own `_SHORTCUT_CODE_BY_BUTTON_ID` maps the button labeled
-    "10Y" (shared DOM id `overview-shortcut-ytd`) to `SHORTCUT_10Y`, the only
-    divergence from every other page's copy of this mapping.
+    "10Y" (shared DOM id `overview-shortcut-ytd`) to `SHORTCUT_10Y`, and its own
+    page-local "2Y" button (`risk-shortcut-2y`) to `SHORTCUT_2Y` (027) — the only
+    divergences from every other page's copy of this mapping. This callback has no
+    `Output` for `risk-range-code-store`; that store is derived from the resulting
+    dates by `_derive_range_code` below, not written here (027 finding F2 — a single
+    derivation avoids a callback-ordering race between a shortcut click and a manual
+    date-picker edit).
     """
     button_id = ctx.triggered_id
     code = _SHORTCUT_CODE_BY_BUTTON_ID.get(button_id)
@@ -428,6 +450,46 @@ def _apply_date_range_shortcut(
     from_date = _shortcut_from_date(code, account, date.today())
     to_date = _last_business_day(date.today())
     return from_date.isoformat(), to_date.isoformat()
+
+
+@callback(
+    Output("risk-range-code-store", "data"),
+    Input("app-parameters-from-date", "date"),
+    Input("app-parameters-to-date", "date"),
+    State("app-parameters-account", "value"),
+    State("risk-accounts-store", "data"),
+    prevent_initial_call=True,
+)
+def _derive_range_code(
+    from_date: str | None,
+    to_date: str | None,
+    account_name: str | None,
+    accounts_data: list[dict[str, Any]] | None,
+) -> str | None:
+    """Derive which (if any) shortcut code the current from/to dates match (027).
+
+    Recomputed from current state every time either date changes, regardless of
+    whether that change came from a shortcut click, the account-switch default, or a
+    direct hand-edit of either date picker — there is nothing to race against, because
+    this is the only callback that writes `risk-range-code-store` (research.md #5 /
+    finding F2).
+    """
+    if not from_date or not to_date or not account_name or not accounts_data:
+        raise PreventUpdate
+
+    match = next((a for a in accounts_data if a["account_name"] == account_name), None)
+    if match is None:
+        raise PreventUpdate
+
+    account = AccountSummary.model_validate(match)
+    today = date.today()
+    if to_date != _last_business_day(today).isoformat():
+        return None
+
+    for code in _SHORTCUT_CODE_BY_BUTTON_ID.values():
+        if _shortcut_from_date(code, account, today).isoformat() == from_date:
+            return code
+    return None
 
 
 @callback(
@@ -491,7 +553,8 @@ def _guard_confidence_selection(
     Input("app-parameters-account", "value"),
     Input("app-parameters-from-date", "date"),
     Input("app-parameters-to-date", "date"),
-    Input("risk-var-lookback", "value"),
+    Input("risk-range-code-store", "data"),
+    State("risk-var-methods-store", "data"),
     running=[
         (Output(component_id, "disabled"), True, False)
         for component_id in _VAR_REFRESH_DISABLED_IDS
@@ -502,7 +565,8 @@ def _fetch_var_data(
     account_name: str | None,
     from_date: str | None,
     to_date: str | None,
-    lookback: str | None,
+    range_code: str | None,
+    methods_data: dict[str, Any] | None,
 ) -> Any:
     """Fetch the series once, the backtest four times, and status once -- concurrently.
 
@@ -511,13 +575,47 @@ def _fetch_var_data(
     pre-fetched here rather than refetched when the PnL-basis/hide-degraded controls
     change (FR-010/FR-012). research.md #6: the six calls run concurrently via a thread
     pool so the combined refetch does not serialize to ~six times a single call's latency.
+
+    027 (research.md #5 / finding F1): `range_code` (from `risk-range-code-store`) is
+    only used as the VaR `lookback` when it appears in the server-reported
+    `risk-var-methods-store`'s look-back codes. Otherwise (e.g. "3y"/"10y"/"all", or
+    `None` for a custom/default-full-history range) `get_var_series`/`get_var_backtest`
+    are skipped entirely -- but `get_var_status` (account-level, independent of
+    `lookback`) still runs, and a well-formed, non-`None` payload with an empty series
+    and backtest is still returned, so `_render_var_view`'s existing empty-series branch
+    renders the empty state rather than leaving stale data on screen (the original design
+    here tried to `raise PreventUpdate` while also clearing the store via an `Output`,
+    which is self-contradictory in Dash and would not have worked).
     """
-    if not account_name or not from_date or not to_date or not lookback:
+    if not account_name or not from_date or not to_date:
         raise PreventUpdate
 
     client = _get_client()
     start = date.fromisoformat(from_date)
     end = date.fromisoformat(to_date)
+
+    supported_codes = {lb["code"] for lb in (methods_data or {}).get("lookbacks", [])}
+    lookback = range_code if range_code in supported_codes else None
+
+    def _fetch_status() -> dict[str, Any]:
+        return client.get_var_status(account_name).model_dump(mode="json")
+
+    if lookback is None:
+        try:
+            status_data = _fetch_status()
+        except PortfolioAnalysisServiceError as exc:
+            logger.error(
+                "risk_var_data_fetch_failed", account_name=account_name, detail=str(exc)
+            )
+            return {"fetch_error": str(exc)}
+        return {
+            "account_name": account_name,
+            "lookback_code": None,
+            "series": {"series": []},
+            "backtest": {},
+            "status": status_data,
+            "fetch_error": None,
+        }
 
     def _fetch_series() -> dict[str, Any]:
         return client.get_var_series(account_name, start, end, lookback).model_dump(mode="json")
@@ -526,9 +624,6 @@ def _fetch_var_data(
         return client.get_var_backtest(
             account_name, start, end, lookback, pnl_basis, min_quality
         ).model_dump(mode="json")
-
-    def _fetch_status() -> dict[str, Any]:
-        return client.get_var_status(account_name).model_dump(mode="json")
 
     try:
         with ThreadPoolExecutor(max_workers=6) as pool:

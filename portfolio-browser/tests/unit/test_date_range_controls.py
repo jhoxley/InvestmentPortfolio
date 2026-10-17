@@ -13,6 +13,7 @@ from datetime import date
 
 from src.components.date_range_controls import (
     SHORTCUT_1Y,
+    SHORTCUT_2Y,
     SHORTCUT_3Y,
     SHORTCUT_5Y,
     SHORTCUT_10Y,
@@ -123,6 +124,26 @@ def test_shortcut_5y_clamps_to_accounts_earliest_from_date() -> None:
     # account's own earliest recorded date (FR-008), not requested as-is.
     today = date(2026, 7, 16)
     assert _shortcut_from_date(SHORTCUT_5Y, _SHORT_HISTORY_ACCOUNT, today) == date(2025, 1, 1)
+
+
+def test_shortcut_2y_is_exact_calendar_offset() -> None:
+    """027: the Risk page's own "2Y" shortcut (code "2y", lowercase to match the
+    server's own VaR look-back code convention) reuses the same generic year-offset
+    date math as every other shortcut -- it is not rendered by
+    `build_account_date_controls` (that stays five-button for every other page), but
+    `_shortcut_from_date` must still resolve it.
+    """
+    today = date(2026, 3, 15)
+    assert _shortcut_from_date(SHORTCUT_2Y, _LONG_HISTORY_ACCOUNT, today) == date(2024, 3, 15)
+
+
+def test_shortcut_2y_clamps_to_accounts_earliest_from_date() -> None:
+    today = date(2026, 7, 16)
+    assert _shortcut_from_date(SHORTCUT_2Y, _SHORT_HISTORY_ACCOUNT, today) == date(2025, 1, 1)
+
+
+def test_shortcut_2y_code_is_lowercase() -> None:
+    assert SHORTCUT_2Y == "2y"
 
 
 def test_shortcut_10y_is_exact_calendar_offset() -> None:

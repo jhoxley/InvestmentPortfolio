@@ -80,8 +80,8 @@ def build_figure(histogram: list[tuple[int, int]], statistics: HistogramStatisti
     Args:
         histogram: `[basis_point_bucket, day_count]` pairs from a
             ReturnHistogramResponse, at the API's own 1bp granularity.
-        statistics: The same response's `statistics` object (mean, median,
-            and std_dev_bands drive the reference lines and bar coloring).
+        statistics: The same response's `statistics` object (mean drives the
+            reference line; std_dev_bands drives bar coloring).
 
     Returns:
         A styled Figure: one go.Bar trace, x = each bucket's center
@@ -89,10 +89,9 @@ def build_figure(histogram: list[tuple[int, int]], statistics: HistogramStatisti
     """
     # The page only ever calls this once statistics.count > 0 (a count-0
     # response short-circuits to the shared empty state before build_figure
-    # is invoked), and mean/median are only None when count == 0 per
-    # HistogramStatistics's own contract — so both are always defined here.
+    # is invoked), and mean is only None when count == 0 per
+    # HistogramStatistics's own contract — so it is always defined here.
     assert statistics.mean is not None
-    assert statistics.median is not None
 
     buckets = bucket_histogram(histogram)
     x_values = [center / 100 for center, _ in buckets]
@@ -125,18 +124,14 @@ def build_figure(histogram: list[tuple[int, int]], statistics: HistogramStatisti
         },
         yaxis={"title": "Days", "showgrid": True, "gridcolor": "#e6e6e6"},
     )
+    # 027 FR-005: the median is already evident from the bar shape itself, and its line
+    # tended to sit close enough to the mean's to be unclear when both were drawn -- only
+    # the mean reference line is kept.
     fig.add_vline(
         x=statistics.mean / 100,
         line_dash="dash",
         line_color="#2c2c2c",
         annotation_text="Mean",
         annotation_position="top",
-    )
-    fig.add_vline(
-        x=statistics.median / 100,
-        line_dash="dot",
-        line_color="#555555",
-        annotation_text="Median",
-        annotation_position="bottom",
     )
     return fig

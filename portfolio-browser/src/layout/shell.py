@@ -176,7 +176,8 @@ def _build_projection_parameters_bar() -> list:
 
 
 def _build_risk_parameters_bar() -> list:
-    """Real Account/From/To/shortcut controls, with a "10Y" first shortcut (024).
+    """Real Account/From/To/shortcut controls, with a "10Y" first shortcut (024) and an
+    extra page-local "2Y" shortcut button (027).
 
     Options/values are populated by callbacks in src/pages/risk.py once the
     page has fetched /v1/accounts — this only builds the empty controls. The
@@ -185,9 +186,20 @@ def _build_risk_parameters_bar() -> list:
     page-local remapping Performance already uses for its "ITD" label
     (research.md #1). The trailing `FormText` mirrors Projection's own
     `projection-date-validation` pattern for FR-007's inline message.
+
+    027: the extra "2Y" button (id `risk-shortcut-2y`) is added directly here, not via
+    the shared five-button `build_account_date_controls` component — every other page
+    using that component keeps its unchanged five-button layout. This one button makes
+    the Risk page's single range control cover every code the Value at Risk section's
+    server-reported look-backs can use (1y/2y/5y) as well as the histogram's own
+    existing 1Y/3Y/5Y/10Y/All range (research.md #5 in specs/027-risk-page-cleanup).
     """
     return [
         *build_account_date_controls(first_shortcut_label="10Y"),
+        dbc.Col(
+            dbc.Button("2Y", id="risk-shortcut-2y", size="sm", color="secondary", outline=True),
+            width="auto",
+        ),
         dbc.Col(
             dbc.FormText(id="risk-date-validation", color="danger"),
             width="auto",

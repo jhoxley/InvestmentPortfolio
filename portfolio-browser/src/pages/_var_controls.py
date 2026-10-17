@@ -1,4 +1,5 @@
-"""Pure builder for the Value at Risk tab's own controls block (026-var-risk-view).
+"""Pure builder for the Value at Risk section's own controls block (026-var-risk-view;
+no longer includes a "Look-back" control as of 027 -- see module docstring note there).
 
 Kept out of risk.py so it stays importable from a plain unit test, mirroring
 `_risk_chart.py`'s/`_risk_table.py`'s own separation-of-concerns rationale.
@@ -18,15 +19,20 @@ def _format_confidence_label(confidence_bp: int) -> str:
 
 
 def build_controls(methods: VarMethodsResponse | None) -> html.Div:
-    """Build the VaR tab's own controls block.
+    """Build the Value at Risk section's own controls block.
+
+    027: no longer renders its own "Look-back" select -- the page's single shared range
+    control (shortcut buttons) drives the look-back instead (research.md #5 in
+    specs/027-risk-page-cleanup); `methods` is still needed here for the confidence-level
+    options.
 
     Args:
         methods: The fetched VarMethodsResponse, or None before it has loaded (renders a
             disabled placeholder with no options yet).
 
     Returns:
-        An html.Div containing the confidence-level multi-select, look-back select, units
-        toggle, PnL-basis toggle, "hide degraded" toggle and "show ES" toggle.
+        An html.Div containing the confidence-level multi-select, units toggle, PnL-basis
+        toggle, "hide degraded" toggle and "show ES" toggle.
     """
     if methods is None:
         return html.Div("Loading controls…", id="risk-var-controls", className="text-muted")
@@ -34,8 +40,6 @@ def build_controls(methods: VarMethodsResponse | None) -> html.Div:
     confidence_options = [
         {"label": _format_confidence_label(bp), "value": bp} for bp in methods.confidence_levels_bp
     ]
-    lookback_options = [{"label": lb.code.upper(), "value": lb.code} for lb in methods.lookbacks]
-    headline = next((lb.code for lb in methods.lookbacks if lb.is_headline), None)
 
     return html.Div(
         [
@@ -48,11 +52,6 @@ def build_controls(methods: VarMethodsResponse | None) -> html.Div:
                     inline=True,
                 ),
                 width="auto",
-            ),
-            dbc.Col(html.Label("Look-back", htmlFor="risk-var-lookback"), width="auto"),
-            dbc.Col(
-                dbc.Select(id="risk-var-lookback", options=lookback_options, value=headline),
-                width=2,
             ),
             dbc.Col(
                 dbc.RadioItems(

@@ -371,6 +371,34 @@ def chart_occupies_majority_width(dash_duo):
     assert chart.size["width"] > table.size["width"]
 
 
+@then("the table's \"Mean\" row matches the chart's mean reference line, in percent")
+def table_mean_matches_chart_mean(dash_duo, stub_client):
+    """027 FR-003: table and chart must never disagree about the same statistic's unit."""
+    dash_duo.wait_for_element("#risk-statistics-table", timeout=_TIMEOUT)
+    mean_row_text = dash_duo.driver.execute_script(
+        "var rows = Array.from(document.querySelectorAll('#risk-statistics-table tr'));"
+        "var row = rows.find(function(r) {"
+        "  return r.querySelector('td:first-child') && "
+        "    r.querySelector('td:first-child').textContent.trim() === 'Mean';"
+        "});"
+        "return row.querySelector('td:last-child').textContent.trim();"
+    )
+    expected_mean_pct = f"{stub_client._statistics.mean / 100:.2f}%"
+    assert mean_row_text == expected_mean_pct
+
+
+@then('the table\'s "Count" row has no percent sign')
+def table_count_has_no_percent_sign(dash_duo):
+    labels = dash_duo.driver.execute_script(_TABLE_ROW_LABELS_SCRIPT)
+    values_script = (
+        "return Array.from(document.querySelectorAll('#risk-statistics-table td:last-child'))"
+        ".map(function(td) { return td.textContent.trim(); });"
+    )
+    values = dash_duo.driver.execute_script(values_script)
+    count_value = values[labels.index("Count")]
+    assert "%" not in count_value
+
+
 @then('a "no data" message is shown instead of a chart or table')
 def no_data_message_shown(dash_duo):
     dash_duo.wait_for_element("#risk-empty-state", timeout=_TIMEOUT)
@@ -386,6 +414,7 @@ def error_state_shown(dash_duo):
 _SHORTCUT_BUTTON_IDS = {
     "10Y": "overview-shortcut-ytd",
     "1Y": "overview-shortcut-1y",
+    "2Y": "risk-shortcut-2y",  # 027: Risk-page-local button, not the shared five-button set
     "3Y": "overview-shortcut-3y",
     "5Y": "overview-shortcut-5y",
     "All": "overview-shortcut-all",

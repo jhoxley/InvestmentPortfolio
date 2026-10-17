@@ -84,25 +84,42 @@ def _vline_shapes(figure: go.Figure) -> list:
     ]
 
 
-def test_build_figure_adds_mean_and_median_vlines() -> None:
+def test_build_figure_adds_exactly_one_reference_line_for_the_mean() -> None:
+    """027 FR-005: the median line is removed -- the mean line (already clear enough
+    visually, per the bar shape itself) is the only reference line retained.
+    """
     stats = _statistics(mean=10.0, median=-5.0)
 
     figure = build_figure([(-25, 1), (0, 12), (65, 1)], stats)
 
     lines = _vline_shapes(figure)
-    assert len(lines) == 2
-    xs = sorted(line.x0 for line in lines)
-    assert xs == [-0.05, 0.10]
-    assert lines[0].line.dash != lines[1].line.dash or lines[0].line.color != lines[1].line.color
+    assert len(lines) == 1
+    assert lines[0].x0 == 0.10
 
 
-def test_build_figure_draws_both_lines_when_mean_equals_median() -> None:
-    stats = _statistics(mean=5.0, median=5.0)
+def test_build_figure_mean_line_annotation_says_mean_not_median() -> None:
+    stats = _statistics(mean=10.0, median=-5.0)
 
     figure = build_figure([(-25, 1), (0, 12), (65, 1)], stats)
 
-    lines = _vline_shapes(figure)
-    assert len(lines) == 2
+    annotation_texts = [a.text for a in figure.layout.annotations]
+    assert annotation_texts == ["Mean"]
+
+
+def test_build_figure_x_axis_is_absolute_scale_not_mean_relative() -> None:
+    """027 FR-006 regression guard: a bucket's rendered x-position is its own raw
+    basis-point center / 100, independent of the mean/median -- not an offset from the
+    mean. Uses a mean far from a bucket's own center so a mean-relative bug (rendering at
+    `(center - mean) / 100`) would fail this assertion instead of accidentally matching.
+    """
+    stats = _statistics(mean=808.0, median=-150.0)
+    # A single observation at raw center -150bp -> rendered bucket center -145bp (10bp
+    # bucket aligned via `(bp // 10) * 10 + 5`).
+    histogram = [(-150, 1)]
+
+    figure = build_figure(histogram, stats)
+
+    assert list(figure.data[0].x) == [-1.45]
 
 
 # --- band coloring (025 US3) --------------------------------------------------

@@ -1,10 +1,10 @@
-"""Unit tests for src/pages/_var_backtest_panel.py's pure build_panel() (026, US2)."""
+"""Unit tests for src/pages/_var_backtest_panel.py's pure build_panel() (026, US2; 027 US5)."""
 
 from __future__ import annotations
 
-from dash import html
+from dash import dash_table, html
 
-from src.pages._var_backtest_panel import build_panel
+from src.pages._var_backtest_panel import STYLE_CELL, STYLE_HEADER, build_panel
 
 
 def _level(confidence_bp: int = 9500, observation_count: int = 250, **overrides: object) -> dict:
@@ -40,12 +40,30 @@ def _backtest_by_basis_quality(level: dict) -> dict:
 def _text(component: object) -> str:
     if isinstance(component, str):
         return component
+    data = getattr(component, "data", None)
+    if data is not None:
+        # dash_table.DataTable: its cell values live in `.data` (row dicts), not `.children`.
+        return "".join(str(v) for row in data for v in row.values())
     children = getattr(component, "children", None)
     if children is None:
         return ""
     if not isinstance(children, list):
         children = [children]
     return "".join(_text(c) for c in children)
+
+
+def _find_data_tables(component: object) -> list:
+    """Depth-first collect every `dash_table.DataTable` in the component tree."""
+    found = []
+    if isinstance(component, dash_table.DataTable):
+        found.append(component)
+    children = getattr(component, "children", None)
+    if children is not None:
+        if not isinstance(children, list):
+            children = [children]
+        for child in children:
+            found.extend(_find_data_tables(child))
+    return found
 
 
 def test_selects_hypothetical_degraded_by_default() -> None:
@@ -123,6 +141,25 @@ def test_insufficient_observations_shows_not_enough_observations_message() -> No
     )
     text = _text(panel)
     assert "not enough observations" in text.lower()
+
+
+def test_renders_as_data_tables_matching_the_histogram_tables_style() -> None:
+    """027 FR-010/SC-005: the panel must present its figures via the same
+    `dash_table.DataTable` component type and the same `style_cell`/`style_header`
+    dictionaries risk.py's own `risk-statistics-table` uses, not stacked H6/P prose.
+    """
+    panel = build_panel(
+        _backtest_by_basis_quality(_level()),
+        selected_confidence_bp=[9500],
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+    )
+    tables = _find_data_tables(panel)
+    assert len(tables) >= 1
+    for table in tables:
+        assert table.style_cell == STYLE_CELL
+        assert table.style_header == STYLE_HEADER
+        assert {col["id"] for col in table.columns} == {"statistic", "value"}
 
 
 def test_returns_a_div() -> None:

@@ -122,13 +122,18 @@ def test_fetch_var_methods_on_error_sets_error_state_and_no_store_update(
     assert controls_children is not None
 
 
+_METHODS_DATA = {"lookbacks": [{"code": "1y"}, {"code": "2y"}, {"code": "5y"}]}
+
+
 def test_fetch_var_data_calls_series_once_backtest_four_times_status_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _RecordingVarDataClient()
     monkeypatch.setattr(risk_module, "_get_client", lambda: client)
 
-    payload = risk_module._fetch_var_data("HL-SIPP", "2026-01-02", "2026-03-02", "2y")
+    payload = risk_module._fetch_var_data(
+        "HL-SIPP", "2026-01-02", "2026-03-02", "2y", _METHODS_DATA
+    )
 
     series_calls = [c for c in client.calls if c[0] == "series"]
     backtest_calls = [c for c in client.calls if c[0] == "backtest"]
@@ -156,12 +161,56 @@ def test_fetch_var_data_sets_fetch_error_on_any_failure(
     client = _RecordingVarDataClient(raise_error_on=failing_call)
     monkeypatch.setattr(risk_module, "_get_client", lambda: client)
 
-    payload = risk_module._fetch_var_data("HL-SIPP", "2026-01-02", "2026-03-02", "2y")
+    payload = risk_module._fetch_var_data(
+        "HL-SIPP", "2026-01-02", "2026-03-02", "2y", _METHODS_DATA
+    )
 
     assert payload["fetch_error"] is not None
     assert payload.get("series") is None
     assert payload.get("backtest") is None
     assert payload.get("status") is None
+
+
+def test_fetch_var_data_unsupported_code_skips_series_and_backtest_but_still_fetches_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """027 FR-009 / finding F1: an unsupported range code (not in the server's reported
+    look-backs, or None) must not call get_var_series/get_var_backtest, but the
+    account-level status call still happens; the returned payload is well-formed (not
+    None) with an empty series/backtest so `_render_var_view`'s existing empty-series
+    branch renders the empty state rather than leaving stale data on screen.
+    """
+    client = _RecordingVarDataClient()
+    monkeypatch.setattr(risk_module, "_get_client", lambda: client)
+
+    payload = risk_module._fetch_var_data(
+        "HL-SIPP", "2026-01-02", "2026-03-02", "3y", _METHODS_DATA
+    )
+
+    assert [c[0] for c in client.calls] == ["status"]
+    assert payload is not None
+    assert payload["fetch_error"] is None
+    assert payload["series"] == {"series": []}
+    assert payload["backtest"] == {}
+    assert payload["status"]["missing_dates"] == 3
+
+
+def test_fetch_var_data_none_code_skips_series_and_backtest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """None (custom range / default full-history view, before any shortcut is clicked)
+    is likewise unsupported -- same empty-payload behavior as an explicit 3y/10y/all.
+    """
+    client = _RecordingVarDataClient()
+    monkeypatch.setattr(risk_module, "_get_client", lambda: client)
+
+    payload = risk_module._fetch_var_data(
+        "HL-SIPP", "2026-01-02", "2026-03-02", None, _METHODS_DATA
+    )
+
+    assert [c[0] for c in client.calls] == ["status"]
+    assert payload["series"] == {"series": []}
+    assert payload["backtest"] == {}
 
 
 # --- FR-003: the confidence multi-select must never be allowed to clear to empty ---

@@ -8,17 +8,17 @@ Feature: Value at Risk main chart
 
   Scenario: Opening the tab shows realised PnL bars with a VaR overlay
     Given the browser has loaded the Risk page and its content finished loading
-    When I select the "Value at Risk" tab
+    When the Value at Risk section finishes loading
     Then the chart, the linked market-value chart and the backtest panel are all present
 
   Scenario: A day whose loss exceeded its forecast is visually distinguished
     Given portfolio-analysis-service has a VaR series with an exceedance day
     And the browser has loaded the Risk page and its content finished loading
-    When I select the "Value at Risk" tab
+    When the Value at Risk section finishes loading
     Then the exceedance day's bar is coloured differently from non-exceeding days
 
   Scenario: Expected Shortfall can optionally be shown
     Given the browser has loaded the Risk page and its content finished loading
-    When I select the "Value at Risk" tab
+    When the Value at Risk section finishes loading
     And I turn on the Expected Shortfall display
     Then a dashed Expected Shortfall overlay line appears on the chart

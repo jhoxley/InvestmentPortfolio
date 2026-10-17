@@ -29,7 +29,7 @@ from src.models.portfolio_analysis import (
     VarStatusSummary,
 )
 
-scenarios("../features/var_risk_tab_shell.feature")
+scenarios("../features/risk_single_page.feature")
 scenarios("../features/var_risk_chart.feature")
 scenarios("../features/var_risk_backtest_panel.feature")
 scenarios("../features/var_risk_instant_controls.feature")
@@ -256,7 +256,9 @@ def load_risk_page(dash_duo: Any, monkeypatch: Any) -> Any:
         stub_client_with_completed_calculation(monkeypatch)
     dash_duo.start_server(app_module.app)
     dash_duo.driver.get(f"{dash_duo.server_url}/risk")
-    dash_duo.wait_for_element("#risk-tabs", timeout=_TIMEOUT)
+    # 027: the merged single-page layout has no "#risk-tabs" shell to wait for -- the
+    # histogram's chart container is always mounted, so wait for that instead.
+    dash_duo.wait_for_element("#risk-chart-container", timeout=_TIMEOUT)
     return app_module.app
 
 
@@ -268,21 +270,54 @@ def risk_page_loaded(dash_duo: Any, monkeypatch: Any) -> Any:
     return load_risk_page(dash_duo, monkeypatch)
 
 
-@then(parsers.parse('there is a "{var_label}" tab next to the "{histogram_label}" tab'))
-def assert_both_tabs_present(dash_duo: Any, var_label: str, histogram_label: str) -> None:
-    tabs_text = dash_duo.find_element("#risk-tabs").text
-    assert histogram_label in tabs_text
-    assert var_label in tabs_text
+@then("there is no tab control on the page")
+def assert_no_tab_control(dash_duo: Any) -> None:
+    """027 FR-001: the dbc.Tabs/dbc.Tab shell is gone from the merged single page."""
+    assert dash_duo.driver.find_elements("css selector", "#risk-tabs") == []
+    assert dash_duo.driver.find_elements("css selector", "[role='tablist']") == []
 
 
-@when(parsers.parse('I select the "{tab_label}" tab'))
-def select_tab(dash_duo: Any, tab_label: str, stub_client: _FakeVarRiskClient) -> None:
-    tab_link = dash_duo.find_element("#risk-tabs a[role='tab']:not([aria-selected='true'])")
-    if tab_label in tab_link.text:
-        tab_link.click()
-    # Either way, wait for the VaR tab's initial fetch to complete -- one of the chart or
-    # the empty/error state -- then snapshot the call counts so later "instant control"
-    # steps can assert no further calls were made.
+@then("the return histogram chart and statistics table are visible")
+def assert_histogram_visible_without_interaction(dash_duo: Any) -> None:
+    """027 FR-002: the histogram renders without any click, as soon as the page loads."""
+    chart_container = dash_duo.wait_for_element(
+        "#risk-chart-container .js-plotly-plot, #risk-chart-container #risk-empty-state, "
+        "#risk-chart-container #risk-error-state",
+        timeout=_TIMEOUT,
+    )
+    assert chart_container.is_displayed()
+    table_container = dash_duo.find_element("#risk-table-container")
+    assert table_container.is_displayed()
+
+
+@then(
+    "the Value at Risk controls, chart and backtest panel are visible below the histogram "
+    "section"
+)
+def assert_var_section_visible_below_histogram(dash_duo: Any) -> None:
+    """027 FR-001/FR-002: both sections are mounted on one page, histogram first."""
+    histogram_y = dash_duo.find_element("#risk-chart-container").location["y"]
+    var_controls = dash_duo.wait_for_element("#risk-var-controls-container", timeout=_TIMEOUT)
+    assert var_controls.is_displayed()
+    assert var_controls.location["y"] > histogram_y
+    assert dash_duo.find_element("#risk-var-chart-container").is_displayed()
+    assert dash_duo.find_element("#risk-var-backtest-panel").is_displayed()
+
+
+@then("the shared account selector, date range and shortcut buttons appear exactly once")
+def assert_shared_controls_not_duplicated(dash_duo: Any) -> None:
+    """027: merging the two former tab panels must not duplicate the shared parameters bar."""
+    accounts = dash_duo.driver.find_elements("css selector", "#app-parameters-account")
+    assert len(accounts) == 1
+
+
+@given("the Value at Risk section finishes loading")
+@when("the Value at Risk section finishes loading")
+def var_section_loaded(dash_duo: Any, stub_client: _FakeVarRiskClient) -> None:
+    """027: supersedes the old tab-click step -- the VaR section is already mounted on page
+    load (no tab to select), so this only waits for its first render and snapshots call
+    counts for later "instant control" steps to assert no further calls were made.
+    """
     dash_duo.wait_for_element(
         "#risk-var-chart .js-plotly-plot, "
         "#risk-var-chart-container #risk-empty-state, "
@@ -291,19 +326,6 @@ def select_tab(dash_duo: Any, tab_label: str, stub_client: _FakeVarRiskClient) -
     )
     stub_client.series_calls_after_initial_load = len(stub_client.series_calls)
     stub_client.backtest_calls_after_initial_load = len(stub_client.backtest_calls)
-
-
-@then(
-    parsers.parse(
-        "the account selector, date range and shortcut buttons are the same DOM elements "
-        'as on the "{other_tab_label}" tab'
-    )
-)
-def assert_shared_controls_unchanged(dash_duo: Any, other_tab_label: str) -> None:
-    # The shared parameters bar lives in shell.py above the tabs, outside either dbc.Tab's
-    # children -- asserting its ids exist once (not duplicated per tab) proves this.
-    accounts = dash_duo.driver.find_elements("css selector", "#app-parameters-account")
-    assert len(accounts) == 1
 
 
 # --- User Story 1: main chart -----------------------------------------------------
@@ -388,6 +410,26 @@ def assert_backtest_panel_single_level(dash_duo: Any, pct: str) -> None:
     assert pct in panel_text
 
 
+@then(
+    "the backtest panel is rendered as a labelled table/grid matching the histogram's "
+    "statistics table style"
+)
+def assert_backtest_panel_matches_histogram_table_style(dash_duo: Any) -> None:
+    """027 FR-010/SC-005: both must use the same bordered, labelled table/grid treatment."""
+    dash_duo.wait_for_element("#risk-statistics-table", timeout=_TIMEOUT)
+    panel_table = dash_duo.find_element("#risk-var-backtest-panel table")
+    histogram_table = dash_duo.find_element("#risk-statistics-table table")
+    assert panel_table.tag_name == histogram_table.tag_name == "table"
+    # Both render via dash_table.DataTable with the same style_cell/style_header dicts
+    # (src/pages/_var_backtest_panel.py's STYLE_CELL/STYLE_HEADER, imported by risk.py) --
+    # cell padding is the most visible, directly comparable artifact of that shared style.
+    panel_cell = dash_duo.find_element("#risk-var-backtest-panel td")
+    histogram_cell = dash_duo.find_element("#risk-statistics-table td")
+    assert panel_cell.value_of_css_property("padding") == histogram_cell.value_of_css_property(
+        "padding"
+    )
+
+
 # --- User Story 3: instant confidence/units/PnL-basis controls ---------------------
 
 
@@ -451,17 +493,24 @@ def assert_new_series_request(dash_duo: Any, stub_client: _FakeVarRiskClient) ->
     assert len(stub_client.series_calls) > stub_client.series_calls_after_initial_load
 
 
-@when(parsers.parse('I change the look-back to "{code}"'))
-def change_lookback(dash_duo: Any, code: str, stub_client: _FakeVarRiskClient) -> None:
-    from selenium.webdriver.support.ui import Select as SeleniumSelect
+# 027: the VaR tab's own "Look-back" dropdown is gone -- changing the look-back now means
+# clicking one of the page's shared shortcut buttons (the same ones that drive the
+# histogram), identified by their visible label.
+_SHORTCUT_BUTTON_IDS_FOR_VAR = {
+    "10Y": "overview-shortcut-ytd",
+    "1Y": "overview-shortcut-1y",
+    "2Y": "risk-shortcut-2y",
+    "3Y": "overview-shortcut-3y",
+    "5Y": "overview-shortcut-5y",
+    "All": "overview-shortcut-all",
+}
 
-    stub_client.overlay_y_before_lookback_change = dash_duo.driver.execute_script(
-        "var gd = document.querySelector('#risk-var-chart .js-plotly-plot');"
-        "var t = gd.data.find(function(t) { return t.name && t.name.indexOf('VaR') !== -1; });"
-        "return t ? t.y : null;"
-    )
-    select = SeleniumSelect(dash_duo.find_element("#risk-var-lookback"))
-    select.select_by_value(code)
+
+@when(parsers.parse('I click the "{label}" shortcut button'))
+def click_shared_shortcut_button(dash_duo: Any, label: str) -> None:
+    button_id = _SHORTCUT_BUTTON_IDS_FOR_VAR[label]
+    dash_duo.find_element(f"#{button_id}").click()
+    dash_duo.wait_for_element("#risk-chart-container", timeout=_TIMEOUT)
 
 
 @then(parsers.parse('a new VaR series request was made with look-back "{code}"'))
@@ -470,6 +519,29 @@ def assert_series_request_with_lookback(
 ) -> None:
     dash_duo.wait_for_element("#risk-var-chart .js-plotly-plot", timeout=_TIMEOUT)
     assert stub_client.series_calls[-1]["lookback"] == code
+
+
+@then("the histogram section still renders normally")
+def assert_histogram_still_renders(dash_duo: Any) -> None:
+    """027 FR-009: a range unsupported by VaR must not affect the histogram section."""
+    dash_duo.wait_for_element(
+        "#risk-chart-container .js-plotly-plot, #risk-chart-container #risk-empty-state, "
+        "#risk-chart-container #risk-error-state",
+        timeout=_TIMEOUT,
+    )
+
+
+@then(parsers.parse('the Value at Risk section shows "{message}"'))
+def assert_var_section_shows_message(dash_duo: Any, message: str) -> None:
+    empty_state = dash_duo.wait_for_element(
+        "#risk-var-chart-container #risk-empty-state", timeout=_TIMEOUT
+    )
+    assert message in empty_state.text
+
+
+@then('no "Look-back" control is shown in the Value at Risk section')
+def assert_no_lookback_control_in_dom(dash_duo: Any) -> None:
+    assert dash_duo.driver.find_elements("css selector", "#risk-var-lookback") == []
 
 
 @then("the chart no longer shows the previous selection's data")
