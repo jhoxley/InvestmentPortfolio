@@ -60,29 +60,44 @@ def build_figures(
     var_field = "var_gbp" if units == "gbp" else "var_pct"
     es_field = "es_gbp" if units == "gbp" else "es_pct"
 
-    bar_entries = [e for e in entries if e[pnl_field] is not None]
-    bar_x = [e["outcome_date"] for e in bar_entries]
-    bar_y = [e[pnl_field] for e in bar_entries]
-    bar_colors = [
-        EXCEPTION_COLOR
-        if any(
-            (lvl := _level(e, bp)) is not None and lvl[exception_field]
-            for bp in selected_confidence_bp
-        )
-        else NORMAL_COLOR
-        for e in bar_entries
-    ]
-
     fig = make_subplots(
         rows=2,
         cols=1,
         shared_xaxes=True,
         row_heights=[0.7, 0.3],
         specs=[[{}], [{"secondary_y": True}]],
+        # 028 FR-007/FR-008: a caption above each chart section. Using make_subplots'
+        # own `subplot_titles` (rather than splitting into two dcc.Graph components)
+        # keeps `shared_xaxes=True`'s zoom/pan link between the two rows intact
+        # (research.md #4).
+        subplot_titles=[
+            "Realised PnL vs. Value at Risk forecast",
+            "Total Market Value and Proxied/Rescaled Share",
+        ],
     )
-    fig.add_trace(
-        go.Bar(x=bar_x, y=bar_y, marker={"color": bar_colors}, name="Realised PnL"), row=1, col=1
-    )
+
+    # 028 FR-005: no percentage-equivalent of realised PnL exists on `VarSeriesEntry`
+    # (unlike var_gbp/var_pct and es_gbp/es_pct) -- plotting it in money terms alongside
+    # a percentage-scaled VaR line compresses the line near zero. Omit the trace
+    # entirely in percentage mode rather than show it at a misleading scale.
+    if units == "gbp":
+        bar_entries = [e for e in entries if e[pnl_field] is not None]
+        bar_x = [e["outcome_date"] for e in bar_entries]
+        bar_y = [e[pnl_field] for e in bar_entries]
+        bar_colors = [
+            EXCEPTION_COLOR
+            if any(
+                (lvl := _level(e, bp)) is not None and lvl[exception_field]
+                for bp in selected_confidence_bp
+            )
+            else NORMAL_COLOR
+            for e in bar_entries
+        ]
+        fig.add_trace(
+            go.Bar(x=bar_x, y=bar_y, marker={"color": bar_colors}, name="Realised PnL"),
+            row=1,
+            col=1,
+        )
 
     for confidence_bp in selected_confidence_bp:
         var_x: list[Any] = []
@@ -140,5 +155,13 @@ def build_figures(
         secondary_y=True,
     )
 
-    fig.update_layout(margin={"t": 30, "b": 30})
+    fig.update_layout(
+        margin={"t": 30, "b": 30},
+        # 028 FR-001: below the chart, not Plotly's default in-plot-area placement,
+        # which crowded into the backtest panel's column space. Same value every other
+        # chart in this codebase uses -- Plotly's legend `y` (default yref="paper") is
+        # relative to the whole figure regardless of subplot row count, so this
+        # two-row figure needs no different offset than a single-row chart's.
+        legend={"orientation": "h", "y": -0.2, "x": 0.5, "xanchor": "center"},
+    )
     return fig

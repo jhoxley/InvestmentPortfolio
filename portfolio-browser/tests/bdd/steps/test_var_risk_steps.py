@@ -352,6 +352,25 @@ def assert_chart_and_panel_present(dash_duo: Any) -> None:
     assert panel_text.strip() != ""
 
 
+@then("the chart's legend renders below the chart's plotting area")
+def assert_legend_below_chart(dash_duo: Any) -> None:
+    """028 FR-001: legend.orientation/y must place it below the plot, not inside it."""
+    legend = dash_duo.driver.execute_script(
+        "var gd = document.querySelector('#risk-var-chart .js-plotly-plot');"
+        "return gd.layout.legend;"
+    )
+    assert legend["orientation"] == "h"
+    assert legend["y"] < 0
+
+
+@then("the backtest summary panel is fully visible within the viewport")
+def assert_backtest_panel_fully_visible(dash_duo: Any) -> None:
+    """028 FR-002/SC-001: the panel must not be pushed off-screen by the legend."""
+    panel = dash_duo.find_element("#risk-var-backtest-panel")
+    window_width = dash_duo.driver.execute_script("return window.innerWidth;")
+    assert panel.location["x"] + panel.size["width"] <= window_width
+
+
 @then("the exceedance day's bar is coloured differently from non-exceeding days")
 def assert_exceedance_bar_colored(dash_duo: Any) -> None:
     colors = dash_duo.driver.execute_script(
@@ -410,6 +429,32 @@ def assert_backtest_panel_single_level(dash_duo: Any, pct: str) -> None:
     assert pct in panel_text
 
 
+def _assert_backtest_panel_is_one_table(dash_duo: Any) -> None:
+    """028 FR-003: up to three per-level tables collapse into one combined table."""
+    tables = dash_duo.driver.find_elements("css selector", "#risk-var-backtest-panel table")
+    assert len(tables) == 1
+
+
+@then("the backtest panel is exactly one table")
+def assert_backtest_panel_is_one_table(dash_duo: Any) -> None:
+    _assert_backtest_panel_is_one_table(dash_duo)
+
+
+@then("the backtest panel is still exactly one table")
+def assert_backtest_panel_is_still_one_table(dash_duo: Any) -> None:
+    _assert_backtest_panel_is_one_table(dash_duo)
+
+
+@then(parsers.parse("it has exactly {count:d} value column"))
+def assert_backtest_panel_column_count(dash_duo: Any, count: int) -> None:
+    """028 FR-004: column count tracks the current confidence-level selection."""
+    header_cells = dash_duo.driver.find_elements(
+        "css selector", "#risk-var-backtest-panel table th"
+    )
+    # One header cell is the leading "statistic" column; the rest are value columns.
+    assert len(header_cells) - 1 == count
+
+
 @then(
     "the backtest panel is rendered as a labelled table/grid matching the histogram's "
     "statistics table style"
@@ -437,6 +482,63 @@ def assert_backtest_panel_matches_histogram_table_style(dash_duo: Any) -> None:
 def switch_units_to_pct(dash_duo: Any) -> None:
     option = dash_duo.find_element("#risk-var-units input[value='pct']")
     option.click()
+
+
+@when("I switch units to money")
+def switch_units_to_gbp(dash_duo: Any) -> None:
+    option = dash_duo.find_element("#risk-var-units input[value='gbp']")
+    option.click()
+
+
+def _bar_trace_count(dash_duo: Any) -> int:
+    return dash_duo.driver.execute_script(
+        "var gd = document.querySelector('#risk-var-chart .js-plotly-plot');"
+        "return gd.data.filter(function(t) { return t.type === 'bar'; }).length;"
+    )
+
+
+@then("no realised PnL bars are shown on the chart")
+def assert_no_pnl_bars(dash_duo: Any) -> None:
+    """028 FR-005: the bar trace is omitted entirely in percentage mode."""
+    assert _bar_trace_count(dash_duo) == 0
+
+
+@then("the realised PnL bars reappear on the chart")
+def assert_pnl_bars_reappear(dash_duo: Any) -> None:
+    """028 FR-006: switching back to money restores the bar trace."""
+    assert _bar_trace_count(dash_duo) == 1
+
+
+def _subplot_title_annotations(dash_duo: Any) -> list[str]:
+    return dash_duo.driver.execute_script(
+        "var gd = document.querySelector('#risk-var-chart .js-plotly-plot');"
+        "return gd.layout.annotations.map(function(a) { return a.text; });"
+    )
+
+
+@then("a caption is visible above the main chart")
+def assert_main_chart_caption_visible(dash_duo: Any) -> None:
+    """028 FR-007: a caption explaining the main chart, rendered via subplot_titles."""
+    titles = _subplot_title_annotations(dash_duo)
+    assert len(titles) == 2
+    assert "pnl" in titles[0].lower()
+
+
+@then("a different caption is visible above the linked market-value chart")
+def assert_linked_chart_caption_visible(dash_duo: Any) -> None:
+    """028 FR-008: a distinct caption explaining the linked market-value chart."""
+    titles = _subplot_title_annotations(dash_duo)
+    assert "market value" in titles[1].lower()
+    assert titles[0] != titles[1]
+
+
+@then("the VaR forecast line is still shown on the chart")
+def assert_var_forecast_line_still_shown(dash_duo: Any) -> None:
+    overlays = dash_duo.driver.execute_script(
+        "var gd = document.querySelector('#risk-var-chart .js-plotly-plot');"
+        "return gd.data.filter(function(t) { return t.name && t.name.indexOf('VaR') !== -1; });"
+    )
+    assert len(overlays) >= 1
 
 
 @when("I switch PnL basis to ladder")

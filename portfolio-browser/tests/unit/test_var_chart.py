@@ -237,6 +237,129 @@ def test_hide_degraded_omits_degraded_entries() -> None:
     assert len(overlay_hidden.x) == 1
 
 
+def test_pct_units_omits_the_realised_pnl_bar_entirely() -> None:
+    """028 FR-005: no percentage-equivalent of realised PnL exists on `VarSeriesEntry`
+    (confirmed against src/models/portfolio_analysis.py), so in percentage mode the bar
+    trace must be omitted entirely -- not added with `visible=False` -- while the VaR
+    overlay line and the linked market-value subplot are unaffected.
+    """
+    series = [_entry("2026-03-02", "2026-03-03", total_value_gbp=1234.0)]
+    fig = build_figures(
+        series,
+        selected_confidence_bp=[9500],
+        units="pct",
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+        show_es=False,
+    )
+    bars = [t for t in fig.data if isinstance(t, go.Bar)]
+    assert bars == []
+    overlays = [t for t in fig.data if isinstance(t, go.Scatter) and "95" in str(t.name)]
+    assert len(overlays) == 1
+    value_traces = [t for t in fig.data if t.name == "Total Market Value"]
+    assert len(value_traces) == 1
+    assert list(value_traces[0].y) == [1234.0]
+
+
+def test_gbp_units_still_render_the_bar_after_a_prior_pct_mode_call() -> None:
+    """028 FR-006: build_figures is a pure function with no shared state, so switching
+    units back to money restores the bar trace exactly as a gbp-only call would -- this
+    test is a regression guard for that invariant, not a fix for a known bug.
+    """
+    series = [_entry("2026-03-02", "2026-03-03", hypothetical_pnl_gbp=-42.0)]
+    build_figures(
+        series,
+        selected_confidence_bp=[9500],
+        units="pct",
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+        show_es=False,
+    )
+    fig_gbp_only = build_figures(
+        series,
+        selected_confidence_bp=[9500],
+        units="gbp",
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+        show_es=False,
+    )
+    fig_after_pct = build_figures(
+        series,
+        selected_confidence_bp=[9500],
+        units="gbp",
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+        show_es=False,
+    )
+    bar_only = _figure_bar_trace(fig_gbp_only)
+    bar_after_pct = _figure_bar_trace(fig_after_pct)
+    assert list(bar_only.y) == list(bar_after_pct.y) == [-42.0]
+
+
+def test_each_subplot_row_has_a_caption() -> None:
+    """028 FR-007/FR-008: a caption above each chart section, via Plotly's own
+    `subplot_titles` -- not a second `dcc.Graph`, which would need new wiring to keep
+    the two rows' x-axis zoom/pan linked (research.md #4).
+    """
+    series = [_entry("2026-03-02", "2026-03-03")]
+    fig = build_figures(
+        series,
+        selected_confidence_bp=[9500],
+        units="gbp",
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+        show_es=False,
+    )
+    # make_subplots renders subplot_titles as annotations; with no other annotations
+    # added by this module, there must be exactly two, one per row.
+    titles = [a.text for a in fig.layout.annotations]
+    assert len(titles) == 2
+    assert "pnl" in titles[0].lower()
+    assert "value at risk" in titles[0].lower()
+    assert "market value" in titles[1].lower()
+
+
+def test_subplot_titles_do_not_disturb_the_shared_x_axis_link() -> None:
+    """028 research.md #4: adding captions must not break the linked zoom/pan between
+    the main chart and the market-value chart beneath it. `shared_xaxes=True` links the
+    two rows' x-axes via Plotly's `matches` layout property (not by giving them the same
+    `xaxis` id -- each subplot row always gets its own).
+    """
+    series = [_entry("2026-03-02", "2026-03-03", total_value_gbp=1234.0)]
+    fig = build_figures(
+        series,
+        selected_confidence_bp=[9500],
+        units="gbp",
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+        show_es=False,
+    )
+    assert fig.layout.xaxis.matches == "x2"
+
+
+def test_legend_is_positioned_below_the_chart() -> None:
+    """028 FR-001: the legend must not render inside/beside the plot area, where it
+    crowds into the backtest panel's column space. No specific y magnitude is asserted
+    beyond "below the plot" -- Plotly's legend y is relative to the whole figure's paper
+    space regardless of subplot row count, so this chart needs the same y as every other
+    chart in this codebase, not a more-negative one (research.md #1).
+    """
+    series = [_entry("2026-03-02", "2026-03-03")]
+    fig = build_figures(
+        series,
+        selected_confidence_bp=[9500],
+        units="gbp",
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+        show_es=False,
+    )
+    legend = fig.layout.legend
+    assert legend.orientation == "h"
+    assert legend.xanchor == "center"
+    assert legend.x == 0.5
+    assert legend.y < 0
+
+
 def test_linked_market_value_subplot_present() -> None:
     series = [_entry("2026-03-02", "2026-03-03", total_value_gbp=1234.0, proxied_mv_pct=5.0)]
     fig = build_figures(

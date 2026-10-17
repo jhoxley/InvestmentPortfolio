@@ -21,3 +21,11 @@ Feature: Value at Risk backtest summary panel
     Given the browser has loaded the Risk page and its content finished loading
     When the Value at Risk section finishes loading
     Then the backtest panel is rendered as a labelled table/grid matching the histogram's statistics table style
+
+  Scenario: Multiple selected confidence levels appear as columns of one table, not separate tables
+    Given the browser has loaded the Risk page and its content finished loading
+    When the Value at Risk section finishes loading
+    Then the backtest panel is exactly one table
+    When I select only the 99% confidence level
+    Then the backtest panel is still exactly one table
+    And it has exactly one value column

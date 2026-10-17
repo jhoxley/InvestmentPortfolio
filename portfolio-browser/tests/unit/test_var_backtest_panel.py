@@ -37,6 +37,13 @@ def _backtest_by_basis_quality(level: dict) -> dict:
     }
 
 
+def _backtest_by_basis_quality_multi(levels: list[dict]) -> dict:
+    return {
+        "hypothetical": {"ok": {"levels": levels}, "degraded": {"levels": levels}},
+        "ladder": {"ok": {"levels": levels}, "degraded": {"levels": levels}},
+    }
+
+
 def _text(component: object) -> str:
     if isinstance(component, str):
         return component
@@ -155,11 +162,93 @@ def test_renders_as_data_tables_matching_the_histogram_tables_style() -> None:
         hide_degraded=False,
     )
     tables = _find_data_tables(panel)
-    assert len(tables) >= 1
-    for table in tables:
-        assert table.style_cell == STYLE_CELL
-        assert table.style_header == STYLE_HEADER
-        assert {col["id"] for col in table.columns} == {"statistic", "value"}
+    assert len(tables) == 1
+    table = tables[0]
+    assert table.style_cell == STYLE_CELL
+    assert table.style_header == STYLE_HEADER
+    assert {col["id"] for col in table.columns} == {"statistic", "level_9500"}
+
+
+def test_combined_table_has_one_column_per_selected_confidence_level() -> None:
+    """028 FR-003: up to three per-level tables become one table with one value column
+    per selected confidence level, not one table per level.
+    """
+    levels = [_level(confidence_bp=9500), _level(confidence_bp=9750), _level(confidence_bp=9900)]
+    data = _backtest_by_basis_quality_multi(levels)
+
+    panel = build_panel(
+        data,
+        selected_confidence_bp=[9500, 9750, 9900],
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+    )
+
+    tables = _find_data_tables(panel)
+    assert len(tables) == 1
+    table = tables[0]
+    assert {col["id"] for col in table.columns} == {
+        "statistic",
+        "level_9500",
+        "level_9750",
+        "level_9900",
+    }
+    assert len(table.data) == 6  # one row per statistic, unchanged from the prior per-level table
+
+
+def test_combined_table_column_names_are_formatted_confidence_labels() -> None:
+    levels = [_level(confidence_bp=9500), _level(confidence_bp=9750)]
+    data = _backtest_by_basis_quality_multi(levels)
+
+    panel = build_panel(
+        data, selected_confidence_bp=[9500, 9750], pnl_basis="hypothetical", hide_degraded=False
+    )
+
+    table = _find_data_tables(panel)[0]
+    names_by_id = {col["id"]: col["name"] for col in table.columns}
+    assert names_by_id["level_9500"] == "95%"
+    assert names_by_id["level_9750"] == "97.5%"
+
+
+def test_deselecting_a_confidence_level_removes_its_column_only() -> None:
+    """028 FR-004: removing a column must not change the remaining columns' values."""
+    levels = [
+        _level(confidence_bp=9500, exception_count=3),
+        _level(confidence_bp=9750, exception_count=5),
+        _level(confidence_bp=9900, exception_count=7),
+    ]
+    data = _backtest_by_basis_quality_multi(levels)
+
+    panel_all = build_panel(
+        data,
+        selected_confidence_bp=[9500, 9750, 9900],
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+    )
+    panel_without_9750 = build_panel(
+        data, selected_confidence_bp=[9500, 9900], pnl_basis="hypothetical", hide_degraded=False
+    )
+
+    table_all = _find_data_tables(panel_all)[0]
+    table_without = _find_data_tables(panel_without_9750)[0]
+
+    assert {col["id"] for col in table_without.columns} == {"statistic", "level_9500", "level_9900"}
+
+    exceptions_row_all = next(r for r in table_all.data if r["statistic"] == "Exceptions")
+    exceptions_row_without = next(r for r in table_without.data if r["statistic"] == "Exceptions")
+    assert exceptions_row_all["level_9500"] == exceptions_row_without["level_9500"]
+    assert exceptions_row_all["level_9900"] == exceptions_row_without["level_9900"]
+
+
+def test_single_selected_level_still_renders_one_column_table() -> None:
+    panel = build_panel(
+        _backtest_by_basis_quality(_level()),
+        selected_confidence_bp=[9500],
+        pnl_basis="hypothetical",
+        hide_degraded=False,
+    )
+    tables = _find_data_tables(panel)
+    assert len(tables) == 1
+    assert {col["id"] for col in tables[0].columns} == {"statistic", "level_9500"}
 
 
 def test_returns_a_div() -> None:
