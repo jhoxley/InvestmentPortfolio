@@ -6,13 +6,22 @@ import structlog
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
-from app.api.dependencies import get_capital_repository, get_ladder_repository
+from app.api.dependencies import (
+    get_capital_rebuild_service,
+    get_capital_repository,
+    get_ladder_rebuild_service,
+    get_ladder_repository,
+    get_rebuild_lock_registry,
+)
 from app.models.periodicity import SUPPORTED_PERIODICITY_VALUES
 from app.models.timeseries import AttributeMetadataResponse, TimeSeriesResponse
 from app.repositories.capital_repository import CapitalRepository
 from app.repositories.ladder_repository import LadderRepository
 from app.services import timeseries_attributes
 from app.services.accounts_service import AccountsService
+from app.services.rebuild.capital_rebuild_service import CapitalRebuildService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 from app.services.timeseries_service import TimeSeriesService
 from app.validators.account_name import validate_account_name
@@ -26,12 +35,18 @@ router = APIRouter(prefix="/v1", tags=["Timeseries"])
 def _get_timeseries_service(
     ladder_repo: LadderRepository = Depends(get_ladder_repository),
     capital_repo: CapitalRepository = Depends(get_capital_repository),
+    ladder_rebuild_service: LadderRebuildService = Depends(get_ladder_rebuild_service),
+    capital_rebuild_service: CapitalRebuildService = Depends(get_capital_rebuild_service),
+    rebuild_lock_registry: RebuildLockRegistry = Depends(get_rebuild_lock_registry),
 ) -> TimeSeriesService:
     """Dependency that returns a wired TimeSeriesService.
 
     Args:
         ladder_repo: LadderRepository instance (injected by FastAPI).
         capital_repo: CapitalRepository instance (injected by FastAPI).
+        ladder_rebuild_service: LadderRebuildService instance (injected by FastAPI).
+        capital_rebuild_service: CapitalRebuildService instance (injected by FastAPI).
+        rebuild_lock_registry: Shared RebuildLockRegistry (injected by FastAPI).
 
     Returns:
         TimeSeriesService instance.
@@ -42,12 +57,24 @@ def _get_timeseries_service(
         capital_repo=capital_repo,
         accounts_service=accounts_service,
         date_resolver=TimeseriesDateResolver(),
+        ladder_rebuild_service=ladder_rebuild_service,
+        capital_rebuild_service=capital_rebuild_service,
+        rebuild_lock_registry=rebuild_lock_registry,
     )
 
 
 @router.get(
     "/accounts/{account_name}/timeseries",
     summary="Retrieve a per-business-day time series of requested attributes for an account",
+    description=(
+        "If the resolved end date is later than the account's last ingested-or-rebuilt "
+        "date, this request synchronously rebuilds the missing period (fresh market "
+        "pricing on held-constant positions) before responding, capped at the prior "
+        "business day relative to today (014). The rebuild is persisted, so a later "
+        "request for the same or an earlier range is served without repeating it. "
+        "Any date whose pricing could not be sourced returns `null` for the affected "
+        "attribute."
+    ),
     response_model=TimeSeriesResponse,
     responses={
         404: {"description": "No capital ledger or position ladder found for this account"},

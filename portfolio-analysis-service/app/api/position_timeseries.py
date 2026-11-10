@@ -7,7 +7,12 @@ import structlog
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
-from app.api.dependencies import get_capital_repository, get_ladder_repository
+from app.api.dependencies import (
+    get_capital_repository,
+    get_ladder_rebuild_service,
+    get_ladder_repository,
+    get_rebuild_lock_registry,
+)
 from app.exceptions import AccountNotFoundError, PositionLadderNotIngestedError
 from app.models.periodicity import SUPPORTED_PERIODICITY_VALUES
 from app.models.position_timeseries import PositionsResponse, PositionTimeSeriesResponse
@@ -18,6 +23,8 @@ from app.services import position_attributes
 from app.services.accounts_service import AccountsService
 from app.services.position_timeseries_service import PositionTimeSeriesService
 from app.services.positions_service import PositionsService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 from app.validators.account_name import validate_account_name
 from app.validators.periodicity import resolve_periodicity
@@ -72,12 +79,16 @@ def _get_positions_endpoint_deps(
 def _get_position_timeseries_service(
     ladder_repo: LadderRepository = Depends(get_ladder_repository),
     capital_repo: CapitalRepository = Depends(get_capital_repository),
+    ladder_rebuild_service: LadderRebuildService = Depends(get_ladder_rebuild_service),
+    rebuild_lock_registry: RebuildLockRegistry = Depends(get_rebuild_lock_registry),
 ) -> PositionTimeSeriesService:
     """Dependency that returns a wired PositionTimeSeriesService.
 
     Args:
         ladder_repo: LadderRepository instance (injected by FastAPI).
         capital_repo: CapitalRepository instance (injected by FastAPI).
+        ladder_rebuild_service: LadderRebuildService instance (injected by FastAPI).
+        rebuild_lock_registry: Shared RebuildLockRegistry (injected by FastAPI).
 
     Returns:
         PositionTimeSeriesService instance.
@@ -88,6 +99,8 @@ def _get_position_timeseries_service(
         accounts_service=accounts_service,
         positions_service=PositionsService(),
         date_resolver=TimeseriesDateResolver(),
+        ladder_rebuild_service=ladder_rebuild_service,
+        rebuild_lock_registry=rebuild_lock_registry,
     )
 
 
@@ -95,6 +108,14 @@ def _get_position_timeseries_service(
     "/accounts/{account_name}/position",
     summary=(
         "Retrieve a per-business-day time series of requested attributes for one or more positions"
+    ),
+    description=(
+        "If the resolved end date is later than the ladder's last ingested-or-rebuilt "
+        "date, this request synchronously rebuilds the missing period before "
+        "responding, capped at the prior business day relative to today (014). The "
+        "rebuild is persisted. Any date whose pricing could not be sourced returns "
+        "`null` for the affected attribute. (The plural `/positions` enumeration "
+        "endpoint takes no date range and never triggers this.)"
     ),
     response_model=PositionTimeSeriesResponse,
     responses={

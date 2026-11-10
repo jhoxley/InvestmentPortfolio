@@ -100,6 +100,7 @@ class CapitalIngestionService:
         self._validator.validate(df, account_name)
 
         capital_df = self._expander.expand(df)
+        capital_df = capital_df.assign(provenance="ingested")
 
         from_date: date = capital_df["date"].min()
         to_date: date = capital_df["date"].max()

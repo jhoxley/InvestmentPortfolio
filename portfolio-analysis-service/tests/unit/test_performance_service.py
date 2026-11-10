@@ -16,7 +16,12 @@ from app.repositories.capital_repository import CapitalMeta, CapitalRepository
 from app.repositories.ladder_repository import AccountMeta, LadderRepository
 from app.services.accounts_service import AccountsService
 from app.services.performance_service import PerformanceService
+from app.services.pricing_enrichment_service import PricingEnrichmentService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
+from app.services.returns_enrichment_service import ReturnsEnrichmentService
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
+from tests.conftest import FakeIdentifierMappingRepository, FakeMarketDataService
 
 TODAY = date(2024, 6, 14)  # Friday, well after all fixture dates below
 
@@ -99,17 +104,34 @@ def capital_repo(tmp_path: Path) -> CapitalRepository:
 
 
 @pytest.fixture()
-def service(ladder_repo: LadderRepository, capital_repo: CapitalRepository) -> PerformanceService:
+def service(
+    ladder_repo: LadderRepository,
+    capital_repo: CapitalRepository,
+    fake_identifier_mapping_repository: FakeIdentifierMappingRepository,
+    fake_market_data_service: FakeMarketDataService,
+) -> PerformanceService:
     """Return a PerformanceService wired to the tmp_path-backed repositories.
 
     Returns:
         PerformanceService ready for use in tests.
     """
     accounts_service = AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo)
+    mapping_repo = fake_identifier_mapping_repository
+    market_data_client = fake_market_data_service.client()
     return PerformanceService(
         ladder_repo=ladder_repo,
         accounts_service=accounts_service,
         date_resolver=TimeseriesDateResolver(),
+        ladder_rebuild_service=LadderRebuildService(
+            repository=ladder_repo,
+            mapping_repo=mapping_repo,
+            market_data_client=market_data_client,
+            enrichment_service=PricingEnrichmentService(
+                mapping_repo=mapping_repo, market_data_client=market_data_client
+            ),
+            returns_service=ReturnsEnrichmentService(),
+        ),
+        rebuild_lock_registry=RebuildLockRegistry(),
     )
 
 

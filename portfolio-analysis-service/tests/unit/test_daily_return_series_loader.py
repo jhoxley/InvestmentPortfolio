@@ -13,11 +13,17 @@ from app.exceptions import (
     InvalidDateRangeError,
     MissingRequiredSourceError,
 )
+from app.models.market_data import PriceHistoryPoint
 from app.repositories.capital_repository import CapitalMeta, CapitalRepository
 from app.repositories.ladder_repository import AccountMeta, LadderRepository
 from app.services.accounts_service import AccountsService
 from app.services.daily_return_series_loader import DailyReturnSeriesLoader
+from app.services.pricing_enrichment_service import PricingEnrichmentService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
+from app.services.returns_enrichment_service import ReturnsEnrichmentService
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
+from tests.conftest import FakeIdentifierMappingRepository, FakeMarketDataService
 
 TODAY = date(2024, 6, 14)  # Friday, well after all fixture dates below
 
@@ -102,17 +108,32 @@ def capital_repo(tmp_path: Path) -> CapitalRepository:
 
 @pytest.fixture()
 def loader(
-    ladder_repo: LadderRepository, capital_repo: CapitalRepository
+    ladder_repo: LadderRepository,
+    capital_repo: CapitalRepository,
+    fake_identifier_mapping_repository: FakeIdentifierMappingRepository,
+    fake_market_data_service: FakeMarketDataService,
 ) -> DailyReturnSeriesLoader:
     """Return a loader wired to the tmp_path-backed repositories.
 
     Returns:
         DailyReturnSeriesLoader ready for use in tests.
     """
+    mapping_repo = fake_identifier_mapping_repository
+    market_data_client = fake_market_data_service.client()
     return DailyReturnSeriesLoader(
         ladder_repo=ladder_repo,
         accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
         date_resolver=TimeseriesDateResolver(),
+        ladder_rebuild_service=LadderRebuildService(
+            repository=ladder_repo,
+            mapping_repo=mapping_repo,
+            market_data_client=market_data_client,
+            enrichment_service=PricingEnrichmentService(
+                mapping_repo=mapping_repo, market_data_client=market_data_client
+            ),
+            returns_service=ReturnsEnrichmentService(),
+        ),
+        rebuild_lock_registry=RebuildLockRegistry(),
     )
 
 
@@ -166,16 +187,48 @@ class TestLoadReturnsResolvedRangeAndSeries:
         assert result.daily_returns["daily_return"].iloc[0] == pytest.approx(0.0065)
         assert result.daily_returns["daily_return"].iloc[1] == pytest.approx(0.002)
 
-    def test_zero_fills_business_days_without_ladder_rows(
-        self, ladder_repo: LadderRepository, loader: DailyReturnSeriesLoader
+    def test_business_days_past_the_last_ladder_row_are_rebuilt_not_zero_filled(
+        self,
+        ladder_repo: LadderRepository,
+        loader: DailyReturnSeriesLoader,
+        fake_identifier_mapping_repository: FakeIdentifierMappingRepository,
+        fake_market_data_service: FakeMarketDataService,
     ) -> None:
-        """Business days after the last ladder row are 0.0, never forward-filled."""
+        """A 014 rebuild extends the ladder, so these days carry real returns, not 0.0.
+
+        Supersedes the pre-014 zero-fill expectation for exactly this scenario: a gap is
+        now closed by LadderRebuildService before compute_daily_portfolio_return ever
+        sees a genuinely missing date. compute_daily_portfolio_return's own zero-fill
+        behaviour (daily_portfolio_return.py) remains correct and unchanged for a date
+        that is still genuinely absent -- this test only confirms that a stale gap no
+        longer reaches that fallback at all.
+        """
         _two_day_ladder(ladder_repo)
+        fake_identifier_mapping_repository.set_entry("A", ticker="A.L")
+        fake_identifier_mapping_repository.set_entry("B", ticker="B.L")
+        fake_market_data_service.configure_prices(
+            "A.L",
+            [
+                PriceHistoryPoint(date=date(2024, 1, 4), close=1.0),
+                PriceHistoryPoint(date=date(2024, 1, 5), close=1.0),
+            ],
+        )
+        fake_market_data_service.configure_prices(
+            "B.L",
+            [
+                PriceHistoryPoint(date=date(2024, 1, 4), close=1.0),
+                PriceHistoryPoint(date=date(2024, 1, 5), close=1.0),
+            ],
+        )
 
         result = loader.load("acct", date(2024, 1, 2), date(2024, 1, 5), TODAY, attribute_label="x")
 
-        assert result.daily_returns["daily_return"].iloc[2] == 0.0
-        assert result.daily_returns["daily_return"].iloc[3] == 0.0
+        rebuilt_dates = set(result.daily_returns["date"])
+        assert date(2024, 1, 4) in rebuilt_dates
+        assert date(2024, 1, 5) in rebuilt_dates
+        meta = ladder_repo.read_meta("acct")
+        assert meta.to_date >= date(2024, 1, 5)
+        assert meta.rebuilt_at is not None
 
     def test_defaults_start_and_end_like_the_date_resolver(
         self, ladder_repo: LadderRepository, loader: DailyReturnSeriesLoader

@@ -8,10 +8,17 @@ import pytest
 
 from app.exceptions import MissingRequiredSourceError
 from app.repositories.capital_repository import CapitalMeta, CapitalRepository
+from app.repositories.identifier_mapping_repository import IdentifierMappingRepository
 from app.repositories.ladder_repository import AccountMeta, LadderRepository
 from app.services.accounts_service import AccountsService
+from app.services.pricing_enrichment_service import PricingEnrichmentService
+from app.services.rebuild.capital_rebuild_service import CapitalRebuildService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
+from app.services.returns_enrichment_service import ReturnsEnrichmentService
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 from app.services.timeseries_service import TimeSeriesService
+from tests.conftest import FakeIdentifierMappingRepository, FakeMarketDataService
 
 TODAY = date(2024, 6, 14)  # Friday, well after all fixture dates below
 
@@ -51,11 +58,17 @@ def _write_ladder(repo: LadderRepository, account_name: str, rows: list[dict]) -
                 "date": r["date"],
                 "sub_account": r["sub_account"],
                 "book_cost": r.get("market_value", 0.0),
-                "quantity": 1.0,
+                # quantity == market_value so that a 014 rebuild's fresh repricing of
+                # "Cash" (fixed at 1.0) reproduces the exact same market_value, keeping
+                # pre-rebuild-feature assertions meaningful for the forward-fill tests.
+                "quantity": r["market_value"],
                 "total_income": 0.0,
                 "price": 1.0,
                 "market_value": r["market_value"],
                 "portfolio_weight": 1.0,
+                "position_return": 0.0,
+                "weighted_position_return": 0.0,
+                "provenance": "ingested",
             }
             for r in rows
         ]
@@ -93,18 +106,36 @@ def capital_repo(tmp_path: Path) -> CapitalRepository:
 
 
 @pytest.fixture()
-def service(ladder_repo: LadderRepository, capital_repo: CapitalRepository) -> TimeSeriesService:
+def service(
+    ladder_repo: LadderRepository,
+    capital_repo: CapitalRepository,
+    fake_identifier_mapping_repository: FakeIdentifierMappingRepository,
+    fake_market_data_service: FakeMarketDataService,
+) -> TimeSeriesService:
     """Return a TimeSeriesService wired to the tmp_path-backed repositories.
 
     Returns:
         TimeSeriesService ready for use in tests.
     """
     accounts_service = AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo)
+    mapping_repo: IdentifierMappingRepository = fake_identifier_mapping_repository  # type: ignore[assignment]
+    market_data_client = fake_market_data_service.client()
     return TimeSeriesService(
         ladder_repo=ladder_repo,
         capital_repo=capital_repo,
         accounts_service=accounts_service,
         date_resolver=TimeseriesDateResolver(),
+        ladder_rebuild_service=LadderRebuildService(
+            repository=ladder_repo,
+            mapping_repo=mapping_repo,
+            market_data_client=market_data_client,
+            enrichment_service=PricingEnrichmentService(
+                mapping_repo=mapping_repo, market_data_client=market_data_client
+            ),
+            returns_service=ReturnsEnrichmentService(),
+        ),
+        capital_rebuild_service=CapitalRebuildService(capital_repo),
+        rebuild_lock_registry=RebuildLockRegistry(),
     )
 
 
@@ -175,7 +206,13 @@ class TestPnlEqualsIncomePlusMarketValueMinusBookCost:
 
 
 class TestForwardFillsPastCapitalLedgersOwnLatestDate:
-    """The capital-derived attributes forward-fill past the capital ledger's own latest date."""
+    """A request past the capital ledger's own latest date triggers a rebuild (014).
+
+    The capital rebuild has no pricing dependency (research.md R3), so the carried-forward
+    value is identical to the pre-014 flat-fill result -- this test's assertion is
+    unchanged, but it now exercises the rebuild-and-persist path, not an in-memory-only
+    flat-fill.
+    """
 
     def test_forward_fills_past_capital_ledgers_own_latest_date(
         self, capital_repo: CapitalRepository, service: TimeSeriesService
@@ -196,12 +233,20 @@ class TestForwardFillsPastCapitalLedgersOwnLatestDate:
 
 
 class TestForwardFillsPastLaddersOwnLatestDate:
-    """market_value forward-fills past the position ladder's own latest date."""
+    """A request past the position ladder's own latest date triggers a rebuild (014).
+
+    This is exactly the defect this feature fixes: a stale request now re-prices the
+    "Cash" sub-account (fixed at 1.0) for every new business day via LadderRebuildService
+    and persists the result, rather than silently repeating the last stored value forever.
+    quantity is set equal to market_value in the fixture so the freshly repriced result
+    (price 1.0 * quantity) still equals the original figure, keeping this assertion a
+    meaningful regression check rather than a coincidence.
+    """
 
     def test_forward_fills_past_ladders_own_latest_date(
         self, ladder_repo: LadderRepository, service: TimeSeriesService
     ) -> None:
-        """Requesting an end date beyond the ladder's to_date carries the last summed value."""
+        """Requesting an end date beyond the ladder's to_date is served by a fresh rebuild."""
         _write_ladder(
             ladder_repo,
             "ladder-only",

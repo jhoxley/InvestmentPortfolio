@@ -23,13 +23,20 @@ class LadderExpander:
 
     _VALUE_COLUMNS: ClassVar[list[str]] = ["book_cost", "quantity", "total_income"]
 
-    def expand(self, df: pd.DataFrame, today: date) -> pd.DataFrame:
+    def expand(self, df: pd.DataFrame, today: date, end_date: date | None = None) -> pd.DataFrame:
         """Expand a sparse ledger DataFrame into a dense daily position ladder.
 
         Args:
             df: Input ledger with columns [date, sub_account, book_cost, quantity, total_income].
                 The date column must be parseable by pd.to_datetime.
-            today: Reference date. The expansion ends at today minus 2 business days.
+            today: Reference date. Used to derive the default `end_date` (today minus 2
+                business days) when `end_date` is not supplied.
+            end_date: Explicit last date of the expansion range (inclusive). Defaults to
+                `today` minus 2 business days — the ingestion convention — when omitted,
+                so existing callers are unaffected. A caller rebuilding a stale ladder on
+                demand supplies its own target end date (capped at T-1 relative to the
+                request's own `today`, not ingestion's T-2) instead of relying on this
+                default.
 
         Returns:
             Dense DataFrame with columns [date, sub_account, book_cost, quantity, total_income]
@@ -39,8 +46,9 @@ class LadderExpander:
         df["date"] = pd.to_datetime(df["date"]).dt.date
 
         min_date = df["date"].min()
-        end_ts = pd.bdate_range(end=today, periods=3)[-3]
-        end_date = end_ts.date()
+        if end_date is None:
+            end_ts = pd.bdate_range(end=today, periods=3)[-3]
+            end_date = end_ts.date()
 
         expanded_parts: list[pd.DataFrame] = []
 

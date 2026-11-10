@@ -20,7 +20,12 @@ from app.repositories.ladder_repository import AccountMeta, LadderRepository
 from app.services.accounts_service import AccountsService
 from app.services.position_timeseries_service import PositionTimeSeriesService
 from app.services.positions_service import PositionsService
+from app.services.pricing_enrichment_service import PricingEnrichmentService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
+from app.services.returns_enrichment_service import ReturnsEnrichmentService
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
+from tests.conftest import FakeIdentifierMappingRepository, FakeMarketDataService
 
 TODAY = date(2024, 6, 14)  # Friday, well after all fixture dates below
 
@@ -112,7 +117,10 @@ def capital_repo(tmp_path: Path) -> CapitalRepository:
 
 @pytest.fixture()
 def service(
-    ladder_repo: LadderRepository, capital_repo: CapitalRepository
+    ladder_repo: LadderRepository,
+    capital_repo: CapitalRepository,
+    fake_identifier_mapping_repository: FakeIdentifierMappingRepository,
+    fake_market_data_service: FakeMarketDataService,
 ) -> PositionTimeSeriesService:
     """Return a PositionTimeSeriesService wired to the tmp_path-backed repositories.
 
@@ -120,11 +128,23 @@ def service(
         PositionTimeSeriesService ready for use in tests.
     """
     accounts_service = AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo)
+    mapping_repo = fake_identifier_mapping_repository
+    market_data_client = fake_market_data_service.client()
     return PositionTimeSeriesService(
         ladder_repo=ladder_repo,
         accounts_service=accounts_service,
         positions_service=PositionsService(),
         date_resolver=TimeseriesDateResolver(),
+        ladder_rebuild_service=LadderRebuildService(
+            repository=ladder_repo,
+            mapping_repo=mapping_repo,
+            market_data_client=market_data_client,
+            enrichment_service=PricingEnrichmentService(
+                mapping_repo=mapping_repo, market_data_client=market_data_client
+            ),
+            returns_service=ReturnsEnrichmentService(),
+        ),
+        rebuild_lock_registry=RebuildLockRegistry(),
     )
 
 
@@ -302,16 +322,30 @@ class TestPnlEqualsIncomePlusMarketValueMinusBookCostPerPosition:
 
 
 class TestStillHeldPositionForwardFilledThroughResolvedEnd:
-    """A position whose last row equals the ladder's own to_date is forward-filled."""
+    """A position whose last row equals the ladder's own to_date is forward-filled.
+
+    The request's resolved_end (2024-01-10) is later than the stored to_date
+    (2024-01-08), so this now triggers a 014 rebuild (through TODAY, since TODAY is far
+    in the future relative to this fixture's dates). quantity is set so that the fake
+    market-data service's default 100.0 GBP close reproduces the same 5000.0 figure,
+    keeping this a meaningful "still forward-filled correctly" check post-rebuild.
+    """
 
     def test_still_held_position_forward_filled_through_resolved_end(
         self, ladder_repo: LadderRepository, service: PositionTimeSeriesService
     ) -> None:
-        """Entries continue through resolved_end carrying the last known value."""
+        """Entries continue through resolved_end reflecting the rebuilt value."""
         _write_ladder(
             ladder_repo,
             "acct",
-            [{"date": date(2024, 1, 8), "sub_account": "Apple Inc", "market_value": 5000.0}],
+            [
+                {
+                    "date": date(2024, 1, 8),
+                    "sub_account": "Apple Inc",
+                    "market_value": 5000.0,
+                    "quantity": 50.0,
+                }
+            ],
             to_date=date(2024, 1, 8),
         )
 

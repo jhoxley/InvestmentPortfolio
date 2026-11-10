@@ -432,6 +432,31 @@ class ObservedHistoryUnsupportedError(Exception):
         super().__init__(self.message)
 
 
+class RebuildUnavailableError(Exception):
+    """Raised internally when a ladder/capital rebuild cannot source any pricing at all.
+
+    Caught by the rebuild-triggering read service (014) to fall back silently to the
+    pre-rebuild flat-filled read for that one request (FR-013); never surfaces as an
+    HTTP error -- a caller that lets this propagate unhandled has a wiring bug.
+    """
+
+    def __init__(self, account_name: str, resource: str, message: str | None = None) -> None:
+        """Initialise with the account and resource whose rebuild could not proceed.
+
+        Args:
+            account_name: The account being rebuilt.
+            resource: Which resource's rebuild failed ("ladder" or "capital").
+            message: Optional override message.
+        """
+        self.account_name = account_name
+        self.resource = resource
+        self.message = message or (
+            f"Unable to source any market data to rebuild the {resource} for account "
+            f"'{account_name}'. Falling back to the prior persisted data for this request."
+        )
+        super().__init__(self.message)
+
+
 class InstrumentNotFoundError(Exception):
     """Raised when market-data-service has no price history at all for an identifier."""
 

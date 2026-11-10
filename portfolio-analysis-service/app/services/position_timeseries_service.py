@@ -21,6 +21,10 @@ from app.services.accounts_service import AccountsService
 from app.services.business_day_expansion import expand_business_days
 from app.services.periodicity_aggregation import aggregate_last_observation
 from app.services.positions_service import PositionsService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
+from app.services.rebuild.rebuild_orchestrator import ensure_fresh
+from app.services.rebuild.staleness_gate import StalenessGate
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 
 logger = structlog.get_logger(__name__)
@@ -37,6 +41,8 @@ class PositionTimeSeriesService:
         accounts_service: AccountsService,
         positions_service: PositionsService,
         date_resolver: TimeseriesDateResolver,
+        ladder_rebuild_service: LadderRebuildService,
+        rebuild_lock_registry: RebuildLockRegistry,
     ) -> None:
         """Initialise with the ladder repository and the shared account/date/position services.
 
@@ -45,11 +51,16 @@ class PositionTimeSeriesService:
             accounts_service: Shared account existence/date-range lookup service.
             positions_service: Position enumeration and effective-set resolution service.
             date_resolver: Shared date defaulting/adjustment service.
+            ladder_rebuild_service: Extends a stale position ladder on demand (014).
+            rebuild_lock_registry: Serialises concurrent rebuilds per (account, resource).
         """
         self._ladder_repo = ladder_repo
         self._accounts_service = accounts_service
         self._positions_service = positions_service
         self._date_resolver = date_resolver
+        self._ladder_rebuild_service = ladder_rebuild_service
+        self._rebuild_lock_registry = rebuild_lock_registry
+        self._staleness_gate = StalenessGate()
 
     def get_series(
         self,
@@ -104,17 +115,29 @@ class PositionTimeSeriesService:
         if summary.position_ladder is None:
             raise PositionLadderNotIngestedError(account_name=account_name)
 
-        ladder_df = self._ladder_repo.read_full_df(account_name)
-        ladder_df = ladder_df.assign(date=pd.to_datetime(ladder_df["date"]).dt.date)
-        effective_positions = self._positions_service.resolve_effective_positions(
-            ladder_df, positions
-        )
-
         resolved_start, resolved_end = self._date_resolver.resolve(
             raw_start=start,
             raw_end=end,
             today=today,
             required_source_earliest_dates=[summary.position_ladder.from_date],
+        )
+
+        ensure_fresh(
+            account_name=account_name,
+            resource="ladder",
+            last_known_date=summary.position_ladder.to_date,
+            resolved_end=resolved_end,
+            today=today,
+            lock_registry=self._rebuild_lock_registry,
+            staleness_gate=self._staleness_gate,
+            rebuilder=self._ladder_rebuild_service,
+            read_last_known_date=lambda: self._ladder_repo.read_meta(account_name).to_date,
+        )
+
+        ladder_df = self._ladder_repo.read_full_df(account_name)
+        ladder_df = ladder_df.assign(date=pd.to_datetime(ladder_df["date"]).dt.date)
+        effective_positions = self._positions_service.resolve_effective_positions(
+            ladder_df, positions
         )
 
         if resolved_start < summary.position_ladder.from_date:
@@ -161,8 +184,14 @@ class PositionTimeSeriesService:
                         date=row["date"],
                         position=position,
                         **{
-                            attr: float(
-                                row[position_attributes.COLUMN_FOR_ATTRIBUTE.get(attr, attr)]
+                            attr: (
+                                None
+                                if pd.isna(
+                                    row[position_attributes.COLUMN_FOR_ATTRIBUTE.get(attr, attr)]
+                                )
+                                else float(
+                                    row[position_attributes.COLUMN_FOR_ATTRIBUTE.get(attr, attr)]
+                                )
                             )
                             for attr in attributes
                         },

@@ -440,11 +440,17 @@ class TestPositionTimeseriesSC001MultiPositionPerformance:
             files=_multipart(_generate_multi_year_ladder_many_positions(years=5, positions=50)),
         )
         assert ladder_resp.status_code == 201, f"Ladder setup failed: {ladder_resp.text}"
+        ingested_to_date = ladder_resp.json()["to_date"]
 
+        # 014: an explicit `end` matching the ladder's own to_date keeps this test
+        # measuring pure read performance (the documented SC-001 concern) rather than
+        # also paying for the always-present 1-business-day rebuild between ingestion's
+        # T-2 convention and the read endpoint's T-1 default end (itself now correctly
+        # exercised by tests/unit/test_timeseries_service_rebuild_trigger.py).
         start = time.perf_counter()
         resp = app_client.get(
             f"/v1/accounts/{account_name}/position",
-            params=[("attribute", "market_value")],
+            params=[("attribute", "market_value"), ("end", ingested_to_date)],
         )
         elapsed = time.perf_counter() - start
         assert resp.status_code == 200, f"Position request failed: {resp.text}"

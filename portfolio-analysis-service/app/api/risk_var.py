@@ -15,7 +15,9 @@ from app.api.dependencies import (
     get_run_scheduler,
     get_var_repository,
 )
-from app.api.ladder import _get_identifier_mapping_repository
+from app.api.dependencies import (
+    get_identifier_mapping_repository as _get_identifier_mapping_repository,
+)
 from app.clients.market_data_client import ObservedPriceClient
 from app.config import Settings, VarSettings, get_settings
 from app.exceptions import InvalidVarQueryError, InvalidVarRunRequestError, VarRunNotFoundError

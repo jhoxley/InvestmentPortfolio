@@ -85,6 +85,10 @@ class IngestionService:
                 self._repository.write(account_name, enriched_df, refreshed_meta)
                 log.info("ingest_refresh_complete", row_count=refreshed_meta.row_count)
                 return self._summary_from_meta(refreshed_meta, status="refreshed")
+
+            superseded = self._try_supersede_projected_span(account_name, file_bytes, today)
+            if superseded is not None:
+                return superseded
             log.warning("ingest_conflict", reason="checksum_mismatch")
             raise MergeNotSupportedError(account_name=account_name)
 
@@ -99,6 +103,7 @@ class IngestionService:
         self._validator.validate(df, account_name, today)
 
         ladder_df = self._expander.expand(df, today)
+        ladder_df = ladder_df.assign(provenance="ingested")
         enriched_df = self._enrichment_service.enrich(ladder_df)
         enriched_df = self._returns_service.enrich(enriched_df)
 
@@ -118,6 +123,106 @@ class IngestionService:
         )
         self._repository.write(account_name, enriched_df, meta)
         log.info("ingest_complete", row_count=row_count)
+
+        return self._summary_from_meta(meta, status="created")
+
+    def _try_supersede_projected_span(
+        self, account_name: str, file_bytes: bytes, today: date
+    ) -> IngestionSummary | None:
+        """Re-ingest a checksum-mismatched ledger if it overlaps a previously rebuilt span.
+
+        Implements research.md R5: a new ledger whose own date range overlaps any
+        `provenance="projected"` row in the currently stored ladder must correctly
+        supersede that projection (FR-008), rather than being unconditionally rejected
+        as an unsupported merge. A new ledger with no such overlap falls through
+        unchanged to today's existing `MergeNotSupportedError` behaviour (FR-007).
+
+        Args:
+            account_name: The account being re-ingested.
+            file_bytes: Raw bytes of the newly uploaded XLSX file.
+            today: Reference date for expansion (T-2 boundary calculation).
+            log: Bound logger from the caller.
+
+        Returns:
+            An IngestionSummary with status 'created' if supersession applied, or None
+            if the new ledger's range does not overlap any projected span (caller then
+            raises MergeNotSupportedError as before).
+
+        Raises:
+            SchemaValidationError: If the uploaded file fails schema validation.
+            EmptyDateRangeError: If the resulting expansion range has no business days.
+            IdentifierMappingError, PriceCoverageError, MarketDataServiceError: As for a
+                normal new-account ingestion.
+        """
+        log = logger.bind(account_name=account_name)
+        existing_full_df = self._repository.read_full_df(account_name)
+        existing_full_df = existing_full_df.assign(
+            date=pd.to_datetime(existing_full_df["date"]).dt.date
+        )
+        if "provenance" not in existing_full_df.columns:
+            return None  # nothing was ever projected; no supersession is possible
+
+        try:
+            new_df = pd.read_excel(io.BytesIO(file_bytes), engine="openpyxl")
+        except Exception as exc:
+            raise SchemaValidationError(
+                fields=["file"],
+                message=f"File could not be parsed as XLSX: {exc}",
+            ) from exc
+        new_df = new_df.copy()
+        new_df["date"] = pd.to_datetime(new_df["date"]).dt.date
+        new_min, new_max = new_df["date"].min(), new_df["date"].max()
+
+        projected_mask = existing_full_df["provenance"] == "projected"
+        overlap = existing_full_df[
+            projected_mask
+            & (existing_full_df["date"] >= new_min)
+            & (existing_full_df["date"] <= new_max)
+        ]
+        if overlap.empty:
+            return None
+
+        log.info(
+            "ingest_supersedes_projected_span",
+            overlap_row_count=len(overlap),
+            new_from_date=str(new_min),
+            new_to_date=str(new_max),
+        )
+
+        self._validator.validate(new_df, account_name, today)
+
+        existing_ladder_df = self._repository.read_ladder_df(account_name)
+        existing_ladder_df = existing_ladder_df.assign(
+            date=pd.to_datetime(existing_ladder_df["date"]).dt.date
+        )
+        seed = existing_ladder_df[existing_ladder_df["date"] < new_min][
+            ["date", "sub_account", "book_cost", "quantity", "total_income"]
+        ]
+        combined_sparse = pd.concat([seed, new_df], ignore_index=True)
+
+        expanded_df = self._expander.expand(combined_sparse, today)
+        expanded_df = expanded_df.assign(
+            provenance=expanded_df["date"].apply(
+                lambda d, _max=new_max: "ingested" if d <= _max else "projected"
+            )
+        )
+        enriched_df = self._enrichment_service.enrich(expanded_df)
+        enriched_df = self._returns_service.enrich(enriched_df)
+
+        sub_accounts: list[str] = sorted(expanded_df["sub_account"].unique().tolist())
+        new_checksum = hashlib.sha256(file_bytes).hexdigest()
+        meta = AccountMeta(
+            account_name=account_name,
+            checksum=new_checksum,
+            row_count=len(expanded_df),
+            from_date=expanded_df["date"].min(),
+            to_date=expanded_df["date"].max(),
+            sub_accounts=sub_accounts,
+            ingested_at=datetime.now(UTC),
+            rebuilt_at=None,
+        )
+        self._repository.write(account_name, enriched_df, meta)
+        log.info("ingest_supersedes_projected_span_complete", row_count=len(expanded_df))
 
         return self._summary_from_meta(meta, status="created")
 
