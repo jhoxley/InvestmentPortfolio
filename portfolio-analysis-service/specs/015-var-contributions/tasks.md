@@ -50,21 +50,21 @@ spec.md's Gherkin blocks and go in `tests/features/var_contributions.feature` wi
 
 **Purpose**: Model/schema additions and empty test scaffolding that later phases fill in.
 
-- [ ] T001 Create empty test modules `tests/unit/test_var_contributions_engine.py`,
+- [X] T001 Create empty test modules `tests/unit/test_var_contributions_engine.py`,
   `tests/unit/test_var_contributions_service.py`, `tests/unit/test_var_repository_scenario_returns.py`,
   `tests/unit/test_risk_var_contributions_openapi.py`, `tests/features/var_contributions.feature`
   (Feature header only) and `tests/steps/var_contributions_steps.py` (binds the feature file via
   `scenarios(...)`, as the other step modules do). Create the module skeletons
   `app/services/var/contributions.py` and `app/services/var/var_contributions_service.py`
   (module docstring only, per research.md §1/§6/§7 and data-model.md).
-- [ ] T002 [P] Add `theme: str | None = Field(default=None, ...)` to `IdentifierMappingEntry` in
+- [X] T002 [P] Add `theme: str | None = Field(default=None, ...)` to `IdentifierMappingEntry` in
   `app/models/market_data.py` (data-model.md) — a genuinely new field added by this feature (it does
   not exist anywhere in this service today, including under any other name). Add a unit test (new
   `tests/unit/test_identifier_mapping_entry_theme.py`, or extend `test_var_settings.py`) proving an
   entry with no `theme` key still validates with `theme is None`, and that an entry with
   `"theme": "Global Equity"` round-trips. Extend `FakeIdentifierMappingRepository.set_entry(...)` in
   `tests/conftest.py` to accept an optional `theme` keyword argument.
-- [ ] T003 [P] Add `ContributionGroupEntry` and `VarContributionsResponse` Pydantic models to
+- [X] T003 [P] Add `ContributionGroupEntry` and `VarContributionsResponse` Pydantic models to
   `app/models/var_series.py` per data-model.md's "API response model" section (same
   `ConfigDict(populate_by_name=True)` / `_links` alias pattern as `VarSeriesResponse`).
 
@@ -81,7 +81,7 @@ skeleton every user story's tests exercise.
 
 ### Tests (write first, must fail)
 
-- [ ] T004 [P] Write `tests/unit/test_var_repository_scenario_returns.py` against a `tmp_path`.
+- [X] T004 [P] Write `tests/unit/test_var_repository_scenario_returns.py` against a `tmp_path`.
   Cover: (a) `read_scenario_returns` returns an empty/`None`-equivalent snapshot when nothing has
   been committed; (b) `commit_scenario_returns(account, panel)` persists `scenario_returns.csv`,
   `scenario_observed.csv` and `scenario_returns_meta.json`, round-tripping through
@@ -92,7 +92,7 @@ skeleton every user story's tests exercise.
   back as unknown (not zero); (d) a commit failure partway through (monkeypatch the second file's
   write to raise) leaves all three files exactly as they were before the call, matching
   `VarRepository.commit`'s existing temp-file/`os.replace` all-or-none behaviour.
-- [ ] T005 [P] Add a regression test to `tests/unit/test_var_engine.py`: for a hand-built `Exposure`
+- [X] T005 [P] Add a regression test to `tests/unit/test_var_engine.py`: for a hand-built `Exposure`
   and `ReturnPanel` (reuse an existing test's fixtures), `build_scenario_matrix(...)` followed by
   `scenario_pnl(matrix.effective_returns[matrix.included], matrix.values)` equals the
   `scenario_pnls` that `estimate()` returns for the identical inputs — proving the extraction changes
@@ -104,28 +104,28 @@ skeleton every user story's tests exercise.
 
 ### Implementation
 
-- [ ] T006 Implement `VarRepository.commit_scenario_returns(account_name, panel: ReturnPanel)` and
+- [X] T006 Implement `VarRepository.commit_scenario_returns(account_name, panel: ReturnPanel)` and
   `read_scenario_returns(account_name) -> ReturnPanel | None` in `app/repositories/var_repository.py`
   (research.md §2, data-model.md "ScenarioReturnsSnapshot"): two wide CSVs (`scenario_returns.csv`,
   `scenario_observed.csv`, one column per identifier) plus `scenario_returns_meta.json`
   (`first_observed_date` per identifier, `updated_at`), written via the same temp-file + `os.replace`
   all-or-none pattern `commit()` already uses, with new dates/identifiers outer-joined onto whatever
   is already stored (latest commit wins on overlap). Makes T004 pass.
-- [ ] T007 Refactor `app/services/var/engine.py`: add the `ScenarioMatrix` dataclass (data-model.md),
+- [X] T007 Refactor `app/services/var/engine.py`: add the `ScenarioMatrix` dataclass (data-model.md),
   now including a `provenance: np.ndarray` field (window_len x m, the existing `_ACTUAL`/`_PROXY`/
   `_RESCALED` codes), and extract `build_scenario_matrix(exposure, panel, as_of_row, lookback_days,
   settings, proxy_configs) -> ScenarioMatrix` from the matrix-building block currently inline in
   `estimate()` (research.md §1). `estimate()` calls this builder, then proceeds exactly as today.
   Run the full existing `tests/unit/test_var_engine.py` suite (pre-existing tests, unmodified) plus
   T005 — all must pass with zero behavioural change.
-- [ ] T008 Extend `VarRunService._execute_body` in `app/services/var/var_run_service.py` to call
+- [X] T008 Extend `VarRunService._execute_body` in `app/services/var/var_run_service.py` to call
   `self._var_repo.commit_scenario_returns(account_name, panel)` as part of the same successful run
   that commits estimates/outcomes/instruments, logging a `var_contributions_snapshot_persisted`
   structured event (identifier_count, grid_days). Add/extend a test in
   `tests/unit/test_var_run_service.py` asserting that two successive runs over different,
   non-identical date ranges leave the persisted snapshot covering the **union** of both runs' grids
   (not just the second run's).
-- [ ] T009 Add `GET /v1/accounts/{account_name}/risk/var/contributions` to `app/api/risk_var.py`,
+- [X] T009 Add `GET /v1/accounts/{account_name}/risk/var/contributions` to `app/api/risk_var.py`,
   backed by a new `_get_var_contributions_service` dependency provider and a currently-minimal
   `VarContributionsService.get_contributions(...)` in `app/services/var/var_contributions_service.py`
   that only resolves the account/date/lookback and returns the "not computed" empty
@@ -152,7 +152,7 @@ theme and verify the component ES sums match the stored total ES within 0.5%.
 
 ### Tests for User Story 1 (write first, must fail) ⚠️
 
-- [ ] T010 [P] [US1] Write `tests/unit/test_var_contributions_engine.py` for
+- [X] T010 [P] [US1] Write `tests/unit/test_var_contributions_engine.py` for
   `app/services/var/contributions.py`, using small hand-built scenario matrices (reuse the mini
   example from `docs/proposals/value-at-risk.md` §3.4: A £60,000, B £30,000, Cash £10,000):
   - `standalone_var(group_pnl, p_bp)` equals `var_es(-group_pnl, p_bp).var` for a single column in
@@ -166,7 +166,7 @@ theme and verify the component ES sums match the stored total ES within 0.5%.
   - `marginal_var(component_es, market_value)` is `component_es / market_value`, and is `0.0` by
     definition for a group whose `component_es` is `0.0` regardless of `market_value` (the Cash
     case: market_value > 0, component_es == 0.0 → marginal == 0.0, never a division producing NaN).
-- [ ] T011 [P] [US1] Add US1 scenarios to `tests/features/var_contributions.feature` (from spec.md:
+- [X] T011 [P] [US1] Add US1 scenarios to `tests/features/var_contributions.feature` (from spec.md:
   "Contributions grouped by position for a fully computed date", "Contributions grouped by theme")
   and implement their steps in `tests/steps/var_contributions_steps.py`: seed a ladder and observed
   prices for 2–3 positions plus Cash (reusing the seeding helpers from
@@ -181,7 +181,7 @@ theme and verify the component ES sums match the stored total ES within 0.5%.
   contributions request — the fixture already records calls for the preceding run, so capture the
   count immediately after the run completes and compare it to the count after the contributions
   call (FR-007, SC-002).
-- [ ] T012 [P] [US1] Write direct (non-HTTP) unit tests in `tests/unit/test_var_contributions_service.py`
+- [X] T012 [P] [US1] Write direct (non-HTTP) unit tests in `tests/unit/test_var_contributions_service.py`
   for `VarContributionsService.get_contributions(...)`'s "computed, sufficient/degraded quality"
   path, constructing its collaborators (`LadderRepository`, `VarRepository`,
   `IdentifierMappingRepository`) against `tmp_path`/fakes directly rather than through the full API —
@@ -193,18 +193,18 @@ theme and verify the component ES sums match the stored total ES within 0.5%.
 
 ### Implementation for User Story 1
 
-- [ ] T013 [P] [US1] Implement `app/services/var/contributions.py`: `standalone_var`,
+- [X] T013 [P] [US1] Implement `app/services/var/contributions.py`: `standalone_var`,
   `incremental_var`, `tail_weights` (reusing `var_es`'s existing `Fraction`-based tail split rather
   than re-deriving it — research.md §6), `component_es`, `marginal_var`, each a small, fully
   type-annotated, docstringed pure function over numpy arrays. Makes T010 pass.
-- [ ] T014 [US1] Add a theme-resolution helper (e.g. `resolve_theme(identifier, mapping_lookup) ->
+- [X] T014 [US1] Add a theme-resolution helper (e.g. `resolve_theme(identifier, mapping_lookup) ->
   str` returning the mapped `theme` or `"Unclassified"`) alongside `app/services/var/exposures.py`,
   and a grouping helper that partitions `ScenarioMatrix` columns (including its `provenance` codes)
   by either `sub_account` (`group_by=position`) or resolved theme (`group_by=theme`, market-value-
   weighted provenance across the theme's constituent columns), always adding a synthetic `"Cash"`
   group (key `"Cash"`, `identifier=None`, `market_value=exposure.cash_value`, all four risk measures
   `0.0`, coverage 100%/0%/0%) regardless of grouping mode.
-- [ ] T015 [US1] Implement `VarContributionsService.get_contributions(...)` fully for the
+- [X] T015 [US1] Implement `VarContributionsService.get_contributions(...)` fully for the
   "computed, sufficient/degraded quality" case in
   `app/services/var/var_contributions_service.py`: look up the stored estimate row (date, lookback,
   confidence) via `VarRepository.read_estimates`; reconstruct `Exposure` for that date via
@@ -214,7 +214,7 @@ theme and verify the component ES sums match the stored total ES within 0.5%.
   group; derive each group's coverage/quality percentages from the grouped provenance (T014); and
   assemble `ContributionGroupEntry` rows into a populated `VarContributionsResponse`. Makes T012
   pass.
-- [ ] T016 [US1] Wire a `var_contributions_request` structured log event (account_name, date,
+- [X] T016 [US1] Wire a `var_contributions_request` structured log event (account_name, date,
   lookback_code, confidence_bp, group_by, group_count) into the route in `app/api/risk_var.py`,
   mirroring `var_series_request`.
 
@@ -234,7 +234,7 @@ each returns the documented shape rather than an error or invented figures.
 
 ### Tests for User Story 2 (write first, must fail) ⚠️
 
-- [ ] T017 [P] [US2] Write direct (non-HTTP) unit tests in `tests/unit/test_var_contributions_service.py`
+- [X] T017 [P] [US2] Write direct (non-HTTP) unit tests in `tests/unit/test_var_contributions_service.py`
   for `VarContributionsService.get_contributions(...)`'s two gating branches, calling the service
   directly (not through T018's full API round trip): (a) no estimate row exists for the resolved
   account/date/lookback → the "not computed" response shape; (b) a stored estimate row with
@@ -242,7 +242,7 @@ each returns the documented shape rather than an error or invented figures.
   `total_value_gbp` still populated. Neither branch should construct a `ScenarioMatrix` or call any
   `contributions.py` function — assert this directly (e.g. via a spy/mock on
   `build_scenario_matrix`).
-- [ ] T018 [P] [US2] Add US2 scenarios to `tests/features/var_contributions.feature` (from spec.md:
+- [X] T018 [P] [US2] Add US2 scenarios to `tests/features/var_contributions.feature` (from spec.md:
   "No VaR run has ever covered the requested account and lookback", "The requested date's VaR
   quality is insufficient") and implement their steps in `tests/steps/var_contributions_steps.py`:
   one scenario against an account with no run at all; one scenario seeded so a requested date/lookback
@@ -254,7 +254,7 @@ each returns the documented shape rather than an error or invented figures.
 
 ### Implementation for User Story 2
 
-- [ ] T019 [US2] In `VarContributionsService.get_contributions(...)`, branch before T015's
+- [X] T019 [US2] In `VarContributionsService.get_contributions(...)`, branch before T015's
   computation: if no estimate row exists for the resolved account/date/lookback, return the
   "not computed" `VarContributionsResponse` (as already stubbed in T009, now reachable for every
   account, not only ones with zero runs); if the stored row's `quality == "insufficient"`, return
@@ -278,7 +278,7 @@ rejected the same way it already is on the series endpoint.
 
 ### Tests for User Story 3 (write first, must fail) ⚠️
 
-- [ ] T020 [P] [US3] Add US3 scenarios to `tests/features/var_contributions.feature` (from spec.md:
+- [X] T020 [P] [US3] Add US3 scenarios to `tests/features/var_contributions.feature` (from spec.md:
   "Invalid group_by value", "Invalid lookback value reuses the existing problem type") and implement
   their steps in `tests/steps/var_contributions_steps.py`, asserting `422`,
   `type == "https://portfolio-analysis/errors/invalid-var-query"`, and the invalid field name is
@@ -289,11 +289,11 @@ rejected the same way it already is on the series endpoint.
 
 ### Implementation for User Story 3
 
-- [ ] T021 [US3] Add `_resolve_group_by(group_by: str | None) -> Literal["position", "theme"]` to
+- [X] T021 [US3] Add `_resolve_group_by(group_by: str | None) -> Literal["position", "theme"]` to
   `app/api/risk_var.py`, raising `InvalidVarQueryError(message=..., fields=["group_by"])` for any
   value other than `"position"`/`"theme"` (default `"position"`), matching the style of the existing
   `_resolve_lookback`/`_resolve_pnl_basis`.
-- [ ] T022 [US3] Add `_resolve_single_confidence(confidence: str | None, settings: VarSettings) ->
+- [X] T022 [US3] Add `_resolve_single_confidence(confidence: str | None, settings: VarSettings) ->
   int` to `app/api/risk_var.py` — distinct from the existing repeatable `_resolve_confidence_levels`,
   since this endpoint's `confidence` parameter takes exactly one value (contracts/openapi.yaml):
   defaults to the first entry of `settings.confidence_levels_bp` when omitted (spec.md FR-001 — there
@@ -311,14 +311,14 @@ the computation or store-lookup code paths.
 
 **Purpose**: Final consistency and documentation pass.
 
-- [ ] T023 [P] Run `ruff check app/ tests/`, `ruff format`, and `mypy --strict app/` across every file
+- [X] T023 [P] Run `ruff check app/ tests/`, `ruff format`, and `mypy --strict app/` across every file
   touched by this feature; fix any findings.
-- [ ] T024 [P] Run `docs/proposals/value-at-risk.md`'s §11-E delivery-plan row update: mark the PAS
+- [X] T024 [P] Run `docs/proposals/value-at-risk.md`'s §11-E delivery-plan row update: mark the PAS
   contributions feature's status, following the same "Status: implemented" note style §11-B already
   carries for feature 012, recording the actual feature number (015) and branch
   (`015-var-contributions`), and listing any deviations found during implementation (e.g. the `theme`
   field addition and the `invalid-var-query` reuse from research.md §3/§4).
-- [ ] T025 Run `specs/015-var-contributions/quickstart.md` steps 1–7 end to end against a real local
+- [X] T025 Run `specs/015-var-contributions/quickstart.md` steps 1–7 end to end against a real local
   run; fix any discrepancy between the documented behaviour and the implementation before calling the
   feature done.
 

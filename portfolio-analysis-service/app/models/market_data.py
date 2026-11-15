@@ -24,6 +24,11 @@ class IdentifierMappingEntry(BaseModel):
     var_proxy_scale: float = Field(
         default=1.0, gt=0, description="Static multiplier applied to the proxy's returns"
     )
+    theme: str | None = Field(
+        default=None,
+        description="Free-text grouping label for risk/contribution reporting "
+        "(e.g. 'Global Equity'); unset entries group under 'Unclassified'",
+    )
 
 
 class PriceHistoryPoint(BaseModel):

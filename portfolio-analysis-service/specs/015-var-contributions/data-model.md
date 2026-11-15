@@ -66,7 +66,12 @@ Produced by the new `build_scenario_matrix(...)` builder extracted from `estimat
 the account-wide figures: for `group_by=position`, from that one column's own per-scenario-day codes
 (market-value-weighted across the group's constituent columns for `group_by=theme`) restricted to
 `included` rows — not from `instruments.csv`'s single stored "worst treatment" label, which is too
-coarse (one categorical value per identifier per look-back, not a percentage).
+coarse (one categorical value per identifier per look-back, not a percentage). Note this mirrors
+the existing account-wide convention exactly: a *single* position's own worst-treatment is itself
+binary (0% or 100%, the same as `EstimateResult.position_treatments`), so a genuinely mixed
+percentage only appears for a group spanning several positions with different treatments — in
+practice, this means `group_by=position` percentages are always 0/100, and only `group_by=theme`
+groups (or Cash, always 100/0/0) can show a blended percentage.
 
 ### ContributionGroupEntry (new, in `app/services/var/contributions.py` and the API response model)
 

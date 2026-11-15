@@ -232,34 +232,59 @@ def _position_returns_and_provenance(
     return returns, source_observed, provenance
 
 
-def estimate(
+@dataclass(frozen=True)
+class ScenarioMatrix:
+    """The per-scenario-row, per-position matrix underlying one (date, look-back) estimate.
+
+    Extracted from `estimate()`'s own matrix-building so a later decomposition (015,
+    `app.services.var.contributions`) can be computed from the same matrix `estimate()`
+    uses to produce its aggregate VaR/ES, instead of re-deriving the proxy/rescale/
+    sparse logic a second time.
+
+    Attributes:
+        identifiers: Column order, matching `values`/`effective_returns`/`provenance`.
+        values: Length-m GBP market values, one per held position.
+        effective_returns: window_len x m array, after proxy/rescale substitution.
+        included: Length-window_len bool mask -- the holiday/low-information scenario
+            exclusion (FR-003 of feature 012).
+        provenance: window_len x m int array of `_ACTUAL`/`_PROXY`/`_RESCALED` codes,
+            one per cell -- the same codes `estimate()` already computes, carried
+            through so per-group coverage percentages can be derived without a second
+            pass over the proxy/rescale logic (015 data-model.md).
+    """
+
+    identifiers: tuple[str, ...]
+    values: np.ndarray
+    effective_returns: np.ndarray
+    included: np.ndarray
+    provenance: np.ndarray
+
+
+def build_scenario_matrix(
     exposure: Exposure,
     panel: ReturnPanel,
     as_of_row: int,
     lookback_days: int,
-    confidences_bp: tuple[int, ...],
     settings: VarSettings,
     proxy_configs: dict[str, ProxyConfig] | None = None,
-) -> EstimateResult:
-    """Compute one historical-simulation VaR/ES estimate for one date and look-back.
+) -> ScenarioMatrix:
+    """Build the per-scenario-row, per-position effective-returns matrix for one estimate.
 
     Args:
         exposure: The positions held (and their GBP market values) at the as-of date.
         panel: The shared return grid; `as_of_row` indexes into `panel.grid`.
         as_of_row: Row index of the as-of date within `panel.grid`.
         lookback_days: The look-back window length in business days.
-        confidences_bp: Confidence levels to compute, in basis points of probability.
-        settings: VaR configuration (exclusion/sparsity/outlier/quality thresholds).
+        settings: VaR configuration (exclusion/sparsity thresholds).
         proxy_configs: Held identifier to its configured VaR proxy, if any (FR-009/010).
 
     Returns:
-        The populated EstimateResult.
+        The populated ScenarioMatrix.
     """
     proxy_configs = proxy_configs or {}
     start, end = _window_slice(panel, as_of_row, lookback_days)
     window_len = end - start
     window_grid = panel.grid[start:end]
-    excluded_scenarios = lookback_days - window_len
 
     values = np.array([p.market_value for p in exposure.positions], dtype=float)
     n_positions = len(exposure.positions)
@@ -300,7 +325,49 @@ def estimate(
         else:
             effective_returns[row, missing] = 0.0
 
-    included_returns = effective_returns[included]
+    return ScenarioMatrix(
+        identifiers=tuple(p.identifier for p in exposure.positions),
+        values=values,
+        effective_returns=effective_returns,
+        included=included,
+        provenance=provenance,
+    )
+
+
+def estimate(
+    exposure: Exposure,
+    panel: ReturnPanel,
+    as_of_row: int,
+    lookback_days: int,
+    confidences_bp: tuple[int, ...],
+    settings: VarSettings,
+    proxy_configs: dict[str, ProxyConfig] | None = None,
+) -> EstimateResult:
+    """Compute one historical-simulation VaR/ES estimate for one date and look-back.
+
+    Args:
+        exposure: The positions held (and their GBP market values) at the as-of date.
+        panel: The shared return grid; `as_of_row` indexes into `panel.grid`.
+        as_of_row: Row index of the as-of date within `panel.grid`.
+        lookback_days: The look-back window length in business days.
+        confidences_bp: Confidence levels to compute, in basis points of probability.
+        settings: VaR configuration (exclusion/sparsity/outlier/quality thresholds).
+        proxy_configs: Held identifier to its configured VaR proxy, if any (FR-009/010).
+
+    Returns:
+        The populated EstimateResult.
+    """
+    matrix = build_scenario_matrix(
+        exposure, panel, as_of_row, lookback_days, settings, proxy_configs
+    )
+    values = matrix.values
+    included = matrix.included
+    provenance = matrix.provenance
+    n_positions = len(exposure.positions)
+    window_len = matrix.effective_returns.shape[0]
+    excluded_scenarios = lookback_days - window_len
+
+    included_returns = matrix.effective_returns[included]
     pnls = (
         scenario_pnl(included_returns, values) if n_positions > 0 else np.zeros(int(included.sum()))
     )

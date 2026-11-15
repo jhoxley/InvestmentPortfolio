@@ -1,7 +1,7 @@
 """API router for VaR calculation runs and status (feature 012)."""
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 import structlog.contextvars
 from fastapi import APIRouter, Body, Depends, Query
@@ -22,7 +22,12 @@ from app.clients.market_data_client import ObservedPriceClient
 from app.config import Settings, VarSettings, get_settings
 from app.exceptions import InvalidVarQueryError, InvalidVarRunRequestError, VarRunNotFoundError
 from app.models.var import VarRun, VarRunList, VarRunRequest, VarStatus
-from app.models.var_series import VarBacktestResponse, VarMethodsResponse, VarSeriesResponse
+from app.models.var_series import (
+    VarBacktestResponse,
+    VarContributionsResponse,
+    VarMethodsResponse,
+    VarSeriesResponse,
+)
 from app.repositories.capital_repository import CapitalRepository
 from app.repositories.identifier_mapping_repository import IdentifierMappingRepository
 from app.repositories.ladder_repository import LadderRepository
@@ -30,6 +35,7 @@ from app.repositories.var_repository import VarRepository
 from app.services.accounts_service import AccountsService
 from app.services.var.run_scheduler import RunScheduler
 from app.services.var.var_backtest_service import VarBacktestService
+from app.services.var.var_contributions_service import VarContributionsService
 from app.services.var.var_methods_service import build_methods_response
 from app.services.var.var_run_service import VarRunService
 from app.services.var.var_series_service import VarSeriesService
@@ -143,6 +149,34 @@ def _get_var_backtest_service(
     )
 
 
+def _get_var_contributions_service(
+    ladder_repo: LadderRepository = Depends(get_ladder_repository),
+    capital_repo: CapitalRepository = Depends(get_capital_repository),
+    mapping_repo: IdentifierMappingRepository = Depends(_get_identifier_mapping_repository),
+    var_repo: VarRepository = Depends(get_var_repository),
+    settings: Settings = Depends(get_settings),
+) -> VarContributionsService:
+    """Dependency that returns a wired VarContributionsService (015-var-contributions).
+
+    Args:
+        ladder_repo: LadderRepository instance (injected by FastAPI).
+        capital_repo: CapitalRepository instance (injected by FastAPI).
+        mapping_repo: IdentifierMappingRepository instance (injected by FastAPI).
+        var_repo: VarRepository instance (injected by FastAPI).
+        settings: Application settings (injected by FastAPI).
+
+    Returns:
+        VarContributionsService instance.
+    """
+    return VarContributionsService(
+        ladder_repo=ladder_repo,
+        accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
+        var_repo=var_repo,
+        identifier_mapping_repo=mapping_repo,
+        settings=settings.var,
+    )
+
+
 def _resolve_lookback(lookback: str | None, settings: VarSettings) -> str:
     """Resolve and validate the `lookback` query parameter (FR-003, FR-009, FR-021).
 
@@ -247,6 +281,63 @@ def _resolve_min_quality(min_quality: str | None) -> str:
             fields=["min_quality"],
         )
     return value
+
+
+def _resolve_group_by(group_by: str | None) -> Literal["position", "theme"]:
+    """Resolve and validate the `group_by` query parameter (015, FR-001/FR-013).
+
+    Args:
+        group_by: The caller-supplied value, or None for the "position" default.
+
+    Returns:
+        "position" or "theme".
+
+    Raises:
+        InvalidVarQueryError: group_by is neither "position" nor "theme".
+    """
+    value = group_by or "position"
+    if value not in ("position", "theme"):
+        raise InvalidVarQueryError(
+            message=f"group_by '{value}' is not one of the supported values: position, theme",
+            fields=["group_by"],
+        )
+    return value  # type: ignore[return-value]
+
+
+def _resolve_single_confidence(confidence: str | None, settings: VarSettings) -> int:
+    """Resolve and validate the single-value `confidence` query parameter (015, FR-001/FR-012).
+
+    Unlike `_resolve_confidence_levels` (series/backtest, repeatable), this endpoint's
+    `confidence` takes exactly one value. There is no separate "headline confidence"
+    setting (only `headline_lookback`), so the default is the first configured level.
+
+    Args:
+        confidence: Caller-supplied confidence level as a percentage string (e.g. "95",
+            "97.5"), or None for the first configured level.
+        settings: The application's VaR configuration.
+
+    Returns:
+        Confidence level in basis points.
+
+    Raises:
+        InvalidVarQueryError: The value is not one of the currently configured levels.
+    """
+    supported = ", ".join(_format_pct(bp) for bp in sorted(settings.confidence_levels_bp))
+    if confidence is None:
+        return settings.confidence_levels_bp[0]
+    try:
+        bp = round(float(confidence.rstrip("%")) * 100)
+    except ValueError as exc:
+        raise InvalidVarQueryError(
+            message=f"confidence '{confidence}' is not one of the configured levels: {supported}",
+            fields=["confidence"],
+        ) from exc
+    if bp not in settings.confidence_levels_bp:
+        raise InvalidVarQueryError(
+            message=f"confidence '{confidence}' is not one of the configured levels: {supported}",
+            fields=["confidence"],
+        )
+    return bp
 
 
 def _correlation_id() -> str:
@@ -585,4 +676,69 @@ async def get_var_methods(settings: Settings = Depends(get_settings)) -> JSONRes
         200 with the VarMethodsResponse JSON body.
     """
     response = build_methods_response(settings.var)
+    return JSONResponse(status_code=200, content=response.model_dump(by_alias=True, mode="json"))
+
+
+@router.get(
+    "/accounts/{account_name}/risk/var/contributions",
+    response_model=VarContributionsResponse,
+    summary="Decompose an already-computed VaR/ES estimate into per-position/theme contributions",
+    responses={
+        404: {"description": "No capital ledger or position ladder found for this account"},
+        422: {
+            "description": (
+                "Validation failed — invalid account name, no ingested position ladder, "
+                "or an unsupported lookback/confidence/group_by value"
+            )
+        },
+    },
+)
+async def get_var_contributions(
+    account_name: str,
+    date: date = Query(..., alias="date"),
+    lookback: str | None = Query(default=None),
+    confidence: str | None = Query(default=None),
+    group_by: str | None = Query(default=None),
+    service: VarContributionsService = Depends(_get_var_contributions_service),
+    settings: Settings = Depends(get_settings),
+) -> JSONResponse:
+    """Return the previously computed VaR decomposition for one account/date/lookback.
+
+    Never triggers a calculation and never calls market-data (FR-007). If nothing has
+    been computed for the requested account/date/lookback, returns a successful, empty
+    payload with links to the status and runs resources (FR-009).
+
+    Args:
+        account_name: Path parameter identifying the account.
+        date: Required as-of date (query parameter `date`).
+        lookback: Optional look-back code; defaults to the configured headline.
+        confidence: Optional single confidence level as a percentage; defaults to the
+            first configured level.
+        group_by: Optional "position" or "theme"; defaults to "position".
+        service: Injected VarContributionsService.
+        settings: Application settings (injected by FastAPI).
+
+    Returns:
+        200 with the VarContributionsResponse JSON body.
+
+    Raises:
+        InvalidAccountNameError: Account name fails pattern check.
+        InvalidVarQueryError: lookback, confidence or group_by is not a configured/
+            supported value.
+        AccountNotFoundError: No resource of any kind ingested for this account.
+        MissingRequiredSourceError: The account has no ingested position ladder.
+    """
+    validate_account_name(account_name)
+    lookback_code = _resolve_lookback(lookback, settings.var)
+    confidence_bp = _resolve_single_confidence(confidence, settings.var)
+    resolved_group_by = _resolve_group_by(group_by)
+
+    response = service.get_contributions(
+        account_name=account_name,
+        as_of=date,
+        lookback_code=lookback_code,
+        lookback_days=settings.var.lookbacks[lookback_code],
+        confidence_bp=confidence_bp,
+        group_by=resolved_group_by,
+    )
     return JSONResponse(status_code=200, content=response.model_dump(by_alias=True, mode="json"))

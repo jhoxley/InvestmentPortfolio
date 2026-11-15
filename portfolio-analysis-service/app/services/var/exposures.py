@@ -176,3 +176,105 @@ def build_exposures(
 
     logger.info("var_exposures_built", date_count=len(result))
     return result
+
+
+_UNCLASSIFIED = "Unclassified"
+_CASH_KEY = "Cash"
+
+
+def resolve_theme(sub_account: str, lookup: Callable[[str], IdentifierMappingEntry | None]) -> str:
+    """Resolve a held position's risk/contribution theme (015-var-contributions).
+
+    Args:
+        sub_account: Ladder sub-account name.
+        lookup: Resolves a sub-account name to its identifier mapping entry, or None.
+
+    Returns:
+        The entry's configured `theme`, or the reserved "Unclassified" label when the
+        sub-account has no mapping entry, or its entry has no `theme` set.
+    """
+    entry = lookup(sub_account)
+    if entry is None or entry.theme is None:
+        return _UNCLASSIFIED
+    return entry.theme
+
+
+@dataclass(frozen=True)
+class ContributionGroupDef:
+    """One contribution group's identity and member columns (015-var-contributions).
+
+    Attributes:
+        key: Sub-account name (`group_by="position"`), theme label, or "Cash".
+        identifier: The position's market-data identifier for a single-position group
+            (`group_by="position"`); always None for a theme group (it can span
+            multiple identifiers) and for the synthetic Cash group.
+        indices: Column indices into the `ScenarioMatrix`/`Exposure.positions` this
+            group aggregates; empty for the synthetic Cash group (Cash is never a
+            column in the matrix).
+        market_value: GBP market value of the group on the requested date.
+        is_cash: True only for the synthetic Cash group.
+    """
+
+    key: str
+    identifier: str | None
+    indices: tuple[int, ...]
+    market_value: float
+    is_cash: bool = False
+
+
+def group_positions(
+    exposure: Exposure,
+    group_by: Literal["position", "theme"],
+    lookup: Callable[[str], IdentifierMappingEntry | None],
+) -> list[ContributionGroupDef]:
+    """Partition an exposure's positions (plus Cash) into contribution groups.
+
+    Args:
+        exposure: The positions held (and their GBP market values) at the as-of date.
+        group_by: "position" (one group per `PositionExposure`, matching the matrix's
+            column order exactly) or "theme" (positions aggregated by `resolve_theme()`,
+            per the product decision that sub-accounts sharing one identifier stay
+            separate positions but share one theme).
+        lookup: Resolves a sub-account name to its identifier mapping entry, or None.
+
+    Returns:
+        One `ContributionGroupDef` per position or theme, plus exactly one synthetic
+        "Cash" group last (FR-018) -- always present, even when `exposure.cash_value`
+        is zero, so callers never need a separate Cash branch.
+    """
+    groups: list[ContributionGroupDef]
+    if group_by == "position":
+        groups = [
+            ContributionGroupDef(
+                key=position.sub_account,
+                identifier=position.identifier,
+                indices=(i,),
+                market_value=position.market_value,
+            )
+            for i, position in enumerate(exposure.positions)
+        ]
+    else:
+        by_theme: dict[str, list[int]] = {}
+        for i, position in enumerate(exposure.positions):
+            theme = resolve_theme(position.sub_account, lookup)
+            by_theme.setdefault(theme, []).append(i)
+        groups = [
+            ContributionGroupDef(
+                key=theme,
+                identifier=None,
+                indices=tuple(indices),
+                market_value=sum(exposure.positions[i].market_value for i in indices),
+            )
+            for theme, indices in sorted(by_theme.items())
+        ]
+
+    groups.append(
+        ContributionGroupDef(
+            key=_CASH_KEY,
+            identifier=None,
+            indices=(),
+            market_value=exposure.cash_value,
+            is_cash=True,
+        )
+    )
+    return groups
