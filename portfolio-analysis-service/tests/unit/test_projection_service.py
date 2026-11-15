@@ -23,9 +23,15 @@ from app.models.periodicity import Periodicity
 from app.repositories.capital_repository import CapitalMeta, CapitalRepository
 from app.repositories.ladder_repository import AccountMeta, LadderRepository
 from app.services.accounts_service import AccountsService
+from app.services.pricing_enrichment_service import PricingEnrichmentService
 from app.services.projection_service import ProjectionService
+from app.services.rebuild.capital_rebuild_service import CapitalRebuildService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
+from app.services.returns_enrichment_service import ReturnsEnrichmentService
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 from app.services.timeseries_service import TimeSeriesService
+from tests.conftest import FakeIdentifierMappingRepository, FakeMarketDataService
 
 _FIXTURE_START = date(2016, 1, 4)
 _FIXTURE_END = date(2020, 1, 2)  # ~4 years — enough for a computable 3Y measure (780 days)
@@ -108,9 +114,7 @@ def capital_repo(tmp_path: Path) -> CapitalRepository:
 
 
 @pytest.fixture()
-def service(
-    ladder_repo: LadderRepository, capital_repo: CapitalRepository
-) -> ProjectionService:
+def service(ladder_repo: LadderRepository, capital_repo: CapitalRepository) -> ProjectionService:
     """Return a ProjectionService wired to the tmp_path-backed repositories."""
     accounts_service = AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo)
     return ProjectionService(ladder_repo=ladder_repo, accounts_service=accounts_service)
@@ -118,20 +122,37 @@ def service(
 
 @pytest.fixture()
 def timeseries_service(
-    ladder_repo: LadderRepository, capital_repo: CapitalRepository
+    ladder_repo: LadderRepository,
+    capital_repo: CapitalRepository,
+    fake_identifier_mapping_repository: FakeIdentifierMappingRepository,
+    fake_market_data_service: FakeMarketDataService,
 ) -> TimeSeriesService:
     """A real TimeSeriesService, used only as the cross-check oracle in T002(e)."""
     accounts_service = AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo)
+    mapping_repo = fake_identifier_mapping_repository
+    market_data_client = fake_market_data_service.client()
     return TimeSeriesService(
         ladder_repo=ladder_repo,
         capital_repo=capital_repo,
         accounts_service=accounts_service,
         date_resolver=TimeseriesDateResolver(),
+        ladder_rebuild_service=LadderRebuildService(
+            repository=ladder_repo,
+            mapping_repo=mapping_repo,
+            market_data_client=market_data_client,
+            enrichment_service=PricingEnrichmentService(
+                mapping_repo=mapping_repo, market_data_client=market_data_client
+            ),
+            returns_service=ReturnsEnrichmentService(),
+        ),
+        capital_rebuild_service=CapitalRebuildService(capital_repo),
+        rebuild_lock_registry=RebuildLockRegistry(),
     )
 
 
 class TestOmittedStartDefaultsToLaddersToDate:
     """Test omitted start defaults to ladders to date."""
+
     def test_omitted_start_defaults_to_ladders_to_date(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -147,6 +168,7 @@ class TestOmittedStartDefaultsToLaddersToDate:
 
 class TestExplicitStartOnNonBusinessDayResolvesForward:
     """Test explicit start on non business day resolves forward."""
+
     def test_explicit_start_on_non_business_day_resolves_forward(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -162,6 +184,7 @@ class TestExplicitStartOnNonBusinessDayResolvesForward:
 
 class TestExplicitStartBeyondToDateIsCappedBack:
     """Test explicit start beyond to date is capped back."""
+
     def test_explicit_start_beyond_to_date_is_capped_back(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -177,6 +200,7 @@ class TestExplicitStartBeyondToDateIsCappedBack:
 
 class TestExplicitStartBeforeFromDateRaisesMissingRequiredSourceError:
     """Test explicit start before from date raises missing required source error."""
+
     def test_explicit_start_before_from_date_raises_missing_required_source_error(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -191,6 +215,7 @@ class TestExplicitStartBeforeFromDateRaisesMissingRequiredSourceError:
 
 class TestHistoricalSeriesMatchesTimeSeriesServicesOwnMarketValueAggregation:
     """Test historical series matches time series services own market value aggregation."""
+
     def test_historical_series_matches_timeseries_services_own_aggregation(
         self,
         ladder_repo: LadderRepository,
@@ -208,13 +233,16 @@ class TestHistoricalSeriesMatchesTimeSeriesServicesOwnMarketValueAggregation:
             "known", ["market_value"], None, resolved_start, today=date(2024, 6, 14)
         )
 
-        projected_by_date = {e.date: e.model_dump()["market_value"] for e in projection_response.entries}
+        projected_by_date = {
+            e.date: e.model_dump()["market_value"] for e in projection_response.entries
+        }
         oracle_by_date = {e.date: e.model_dump()["market_value"] for e in oracle_response.entries}
         assert projected_by_date == oracle_by_date
 
 
 class TestAccountWithNoResourceAtAllRaisesAccountNotFoundError:
     """Test account with no resource at all raises account not found error."""
+
     def test_account_with_no_resource_at_all_raises_account_not_found_error(
         self, service: ProjectionService
     ) -> None:
@@ -225,6 +253,7 @@ class TestAccountWithNoResourceAtAllRaisesAccountNotFoundError:
 
 class TestAccountWithCapitalButNoLadderRaisesPositionLadderNotIngestedError:
     """Test account with capital but no ladder raises position ladder not ingested error."""
+
     def test_account_with_capital_but_no_ladder_raises_position_ladder_not_ingested_error(
         self, capital_repo: CapitalRepository, service: ProjectionService
     ) -> None:
@@ -232,13 +261,12 @@ class TestAccountWithCapitalButNoLadderRaisesPositionLadderNotIngestedError:
         _write_capital_only(capital_repo, "capital-only")
 
         with pytest.raises(PositionLadderNotIngestedError):
-            service.get_projection(
-                "capital-only", projection_date=date(2030, 1, 2), returns=[]
-            )
+            service.get_projection("capital-only", projection_date=date(2030, 1, 2), returns=[])
 
 
 class TestProjectionDateNotLaterThanStartRaisesInvalidProjectionRangeError:
     """Test projection date not later than start raises invalid projection range error."""
+
     def test_projection_date_equal_to_start_raises(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -265,6 +293,7 @@ class TestProjectionDateNotLaterThanStartRaisesInvalidProjectionRangeError:
 
 class TestSingleReturnProducesOneHistoricalAndOneProjectedSeries:
     """Test single return produces one historical and one projected series."""
+
     def test_single_return_produces_one_historical_and_one_projected_series(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -287,6 +316,7 @@ class TestSingleReturnProducesOneHistoricalAndOneProjectedSeries:
 
 class TestProjectedSeriesBeginsAtHistoricalSeriesFinalValue:
     """Test projected series begins at historical series final value."""
+
     def test_projected_series_begins_at_historical_series_final_value(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -311,6 +341,7 @@ class TestProjectedSeriesBeginsAtHistoricalSeriesFinalValue:
 
 class TestProjectedSeriesCompoundsTheRequestedReturnsOwnHistoricalRate:
     """Test projected series compounds the requested returns own historical rate."""
+
     def test_projected_series_compounds_the_requested_returns_own_historical_rate(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -350,6 +381,7 @@ class TestProjectedSeriesCompoundsTheRequestedReturnsOwnHistoricalRate:
 
 class TestMultipleReturnsEachProduceTheirOwnSeriesFromASharedStartingPoint:
     """Test multiple returns each produce their own series from a shared starting point."""
+
     def test_multiple_returns_produce_distinct_series_sharing_a_start(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -375,6 +407,7 @@ class TestMultipleReturnsEachProduceTheirOwnSeriesFromASharedStartingPoint:
 
 class TestReturnWithInsufficientHistoryIsSilentlyOmitted:
     """Test return with insufficient history is silently omitted."""
+
     def test_return_with_insufficient_history_is_silently_omitted(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -393,6 +426,7 @@ class TestReturnWithInsufficientHistoryIsSilentlyOmitted:
 
 class TestZeroReturnsReturnsHistoricalSeriesAlone:
     """Test zero returns returns historical series alone."""
+
     def test_zero_returns_returns_historical_series_alone(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -411,6 +445,7 @@ class TestZeroReturnsReturnsHistoricalSeriesAlone:
 
 class TestUnsupportedReturnRaisesUnsupportedAttributeError:
     """Test unsupported return raises unsupported attribute error."""
+
     def test_unsupported_return_raises_unsupported_attribute_error(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:
@@ -418,9 +453,7 @@ class TestUnsupportedReturnRaisesUnsupportedAttributeError:
         _write_ladder(ladder_repo, "known")
 
         with pytest.raises(UnsupportedAttributeError):
-            service.get_projection(
-                "known", projection_date=date(2030, 1, 2), returns=["bogus"]
-            )
+            service.get_projection("known", projection_date=date(2030, 1, 2), returns=["bogus"])
 
 
 # --- Periodicity applied to both legs (Polish, T022) -------------------------
@@ -428,6 +461,7 @@ class TestUnsupportedReturnRaisesUnsupportedAttributeError:
 
 class TestPeriodicityIsAppliedToBothHistoricalAndProjectedLegs:
     """Test periodicity is applied to both historical and projected legs."""
+
     def test_annual_periodicity_buckets_both_legs(
         self, ladder_repo: LadderRepository, service: ProjectionService
     ) -> None:

@@ -16,8 +16,13 @@ from app.repositories.ladder_repository import LadderRepository
 from app.services.accounts_service import AccountsService
 from app.services.daily_return_series_loader import DailyReturnSeriesLoader
 from app.services.performance_service import PerformanceService
+from app.services.pricing_enrichment_service import PricingEnrichmentService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
+from app.services.returns_enrichment_service import ReturnsEnrichmentService
 from app.services.risk_service import RiskService
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
+from tests.conftest import FakeIdentifierMappingRepository, FakeMarketDataService
 from tests.risk_helpers import write_capital_only, write_daily_returns, write_ladder
 
 TODAY = date(2024, 6, 14)  # Friday, well after all fixture dates below
@@ -44,16 +49,33 @@ def capital_repo(tmp_path: Path) -> CapitalRepository:
 
 
 @pytest.fixture()
-def service(ladder_repo: LadderRepository, capital_repo: CapitalRepository) -> RiskService:
+def service(
+    ladder_repo: LadderRepository,
+    capital_repo: CapitalRepository,
+    fake_identifier_mapping_repository: FakeIdentifierMappingRepository,
+    fake_market_data_service: FakeMarketDataService,
+) -> RiskService:
     """Return a RiskService wired to the tmp_path-backed repositories.
 
     Returns:
         RiskService ready for use in tests.
     """
+    mapping_repo = fake_identifier_mapping_repository
+    market_data_client = fake_market_data_service.client()
     loader = DailyReturnSeriesLoader(
         ladder_repo=ladder_repo,
         accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
         date_resolver=TimeseriesDateResolver(),
+        ladder_rebuild_service=LadderRebuildService(
+            repository=ladder_repo,
+            mapping_repo=mapping_repo,
+            market_data_client=market_data_client,
+            enrichment_service=PricingEnrichmentService(
+                mapping_repo=mapping_repo, market_data_client=market_data_client
+            ),
+            returns_service=ReturnsEnrichmentService(),
+        ),
+        rebuild_lock_registry=RebuildLockRegistry(),
     )
     return RiskService(loader=loader)
 
@@ -213,13 +235,27 @@ class TestConsistencyWithPerformance:
         service: RiskService,
         start: date | None,
         end: date | None,
+        fake_identifier_mapping_repository: FakeIdentifierMappingRepository,
+        fake_market_data_service: FakeMarketDataService,
     ) -> None:
         """Identical inputs resolve to identical (from_date, to_date) in both services."""
         write_daily_returns(ladder_repo, "acct", date(2024, 1, 2), [0.001] * 8)
+        mapping_repo = fake_identifier_mapping_repository
+        market_data_client = fake_market_data_service.client()
         performance = PerformanceService(
             ladder_repo=ladder_repo,
             accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
             date_resolver=TimeseriesDateResolver(),
+            ladder_rebuild_service=LadderRebuildService(
+                repository=ladder_repo,
+                mapping_repo=mapping_repo,
+                market_data_client=market_data_client,
+                enrichment_service=PricingEnrichmentService(
+                    mapping_repo=mapping_repo, market_data_client=market_data_client
+                ),
+                returns_service=ReturnsEnrichmentService(),
+            ),
+            rebuild_lock_registry=RebuildLockRegistry(),
         )
 
         risk_response = service.get_return_histogram("acct", start, end, TODAY)
@@ -231,17 +267,24 @@ class TestConsistencyWithPerformance:
         )
         assert risk_response.statistics.count == len(perf_response.entries)
 
-    def test_business_day_without_ladder_rows_counts_as_zero_bucket_observation(
+    def test_business_days_past_the_last_ladder_row_are_rebuilt_not_zero_filled(
         self, ladder_repo: LadderRepository, service: RiskService
     ) -> None:
-        """Days after the last ladder row are zero-filled, as in the performance series."""
+        """A 014 rebuild extends the ladder, so these days contribute real observations.
+
+        Supersedes the pre-014 zero-fill expectation for this scenario: a stale request
+        now closes the gap via LadderRebuildService before the histogram is built, so
+        2024-01-05 and 2024-01-08 are no longer genuinely missing rows.
+        """
         write_daily_returns(ladder_repo, "acct", date(2024, 1, 2), [0.0010, 0.0020, 0.0030])
 
-        # 2024-01-02..04 have data; 2024-01-05 and 2024-01-08 do not.
+        # 2024-01-02..04 had data; 2024-01-05 and 2024-01-08 are now rebuilt, not missing.
         response = service.get_return_histogram("acct", date(2024, 1, 2), date(2024, 1, 8), TODAY)
 
-        assert response.histogram == [(0, 2), (10, 1), (20, 1), (30, 1)]
         assert response.statistics.count == 5
+        meta = ladder_repo.read_meta("acct")
+        assert meta.to_date >= date(2024, 1, 8)
+        assert meta.rebuilt_at is not None
 
 
 class TestErrorPropagation:

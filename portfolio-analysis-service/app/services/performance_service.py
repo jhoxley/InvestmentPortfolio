@@ -14,6 +14,8 @@ from app.services import performance_attributes
 from app.services.accounts_service import AccountsService
 from app.services.daily_return_series_loader import DailyReturnSeriesLoader
 from app.services.performance_metrics import compute_performance_measures
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 
 logger = structlog.get_logger(__name__)
@@ -27,19 +29,25 @@ class PerformanceService:
         ladder_repo: LadderRepository,
         accounts_service: AccountsService,
         date_resolver: TimeseriesDateResolver,
+        ladder_rebuild_service: LadderRebuildService,
+        rebuild_lock_registry: RebuildLockRegistry,
     ) -> None:
-        """Initialise with the ladder repository and the shared account/date services.
+        """Initialise with the ladder repository and the shared account/date/rebuild services.
 
         Args:
             ladder_repo: Repository for position ladders. Every performance measure
                 requires only the position ladder — no capital_repo is needed.
             accounts_service: Shared account existence/date-range lookup service.
             date_resolver: Shared date defaulting/adjustment service.
+            ladder_rebuild_service: Extends a stale position ladder on demand (014).
+            rebuild_lock_registry: Serialises concurrent rebuilds per (account, resource).
         """
         self._loader = DailyReturnSeriesLoader(
             ladder_repo=ladder_repo,
             accounts_service=accounts_service,
             date_resolver=date_resolver,
+            ladder_rebuild_service=ladder_rebuild_service,
+            rebuild_lock_registry=rebuild_lock_registry,
         )
 
     def get_performance(

@@ -6,13 +6,20 @@ import structlog
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
-from app.api.dependencies import get_capital_repository, get_ladder_repository
+from app.api.dependencies import (
+    get_capital_repository,
+    get_ladder_rebuild_service,
+    get_ladder_repository,
+    get_rebuild_lock_registry,
+)
 from app.models.performance import PerformanceAttributeMetadataResponse
 from app.repositories.capital_repository import CapitalRepository
 from app.repositories.ladder_repository import LadderRepository
 from app.services import performance_attributes
 from app.services.accounts_service import AccountsService
 from app.services.performance_service import PerformanceService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 from app.validators.account_name import validate_account_name
 
@@ -24,12 +31,16 @@ router = APIRouter(prefix="/v1", tags=["Performance"])
 def _get_performance_service(
     ladder_repo: LadderRepository = Depends(get_ladder_repository),
     capital_repo: CapitalRepository = Depends(get_capital_repository),
+    ladder_rebuild_service: LadderRebuildService = Depends(get_ladder_rebuild_service),
+    rebuild_lock_registry: RebuildLockRegistry = Depends(get_rebuild_lock_registry),
 ) -> PerformanceService:
     """Dependency that returns a wired PerformanceService.
 
     Args:
         ladder_repo: LadderRepository instance (injected by FastAPI).
         capital_repo: CapitalRepository instance (injected by FastAPI).
+        ladder_rebuild_service: LadderRebuildService instance (injected by FastAPI).
+        rebuild_lock_registry: Shared RebuildLockRegistry (injected by FastAPI).
 
     Returns:
         PerformanceService instance.
@@ -39,6 +50,8 @@ def _get_performance_service(
         ladder_repo=ladder_repo,
         accounts_service=accounts_service,
         date_resolver=TimeseriesDateResolver(),
+        ladder_rebuild_service=ladder_rebuild_service,
+        rebuild_lock_registry=rebuild_lock_registry,
     )
 
 
@@ -46,6 +59,13 @@ def _get_performance_service(
     "/accounts/{account_name}/performance",
     summary=(
         "Retrieve a per-business-day time series of requested performance measures for an account"
+    ),
+    description=(
+        "If the resolved end date is later than the ladder's last ingested-or-rebuilt "
+        "date, this request synchronously rebuilds the missing period before "
+        "responding, capped at the prior business day relative to today (014). The "
+        "rebuild is persisted and shared with the timeseries, position, and "
+        "return-histogram endpoints."
     ),
     responses={
         404: {"description": "No capital ledger or position ladder found for this account"},

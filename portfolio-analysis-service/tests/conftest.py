@@ -326,6 +326,7 @@ class FakeIdentifierMappingRepository:
         var_proxy: str | None = None,
         var_proxy_mode: str = "fill_gaps",
         var_proxy_scale: float = 1.0,
+        theme: str | None = None,
     ) -> None:
         """Configure an explicit mapping entry for a sub-account.
 
@@ -336,6 +337,7 @@ class FakeIdentifierMappingRepository:
             var_proxy: VaR proxy identifier, if any.
             var_proxy_mode: "fill_gaps" or "always".
             var_proxy_scale: Static multiplier on the proxy's returns.
+            theme: Risk/contribution grouping label, if any.
         """
         self._overrides[sub_account] = IdentifierMappingEntry(
             name=sub_account,
@@ -344,6 +346,7 @@ class FakeIdentifierMappingRepository:
             var_proxy=var_proxy,
             var_proxy_mode=var_proxy_mode,  # type: ignore[arg-type]
             var_proxy_scale=var_proxy_scale,
+            theme=theme,
         )
 
     def set_missing(self, sub_account: str) -> None:

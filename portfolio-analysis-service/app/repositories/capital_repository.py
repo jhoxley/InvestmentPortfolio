@@ -20,6 +20,8 @@ class CapitalMeta(BaseModel):
     from_date: date
     to_date: date
     ingested_at: datetime
+    rebuilt_at: datetime | None = None
+    """Timestamp of the most recent on-demand rebuild write, or None if never rebuilt."""
 
 
 class CapitalRepository:
@@ -170,7 +172,8 @@ class CapitalRepository:
             account_name: The account identifier.
 
         Returns:
-            DataFrame with columns [date, capital, income, book_value].
+            DataFrame with columns [date, capital, income, book_value, provenance]. A
+            ledger stored before `provenance` existed is treated as fully `"ingested"`.
 
         Raises:
             FileNotFoundError: If no capital ledger file exists for the account.
@@ -179,7 +182,9 @@ class CapitalRepository:
         if not path.exists():
             raise FileNotFoundError(f"No capital ledger file found for account '{account_name}'")
         df = pd.read_excel(path, engine="openpyxl")
-        return df[["date", "capital", "income", "book_value"]]
+        if "provenance" not in df.columns:
+            df = df.assign(provenance="ingested")
+        return df[["date", "capital", "income", "book_value", "provenance"]]
 
     def list_accounts(self) -> list[str]:
         """List every account name with a stored capital ledger.

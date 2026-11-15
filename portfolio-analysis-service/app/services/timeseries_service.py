@@ -17,6 +17,11 @@ from app.services import timeseries_attributes
 from app.services.accounts_service import AccountsService
 from app.services.business_day_expansion import expand_business_days
 from app.services.periodicity_aggregation import aggregate_last_observation
+from app.services.rebuild.capital_rebuild_service import CapitalRebuildService
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
+from app.services.rebuild.rebuild_orchestrator import ensure_fresh
+from app.services.rebuild.staleness_gate import StalenessGate
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 
 logger = structlog.get_logger(__name__)
@@ -33,19 +38,29 @@ class TimeSeriesService:
         capital_repo: CapitalRepository,
         accounts_service: AccountsService,
         date_resolver: TimeseriesDateResolver,
+        ladder_rebuild_service: LadderRebuildService,
+        capital_rebuild_service: CapitalRebuildService,
+        rebuild_lock_registry: RebuildLockRegistry,
     ) -> None:
-        """Initialise with the two repositories and the shared account/date services.
+        """Initialise with the two repositories and the shared account/date/rebuild services.
 
         Args:
             ladder_repo: Repository for position ladders.
             capital_repo: Repository for capital ledgers.
             accounts_service: Shared account existence/date-range lookup service.
             date_resolver: Shared date defaulting/adjustment service.
+            ladder_rebuild_service: Extends a stale position ladder on demand (014).
+            capital_rebuild_service: Extends a stale capital ledger on demand (014).
+            rebuild_lock_registry: Serialises concurrent rebuilds per (account, resource).
         """
         self._ladder_repo = ladder_repo
         self._capital_repo = capital_repo
         self._accounts_service = accounts_service
         self._date_resolver = date_resolver
+        self._ladder_rebuild_service = ladder_rebuild_service
+        self._capital_rebuild_service = capital_rebuild_service
+        self._rebuild_lock_registry = rebuild_lock_registry
+        self._staleness_gate = StalenessGate()
 
     def get_series(
         self,
@@ -159,6 +174,31 @@ class TimeSeriesService:
                 ),
             )
 
+        if needs_capital and summary.capital_ledger is not None:
+            ensure_fresh(
+                account_name=account_name,
+                resource="capital",
+                last_known_date=summary.capital_ledger.to_date,
+                resolved_end=resolved_end,
+                today=today,
+                lock_registry=self._rebuild_lock_registry,
+                staleness_gate=self._staleness_gate,
+                rebuilder=self._capital_rebuild_service,
+                read_last_known_date=lambda: self._capital_repo.read_meta(account_name).to_date,
+            )
+        if needs_ladder and summary.position_ladder is not None:
+            ensure_fresh(
+                account_name=account_name,
+                resource="ladder",
+                last_known_date=summary.position_ladder.to_date,
+                resolved_end=resolved_end,
+                today=today,
+                lock_registry=self._rebuild_lock_registry,
+                staleness_gate=self._staleness_gate,
+                rebuilder=self._ladder_rebuild_service,
+                read_last_known_date=lambda: self._ladder_repo.read_meta(account_name).to_date,
+            )
+
         capital_expanded: pd.DataFrame | None = None
         if needs_capital:
             capital_df = self._capital_repo.read_df(account_name)
@@ -169,7 +209,9 @@ class TimeSeriesService:
         market_value_expanded: pd.DataFrame | None = None
         if needs_ladder:
             ladder_df = self._ladder_repo.read_full_df(account_name)
-            aggregated = ladder_df.groupby("date", as_index=False)["market_value"].sum()
+            aggregated = ladder_df.groupby("date", as_index=False)["market_value"].agg(
+                lambda values: float("nan") if values.isna().any() else values.sum()
+            )
             market_value_expanded = expand_business_days(
                 aggregated, ["market_value"], resolved_start, resolved_end
             )
@@ -198,7 +240,14 @@ class TimeSeriesService:
         entries = [
             TimeSeriesEntry(
                 date=row["date"],
-                **{attr: float(row[column_for_attribute[attr]]) for attr in attributes},
+                **{
+                    attr: (
+                        None
+                        if pd.isna(row[column_for_attribute[attr]])
+                        else float(row[column_for_attribute[attr]])
+                    )
+                    for attr in attributes
+                },
             )
             for _, row in merged.iterrows()
         ]

@@ -10,13 +10,14 @@ import contextlib
 import json
 import os
 import tempfile
-from datetime import datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pandas as pd
 from pydantic import BaseModel
 
 from app.models.var import VarRun
+from app.services.var.return_panel import ReturnPanel
 
 ESTIMATE_COLUMNS = [
     "date",
@@ -241,6 +242,18 @@ class VarRepository:
         """Return the path to the account's var/meta.json."""
         return self._var_dir(account_name) / "meta.json"
 
+    def _scenario_returns_path(self, account_name: str) -> Path:
+        """Return the path to the account's var/scenario_returns.csv."""
+        return self._var_dir(account_name) / "scenario_returns.csv"
+
+    def _scenario_observed_path(self, account_name: str) -> Path:
+        """Return the path to the account's var/scenario_observed.csv."""
+        return self._var_dir(account_name) / "scenario_observed.csv"
+
+    def _scenario_returns_meta_path(self, account_name: str) -> Path:
+        """Return the path to the account's var/scenario_returns_meta.json."""
+        return self._var_dir(account_name) / "scenario_returns_meta.json"
+
     def _run_path(self, account_name: str, run_id: str) -> Path:
         """Return the path to one run's JSON record.
 
@@ -314,6 +327,148 @@ class VarRepository:
             return None
         with path.open(encoding="utf-8") as f:
             return VarMeta.model_validate(json.load(f))
+
+    def read_scenario_returns(self, account_name: str) -> ReturnPanel | None:
+        """Read the account's accumulated, look-back-independent scenario-returns snapshot.
+
+        Unlike estimates/outcomes/instruments, this store has no fixed column set: each
+        column is an identifier that has ever been fetched by some run for this account
+        (015-var-contributions, research.md §2).
+
+        Args:
+            account_name: The account identifier.
+
+        Returns:
+            A ReturnPanel reconstructed from the stored wide CSVs, or None if nothing has
+            ever been committed.
+        """
+        returns_path = self._scenario_returns_path(account_name)
+        observed_path = self._scenario_observed_path(account_name)
+        meta_path = self._scenario_returns_meta_path(account_name)
+        if not (returns_path.exists() and observed_path.exists() and meta_path.exists()):
+            return None
+
+        returns_df = pd.read_csv(returns_path, index_col="date", parse_dates=["date"])
+        observed_df = pd.read_csv(observed_path, index_col="date", parse_dates=["date"])
+        if returns_df.empty:
+            return None
+
+        returns_df = returns_df.sort_index()
+        observed_df = observed_df.sort_index().reindex(columns=returns_df.columns)
+
+        with meta_path.open(encoding="utf-8") as f:
+            meta = json.load(f)
+
+        identifiers = tuple(returns_df.columns)
+        grid = tuple(ts.date() for ts in returns_df.index)
+        first_observed: dict[str, date | None] = {}
+        for identifier in identifiers:
+            raw = meta.get("identifiers", {}).get(identifier, {}).get("first_observed_date")
+            first_observed[identifier] = date.fromisoformat(raw) if raw else None
+
+        return ReturnPanel(
+            grid=grid,
+            identifiers=identifiers,
+            returns=returns_df.to_numpy(dtype=float),
+            observed=observed_df.fillna(0).to_numpy(dtype=bool),
+            first_observed=first_observed,
+        )
+
+    def commit_scenario_returns(self, account_name: str, panel: ReturnPanel) -> None:
+        """Upsert a run's fetched scenario-returns panel into the accumulated snapshot.
+
+        New dates/identifiers are outer-joined onto whatever is already stored; any cell
+        within `panel`'s own (grid x identifiers) rectangle replaces the stored value
+        (including with NaN/not-observed, if that is what `panel` holds for that cell) --
+        the same "latest fetch wins" semantics a stale re-fetch already has for estimates
+        (research.md §2). All-or-none: writes every file to a temp path first, then
+        `os.replace()`s them in turn, matching `commit()`'s existing atomicity.
+
+        Args:
+            account_name: The account identifier.
+            panel: The freshly fetched ReturnPanel to merge in.
+
+        Raises:
+            OSError: If any underlying file write fails. The store is left unchanged.
+        """
+        var_dir = self._var_dir(account_name)
+        var_dir.mkdir(parents=True, exist_ok=True)
+
+        existing = self.read_scenario_returns(account_name)
+        incoming_index = pd.DatetimeIndex([pd.Timestamp(d) for d in panel.grid])
+        incoming_returns = pd.DataFrame(
+            panel.returns, index=incoming_index, columns=list(panel.identifiers)
+        )
+        incoming_observed = pd.DataFrame(
+            panel.observed, index=incoming_index, columns=list(panel.identifiers)
+        )
+
+        if existing is None:
+            merged_returns = incoming_returns
+            merged_observed = incoming_observed
+            merged_first_observed = dict(panel.first_observed)
+        else:
+            existing_index = pd.DatetimeIndex([pd.Timestamp(d) for d in existing.grid])
+            existing_returns = pd.DataFrame(
+                existing.returns, index=existing_index, columns=list(existing.identifiers)
+            )
+            existing_observed = pd.DataFrame(
+                existing.observed, index=existing_index, columns=list(existing.identifiers)
+            )
+
+            union_index = existing_index.union(incoming_index).sort_values()
+            union_columns = sorted(set(existing.identifiers) | set(panel.identifiers))
+
+            existing_r = existing_returns.reindex(index=union_index, columns=union_columns)
+            existing_o = existing_observed.reindex(index=union_index, columns=union_columns)
+            incoming_r = incoming_returns.reindex(index=union_index, columns=union_columns)
+            incoming_o = incoming_observed.reindex(index=union_index, columns=union_columns)
+
+            mask = pd.DataFrame(False, index=union_index, columns=union_columns)
+            mask.loc[incoming_index, list(panel.identifiers)] = True
+
+            merged_returns = existing_r.where(~mask, incoming_r)
+            merged_observed = existing_o.where(~mask, incoming_o)
+            merged_first_observed = {**existing.first_observed, **panel.first_observed}
+
+        merged_returns = merged_returns.sort_index()
+        merged_observed = merged_observed.sort_index().reindex(columns=merged_returns.columns)
+        merged_returns.index.name = "date"
+        merged_observed.index.name = "date"
+
+        meta_payload: dict[str, object] = {
+            "identifiers": {
+                identifier: {
+                    "first_observed_date": d.isoformat() if d else None,
+                }
+                for identifier, d in sorted(merged_first_observed.items())
+            },
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+
+        tmp_paths: list[Path] = []
+        try:
+            returns_tmp = self._write_temp_csv(
+                var_dir, merged_returns.reset_index(), ["date", *merged_returns.columns]
+            )
+            tmp_paths.append(returns_tmp)
+            observed_tmp = self._write_temp_csv(
+                var_dir,
+                merged_observed.astype("Int64").reset_index(),
+                ["date", *merged_observed.columns],
+            )
+            tmp_paths.append(observed_tmp)
+            meta_tmp = self._write_temp_json(var_dir, meta_payload)
+            tmp_paths.append(meta_tmp)
+        except Exception:
+            for tmp in tmp_paths:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
+            raise
+
+        os.replace(returns_tmp, self._scenario_returns_path(account_name))
+        os.replace(observed_tmp, self._scenario_observed_path(account_name))
+        os.replace(meta_tmp, self._scenario_returns_meta_path(account_name))
 
     def commit(
         self,

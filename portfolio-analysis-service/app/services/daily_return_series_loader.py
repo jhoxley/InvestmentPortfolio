@@ -13,6 +13,10 @@ from app.exceptions import AccountNotFoundError, MissingRequiredSourceError
 from app.repositories.ladder_repository import LadderRepository
 from app.services.accounts_service import AccountsService
 from app.services.daily_portfolio_return import compute_daily_portfolio_return
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
+from app.services.rebuild.rebuild_orchestrator import ensure_fresh
+from app.services.rebuild.staleness_gate import StalenessGate
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 
 
@@ -41,17 +45,24 @@ class DailyReturnSeriesLoader:
         ladder_repo: LadderRepository,
         accounts_service: AccountsService,
         date_resolver: TimeseriesDateResolver,
+        ladder_rebuild_service: LadderRebuildService,
+        rebuild_lock_registry: RebuildLockRegistry,
     ) -> None:
-        """Initialise with the ladder repository and the shared account/date services.
+        """Initialise with the ladder repository and the shared account/date/rebuild services.
 
         Args:
             ladder_repo: Repository for position ladders.
             accounts_service: Shared account existence/date-range lookup service.
             date_resolver: Shared date defaulting/adjustment service.
+            ladder_rebuild_service: Extends a stale position ladder on demand (014).
+            rebuild_lock_registry: Serialises concurrent rebuilds per (account, resource).
         """
         self._ladder_repo = ladder_repo
         self._accounts_service = accounts_service
         self._date_resolver = date_resolver
+        self._ladder_rebuild_service = ladder_rebuild_service
+        self._rebuild_lock_registry = rebuild_lock_registry
+        self._staleness_gate = StalenessGate()
 
     def load(
         self,
@@ -113,6 +124,18 @@ class DailyReturnSeriesLoader:
                     f"is {resolved_start}."
                 ),
             )
+
+        ensure_fresh(
+            account_name=account_name,
+            resource="ladder",
+            last_known_date=summary.position_ladder.to_date,
+            resolved_end=resolved_end,
+            today=today,
+            lock_registry=self._rebuild_lock_registry,
+            staleness_gate=self._staleness_gate,
+            rebuilder=self._ladder_rebuild_service,
+            read_last_known_date=lambda: self._ladder_repo.read_meta(account_name).to_date,
+        )
 
         ladder_df = self._ladder_repo.read_full_df(account_name)
         daily_returns = compute_daily_portfolio_return(

@@ -5,12 +5,19 @@ from datetime import date
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
-from app.api.dependencies import get_capital_repository, get_ladder_repository
+from app.api.dependencies import (
+    get_capital_repository,
+    get_ladder_rebuild_service,
+    get_ladder_repository,
+    get_rebuild_lock_registry,
+)
 from app.models.risk import ReturnHistogramResponse
 from app.repositories.capital_repository import CapitalRepository
 from app.repositories.ladder_repository import LadderRepository
 from app.services.accounts_service import AccountsService
 from app.services.daily_return_series_loader import DailyReturnSeriesLoader
+from app.services.rebuild.ladder_rebuild_service import LadderRebuildService
+from app.services.rebuild.rebuild_lock_registry import RebuildLockRegistry
 from app.services.risk_service import RiskService
 from app.services.timeseries_date_resolver import TimeseriesDateResolver
 from app.validators.account_name import validate_account_name
@@ -21,12 +28,16 @@ router = APIRouter(prefix="/v1", tags=["Risk"])
 def _get_risk_service(
     ladder_repo: LadderRepository = Depends(get_ladder_repository),
     capital_repo: CapitalRepository = Depends(get_capital_repository),
+    ladder_rebuild_service: LadderRebuildService = Depends(get_ladder_rebuild_service),
+    rebuild_lock_registry: RebuildLockRegistry = Depends(get_rebuild_lock_registry),
 ) -> RiskService:
     """Dependency that returns a wired RiskService.
 
     Args:
         ladder_repo: LadderRepository instance (injected by FastAPI).
         capital_repo: CapitalRepository instance (injected by FastAPI).
+        ladder_rebuild_service: LadderRebuildService instance (injected by FastAPI).
+        rebuild_lock_registry: Shared RebuildLockRegistry (injected by FastAPI).
 
     Returns:
         RiskService instance.
@@ -35,6 +46,8 @@ def _get_risk_service(
         ladder_repo=ladder_repo,
         accounts_service=AccountsService(ladder_repo=ladder_repo, capital_repo=capital_repo),
         date_resolver=TimeseriesDateResolver(),
+        ladder_rebuild_service=ladder_rebuild_service,
+        rebuild_lock_registry=rebuild_lock_registry,
     )
     return RiskService(loader=loader)
 
@@ -45,6 +58,13 @@ def _get_risk_service(
     summary=(
         "Retrieve a histogram and statistics of an account's portfolio-level daily returns "
         "in basis points"
+    ),
+    description=(
+        "If the resolved end date is later than the ladder's last ingested-or-rebuilt "
+        "date, this request synchronously rebuilds the missing period before "
+        "responding, capped at the prior business day relative to today (014). The "
+        "rebuild is persisted and shared with the timeseries, position, and "
+        "performance endpoints."
     ),
     responses={
         404: {"description": "No capital ledger or position ladder found for this account"},

@@ -577,3 +577,61 @@ class TestExecuteEarlyExit:
         assert final.status == "succeeded"
         assert final.dates_computed == 0
         assert client.calls == []
+
+
+class TestScenarioReturnsSnapshotPersistence:
+    """A successful run persists its fetched panel; successive runs accumulate coverage."""
+
+    def test_two_runs_over_disjoint_ranges_leave_the_union_of_both_grids(
+        self, repos: tuple[LadderRepository, CapitalRepository, VarRepository]
+    ) -> None:
+        """A second run far from the first's dates doesn't shrink the persisted snapshot."""
+        import pandas as pd
+
+        ladder_repo, _, var_repo = repos
+        df = pd.DataFrame(
+            [
+                {
+                    "date": d,
+                    "sub_account": "Equity A",
+                    "book_cost": 0.0,
+                    "quantity": 10.0,
+                    "total_income": 0.0,
+                    "price": 100.0,
+                    "market_value": 1000.0,
+                    "portfolio_weight": 1.0,
+                    "position_return": 0.0,
+                    "weighted_position_return": 0.0,
+                }
+                for d in (date(2026, 3, 2), date(2026, 4, 2))
+            ]
+        )
+        meta = AccountMeta(
+            account_name="acct",
+            checksum="x",
+            row_count=2,
+            from_date=date(2026, 3, 2),
+            to_date=date(2026, 4, 2),
+            sub_accounts=["Equity A"],
+            ingested_at=datetime.now(UTC),
+        )
+        ladder_repo.write("acct", df, meta)
+
+        service = _service(repos, _StubObservedClient(), InlineRunScheduler())
+        service.create_run(
+            "acct",
+            VarRunRequest(mode="full", start=date(2026, 3, 2), end=date(2026, 3, 2)),
+            date(2026, 3, 2),
+            "corr-1",
+        )
+        service.create_run(
+            "acct",
+            VarRunRequest(mode="full", start=date(2026, 4, 2), end=date(2026, 4, 2)),
+            date(2026, 4, 2),
+            "corr-2",
+        )
+
+        panel = var_repo.read_scenario_returns("acct")
+        assert panel is not None
+        assert date(2026, 3, 2) in panel.grid
+        assert date(2026, 4, 2) in panel.grid

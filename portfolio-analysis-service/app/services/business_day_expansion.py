@@ -17,6 +17,10 @@ def expand_business_days(
     source hasn't been refreshed in a while) can still seed forward-fill instead of
     yielding nulls.
 
+    A row that was genuinely present in `df` but already carries a null value (014: an
+    unresolved date from a partial rebuild, FR-010) is left null rather than papered over
+    by the forward-fill -- only calendar days absent from `df` altogether are filled.
+
     Args:
         df: Input DataFrame with a `date` column and the given value_columns.
         value_columns: Names of the columns to forward-fill.
@@ -31,11 +35,17 @@ def expand_business_days(
 
     indexed = df.sort_values("date").set_index(pd.DatetimeIndex(pd.to_datetime(df["date"])))
     indexed = indexed[value_columns]
+    originally_present = indexed.index
 
     calendar_start = min(start, indexed.index.min().date()) if not indexed.empty else start
     calendar_days = pd.date_range(start=calendar_start, end=end)
 
     reindexed = indexed.reindex(calendar_days).ffill()
+    for column in value_columns:
+        originally_null = indexed.index[indexed[column].isna()]
+        restore = originally_present.intersection(originally_null)
+        reindexed.loc[reindexed.index.isin(restore), column] = pd.NA
+
     reindexed = reindexed.loc[reindexed.index.isin(business_days)]
     reindexed["date"] = reindexed.index.date
 

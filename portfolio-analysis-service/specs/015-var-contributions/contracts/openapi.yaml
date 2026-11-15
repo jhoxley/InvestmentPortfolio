@@ -1,0 +1,174 @@
+openapi: "3.1.0"
+
+info:
+  title: Portfolio Analysis API
+  description: >
+    Adds one strictly read-only endpoint over feature 012's existing per-account VaR store:
+    a per-position or per-theme decomposition of an already-computed VaR/ES estimate into
+    standalone VaR, incremental VaR, component Expected Shortfall and marginal VaR. Never
+    triggers a calculation and never calls market-data-web-service.
+  version: "0.15.0"
+
+servers:
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+tags:
+  - name: Risk
+
+paths:
+  /accounts/{account_name}/risk/var/contributions:
+    parameters:
+      - $ref: "#/components/parameters/AccountName"
+      - name: date
+        in: query
+        required: true
+        schema: {type: string, format: date}
+        description: As-of date; must be a business date within the account's ladder range.
+      - $ref: "#/components/parameters/Lookback"
+      - name: confidence
+        in: query
+        required: false
+        schema: {type: number}
+        description: >
+          A single configured confidence level as a percentage (95, 97.5, 99). Defaults to
+          the configured headline confidence level when omitted. Unlike the series/backtest
+          endpoints, this parameter is not repeatable — one response describes one level.
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [position, theme]
+          default: position
+
+    get:
+      operationId: get_var_contributions
+      summary: Decompose an already-computed VaR/ES estimate into per-position or per-theme contributions
+      description: >
+        Returns standalone VaR, incremental VaR, component Expected Shortfall and marginal VaR
+        for each held position (ladder sub-account) or theme, plus the synthetic Cash group,
+        for one account/date/lookback/confidence. Reuses the scenario returns already persisted
+        by the most recent successful VaR run; never triggers a new run and never calls
+        market-data-web-service. If nothing has been computed for the requested
+        account/date/lookback, returns a successful empty payload with links to the status and
+        runs resources. If the requested date's stored quality is "insufficient", returns a
+        successful payload with quality="insufficient" and no groups, rather than fabricating
+        figures.
+      tags: [Risk]
+      responses:
+        "200":
+          description: Contributions (possibly empty, or insufficient-quality with no groups)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VarContributionsResponse"
+        "404":
+          $ref: "#/components/responses/AccountNotFound"
+        "422":
+          $ref: "#/components/responses/ValidationProblem"
+
+components:
+  parameters:
+    AccountName:
+      name: account_name
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9_-]{1,64}$"
+
+    Lookback:
+      name: lookback
+      in: query
+      required: false
+      schema: {type: string, enum: [1y, 2y, 5y]}
+      description: Defaults to the configured headline look-back when omitted.
+
+  responses:
+    AccountNotFound:
+      description: No capital ledger or position ladder has been ingested for the account
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+    ValidationProblem:
+      description: >
+        Invalid account name (invalid-account-name), account without a position ladder
+        (missing-required-source), or an unsupported lookback/confidence/group_by value
+        (invalid-var-query, carries correlation_id — the same problem type already used by the
+        series/backtest endpoints for lookback and confidence; see research.md §3)
+      content:
+        application/problem+json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/VarProblemDetail"
+              - $ref: "#/components/schemas/ProblemDetail"
+
+  schemas:
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+
+    VarProblemDetail:
+      description: Problem details for the var-query error type (adds correlation_id)
+      allOf:
+        - $ref: "#/components/schemas/ProblemDetail"
+        - type: object
+          required: [correlation_id]
+          properties:
+            correlation_id: {type: string}
+
+    ContributionGroupEntry:
+      type: object
+      required:
+        - key
+        - identifier
+        - market_value_gbp
+        - weight_pct
+        - standalone_var_gbp
+        - incremental_var_gbp
+        - component_es_gbp
+        - marginal_var_gbp_per_gbp
+        - actual_mv_pct
+        - proxied_mv_pct
+        - rescaled_mv_pct
+      properties:
+        key: {type: string}
+        identifier: {type: [string, "null"]}
+        market_value_gbp: {type: number}
+        weight_pct: {type: number}
+        standalone_var_gbp: {type: number}
+        incremental_var_gbp: {type: number}
+        component_es_gbp: {type: number}
+        marginal_var_gbp_per_gbp: {type: number}
+        actual_mv_pct: {type: number}
+        proxied_mv_pct: {type: number}
+        rescaled_mv_pct: {type: number}
+
+    VarContributionsResponse:
+      type: object
+      required: [account_name, lookback_code, lookback_days, confidence_bp, group_by, groups, _links]
+      properties:
+        account_name: {type: string}
+        date: {type: [string, "null"], format: date}
+        outcome_date: {type: [string, "null"], format: date}
+        lookback_code: {type: string}
+        lookback_days: {type: integer}
+        confidence_bp: {type: integer}
+        group_by: {type: string, enum: [position, theme]}
+        total_value_gbp: {type: [number, "null"]}
+        quality: {type: [string, "null"], enum: [ok, degraded, insufficient, null]}
+        quality_reason: {type: [string, "null"]}
+        groups:
+          type: array
+          items: {$ref: "#/components/schemas/ContributionGroupEntry"}
+        _links:
+          type: object
+          additionalProperties: {type: string}

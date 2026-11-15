@@ -111,6 +111,41 @@ class MethodLookback(BaseModel):
     is_headline: bool
 
 
+class ContributionGroupEntry(BaseModel):
+    """One position or theme's risk contribution for one contributions request (015)."""
+
+    key: str
+    identifier: str | None
+    market_value_gbp: float
+    weight_pct: float
+    standalone_var_gbp: float
+    incremental_var_gbp: float
+    component_es_gbp: float
+    marginal_var_gbp_per_gbp: float
+    actual_mv_pct: float
+    proxied_mv_pct: float
+    rescaled_mv_pct: float
+
+
+class VarContributionsResponse(BaseModel):
+    """Response body for GET /v1/accounts/{account_name}/risk/var/contributions (015)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    account_name: str
+    date: dt.date | None
+    outcome_date: dt.date | None
+    lookback_code: str
+    lookback_days: int
+    confidence_bp: int
+    group_by: Literal["position", "theme"]
+    total_value_gbp: float | None
+    quality: Quality | None
+    quality_reason: str | None
+    groups: list[ContributionGroupEntry] = Field(default_factory=list)
+    links: dict[str, str] = Field(alias="_links", description="HATEOAS navigation links")
+
+
 class VarMethodsResponse(BaseModel):
     """Response body for GET /v1/risk/var/methods."""
 

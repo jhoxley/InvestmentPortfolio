@@ -5,6 +5,10 @@ from datetime import date
 import pandas as pd
 
 from app.exceptions import FutureEndDateError, InvalidDateRangeError
+from app.services.business_day_helpers import (
+    business_day_before,
+    most_recent_business_day_on_or_before,
+)
 
 
 class TimeseriesDateResolver:
@@ -66,7 +70,7 @@ class TimeseriesDateResolver:
         """
         adjusted: date = pd.bdate_range(start=d, periods=1)[0].date()
         if adjusted > today:
-            return self._most_recent_business_day_on_or_before(today)
+            return most_recent_business_day_on_or_before(today)
         return adjusted
 
     def _business_day_before(self, today: date) -> date:
@@ -78,17 +82,4 @@ class TimeseriesDateResolver:
         Returns:
             The business day immediately preceding today.
         """
-        result: date = pd.bdate_range(end=today, periods=2)[0].date()
-        return result
-
-    def _most_recent_business_day_on_or_before(self, today: date) -> date:
-        """Return the most recent business day on or before today.
-
-        Args:
-            today: The current date.
-
-        Returns:
-            today itself if it is a business day, otherwise the preceding business day.
-        """
-        result: date = pd.bdate_range(end=today, periods=1)[0].date()
-        return result
+        return business_day_before(today)

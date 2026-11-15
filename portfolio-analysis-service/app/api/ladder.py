@@ -7,9 +7,12 @@ import structlog
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
+from app.api.dependencies import (
+    get_identifier_mapping_repository as _get_identifier_mapping_repository,
+)
 from app.api.dependencies import get_ladder_repository
-from app.clients.market_data_client import HttpMarketDataClient, MarketDataClient
-from app.config import Settings, get_settings
+from app.api.dependencies import get_market_data_client as _get_market_data_client
+from app.clients.market_data_client import MarketDataClient
 from app.exceptions import AccountNotFoundError
 from app.models.ladder import IngestionSummary, LadderSummary, Links
 from app.repositories.identifier_mapping_repository import IdentifierMappingRepository
@@ -22,35 +25,6 @@ from app.validators.account_name import validate_account_name
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/accounts", tags=["Ladder"])
-
-
-def _get_identifier_mapping_repository(
-    settings: Settings = Depends(get_settings),
-) -> IdentifierMappingRepository:
-    """Dependency that returns an IdentifierMappingRepository bound to the configured path.
-
-    Args:
-        settings: Application settings (injected by FastAPI).
-
-    Returns:
-        IdentifierMappingRepository instance.
-    """
-    return IdentifierMappingRepository(mapping_path=settings.identifier_mapping.path)
-
-
-def _get_market_data_client(settings: Settings = Depends(get_settings)) -> MarketDataClient:
-    """Dependency that returns a MarketDataClient bound to the configured service location.
-
-    Args:
-        settings: Application settings (injected by FastAPI).
-
-    Returns:
-        MarketDataClient instance.
-    """
-    return HttpMarketDataClient(
-        base_url=settings.market_data_service.base_url,
-        timeout_seconds=settings.market_data_service.timeout_seconds,
-    )
 
 
 def _get_pricing_enrichment_service(

@@ -576,6 +576,13 @@ class VarRunService:
             ),
         )
 
+        self._var_repo.commit_scenario_returns(account_name, panel)
+        log.info(
+            "var_contributions_snapshot_persisted",
+            identifier_count=len(panel.identifiers),
+            grid_days=len(panel.grid),
+        )
+
         return run.model_copy(
             update={
                 **base_update,

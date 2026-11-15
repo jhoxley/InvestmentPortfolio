@@ -21,6 +21,8 @@ class AccountMeta(BaseModel):
     to_date: date
     sub_accounts: list[str]
     ingested_at: datetime
+    rebuilt_at: datetime | None = None
+    """Timestamp of the most recent on-demand rebuild write, or None if never rebuilt."""
 
 
 class LadderRepository:
@@ -139,8 +141,9 @@ class LadderRepository:
             account_name: The account identifier.
 
         Returns:
-            DataFrame with columns [date, sub_account, book_cost, quantity, total_income],
-            dropping price/market_value/portfolio_weight if already present.
+            DataFrame with columns [date, sub_account, book_cost, quantity, total_income,
+            provenance], dropping price/market_value/portfolio_weight if already present.
+            A ladder stored before `provenance` existed is treated as fully `"ingested"`.
 
         Raises:
             FileNotFoundError: If no ladder file exists for the account.
@@ -149,7 +152,9 @@ class LadderRepository:
         if not path.exists():
             raise FileNotFoundError(f"No ladder file found for account '{account_name}'")
         df = pd.read_excel(path, engine="openpyxl")
-        return df[["date", "sub_account", "book_cost", "quantity", "total_income"]]
+        if "provenance" not in df.columns:
+            df = df.assign(provenance="ingested")
+        return df[["date", "sub_account", "book_cost", "quantity", "total_income", "provenance"]]
 
     def read_xlsx(self, account_name: str) -> Path:
         """Return the path to the stored ladder.xlsx for an account.
@@ -173,7 +178,9 @@ class LadderRepository:
 
         Unlike read_ladder_df (which deliberately drops price/market_value/
         portfolio_weight for the refresh path), this returns the full stored ladder —
-        used by the time series endpoint, which needs market_value.
+        used by the time series endpoint, which needs market_value. Includes the
+        `provenance` column ("ingested" | "projected") for ladders written after this
+        column was introduced; older ladders will simply lack the column.
 
         Args:
             account_name: The account identifier.
